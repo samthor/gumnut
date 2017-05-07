@@ -77,7 +77,16 @@ int eat_token(def *d) {
 
   // TODO: strings?
   if (c == '\'' || c == '"' || c == '`') {
-    return -1;
+    char start = c;
+    while ((c = peek_char(d, ++len))) {
+      if (c == start) {
+        ++len;
+        break;
+      } else if (c == '\\') {
+        ++len;
+      }
+    }
+    return len;
   }
 
   // semicolon - should we return this at all?
@@ -184,13 +193,40 @@ int consume(def *d) {
   return 0;
 }
 
+// reads stdin into buf, reallocating as nessecary. returns strlen(buf) or < 0 for error.
+int read_stdin(char **buf) {
+  int pos = 0;
+  int size = 1024;
+  *buf = malloc(size);
+
+  for (;;) {
+    if (pos >= size - 1) {
+      size *= 2;
+      *buf = realloc(*buf, size);
+    }
+    if (!fgets(*buf + pos, size - pos, stdin)) {
+      break;
+    }
+    pos += strlen(*buf + pos);
+  }
+  if (ferror(stdin)) {
+    return -1;
+  } 
+
+  return pos;
+}
+
 int main() {
+  char *buf;
+  if (read_stdin(&buf) < 0) {
+    return -1;
+  }
+
   def d;
-  d.buf = "var x;\nx = .100.200*F123; // butt al ong comment sup\n/*hello/\n\n//***/var y = 1;var.zzz;var q='string';";
+  d.buf = buf;
   d.len = strlen(d.buf);
   d.curr = 0;
   d.lineNo = 1;
 
   consume(&d);
 }
-
