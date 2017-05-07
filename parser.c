@@ -7,11 +7,18 @@ typedef struct {
   char *buf;
   int curr;
   int len;
-  int lineNo;
+  int line_no;
 } def;
 
 #define TYPE_FOO 1
 #define TYPE_BAR 2
+
+typedef struct {
+  char *p;
+  int len;
+  int after_whitespace;
+  int line_no;
+} token;
 
 typedef struct {
   struct node *cond; // wrapped conditional inside if(), while(), for() etc
@@ -40,20 +47,21 @@ int isnum(char c) {
   return c >= '0' && c <= '9';
 }
 
-int eat_token(def *d) {
-
-  // eat whitespace, ignored
+int eat_whitespace(def *d) {
+  int len = 0;
   for (;;) {
     char c = d->buf[d->curr];
     if (!isspace(c)) {
-      break;
-    }
-    if (c == '\n') {
-      ++d->lineNo;
+      return len;
+    } else if (c == '\n') {
+      ++d->line_no;
     }
     ++d->curr;
+    ++len;
   }
+}
 
+int eat_raw_token(def *d) {
   int len = 0;
   char c;
   for (;;) {
@@ -75,15 +83,20 @@ int eat_token(def *d) {
     return 0;
   }
 
-  // TODO: strings?
+  // consume strings
   if (c == '\'' || c == '"' || c == '`') {
     char start = c;
     while ((c = peek_char(d, ++len))) {
+      // TODO: strchr for final, and check
       if (c == start) {
         ++len;
         break;
       } else if (c == '\\') {
         ++len;
+        c = peek_char(d, len);
+      }
+      if (c == '\n') {
+        ++d->line_no;  // look for \n
       }
     }
     return len;
@@ -126,21 +139,23 @@ int eat_token(def *d) {
       if (at == NULL) {
         return d->len - d->curr;  // consumed whole string, not found
       }
-      len = at - search + 2;
-      if (next == '*') {
-        // count \n's
-        char *newline = (char *) search;
-        while (newline < at) {
-          newline = strchr(newline, '\n');
-          if (!newline) {
-            break;
-          }
-          ++d->lineNo;  // TODO: this places the comment on the final line, not at its start point
-          ++newline;
-        }
-        len += 2;  // eat */
+      len = at - search + 2;  // add preamble
+
+      if (next == '/') {
+        return len;  // single line, done
       }
-      return len;
+
+      // count \n's
+      char *newline = (char *) search;
+      for (;;) {
+        newline = strchr(newline, '\n');
+        if (!newline || newline >= at) {
+          break;
+        }
+        ++d->line_no;
+        ++newline;
+      }
+      return len + 2;  // eat "*/"
     }
   }
 
@@ -184,25 +199,37 @@ int eat_token(def *d) {
   return len;
 }
 
+token eat_token(def *d) {
+  token out;
+  eat_whitespace(d);
+
+  out.p = NULL;
+  out.after_whitespace = 0;
+  out.line_no = d->line_no;
+  out.len = eat_raw_token(d);
+
+  if (out.len > 0) {
+    out.p = d->buf + d->curr;
+    out.after_whitespace = isspace(d->curr + out.len);
+    d->curr += out.len;
+  }
+
+  return out;
+}
+
 int consume(def *d) {
 
   for (;;) {
-    int len = eat_token(d);
-    if (len <= 0) {
+    token out = eat_token(d);
 
-      if (d->curr + len < d->len) {
+    if (!out.p) {
+      if (d->curr < d->len) {
         printf("can't parse reminder:\n%s\n", d->buf + d->curr);
+        return -1;
       }
-
-      break;  // fail, otw we can't consume more
+      break;
     }
-
-    char *out = (char *) malloc(len + 1);
-    strncpy(out, d->buf + d->curr, len);
-    out[len] = 0;
-    printf("%4d: %s\n", d->lineNo, out);
-
-    d->curr += len;  // TODO: move to eat_token??
+    printf("%4d: %.*s\n", out.line_no, out.len, out.p);
   }
 
   return 0;
@@ -241,7 +268,7 @@ int main() {
   d.buf = buf;
   d.len = strlen(d.buf);
   d.curr = 0;
-  d.lineNo = 1;
+  d.line_no = 1;
 
   consume(&d);
 }
