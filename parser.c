@@ -120,26 +120,28 @@ int eat_token(def *d) {
       find = "*/";
     }
 
-    const char *search = (const char *) d->buf + d->curr + 2;
-    char *at = strstr(search, find);
-    if (at == NULL) {
-      return d->len - d->curr;  // consumed whole string, not found
-    }
-    len = at - search + 2;
-    if (next == '*') {
-      // count \n's
-      char *newline = (char *) search;
-      while (newline < at) {
-        newline = strchr(newline, '\n');
-        if (!newline) {
-          break;
-        }
-        ++d->lineNo;  // TODO: this places the comment on the final line, not at its start point
-        ++newline;
+    if (find) {
+      const char *search = (const char *) d->buf + d->curr + 2;
+      char *at = strstr(search, find);
+      if (at == NULL) {
+        return d->len - d->curr;  // consumed whole string, not found
       }
-      len += 2;  // eat */
+      len = at - search + 2;
+      if (next == '*') {
+        // count \n's
+        char *newline = (char *) search;
+        while (newline < at) {
+          newline = strchr(newline, '\n');
+          if (!newline) {
+            break;
+          }
+          ++d->lineNo;  // TODO: this places the comment on the final line, not at its start point
+          ++newline;
+        }
+        len += 2;  // eat */
+      }
+      return len;
     }
-    return len;
   }
 
   // number: "0", ".01", "0x100"
@@ -161,6 +163,14 @@ int eat_token(def *d) {
     return 1;
   }
 
+  if (c == ',') {
+    return 1;
+  }
+
+  if (c == ':' || c == '?') {
+    return 1;
+  }
+
   // ops: i.e., anything made up of =<& etc
   while (contains(ops, peek_char(d, len))) {
     ++len;
@@ -179,13 +189,18 @@ int consume(def *d) {
   for (;;) {
     int len = eat_token(d);
     if (len <= 0) {
+
+      if (d->curr + len < d->len) {
+        printf("can't parse reminder:\n%s\n", d->buf + d->curr);
+      }
+
       break;  // fail, otw we can't consume more
     }
 
     char *out = (char *) malloc(len + 1);
     strncpy(out, d->buf + d->curr, len);
     out[len] = 0;
-    printf("%4d: `%s`\n", d->lineNo, out);
+    printf("%4d: %s\n", d->lineNo, out);
 
     d->curr += len;  // TODO: move to eat_token??
   }
