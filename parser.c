@@ -239,15 +239,32 @@ int eat_raw_token(def *d) {
   }
 
   // ops: i.e., anything made up of =<& etc
-  while (contains(ops, peek_char(d, len))) {
-    ++len;
-  }
-  if (len > 0) {
-    return len;  // found ops
+  for (;;) {
+    if (!contains(ops, c)) {
+      if (len > 0) {
+        return len;
+      }
+      break;
+    }
+    if (c == '=') {
+      // only ='s from here on in
+      while (c == '=') {
+        c = peek_char(d, ++len);
+      }
+      d->slash_regexp = 1;
+      return len;
+    }
+    c = peek_char(d, ++len);
+
+    // FIXME: there's conditions around this-
+    // 1. ops like ~, +, !, + ... they attach to the next token?
+    // TODO: and some of them might mean slash_regexp (+ regexp? weird but valid).
   }
 
-  // if not in [a-zA-Z...], then what are we?
-
+  if (c != 0) {
+    // what are we?
+    printf("panic: unknown: %c%c", c, next);
+  }
   return len;
 }
 
