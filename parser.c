@@ -8,6 +8,8 @@ typedef struct {
   int curr;
   int len;
   int line_no;
+
+  int slash_regexp;  // whether the next slash is a regexp
 } def;
 
 #define TYPE_FOO 1
@@ -73,14 +75,23 @@ int eat_raw_token(def *d) {
     ++len;
   }
   if (len) {
+    int regexp = 0;
+    char *s = d->buf + d->curr;
+    if (!strncmp(s, "await", len) || !strncmp(s, "yield", len)) {
+      // TODO: there's probably more statements that change behavior like this
+      regexp = 1;
+    }
+
+    d->slash_regexp = regexp;
+
     // FIXME: expect followons: square brackets, dot, comma, semicolon?
-    // TODO: Some statements (keywords?) require a space after them; we should return whether a
-    // token is followed by whitespace, for the high-level thing to work it out
     return len;  // found variable or symbol (or out of data)
   }
 
   if (isspace(c)) {
-    return 0;
+    // FIXME: should never happen? consume whitespace?
+    printf("panic: should never be isspace at eat_raw_token");
+    return -1;
   }
 
   // consume strings
@@ -92,33 +103,37 @@ int eat_raw_token(def *d) {
         ++len;
         break;
       } else if (c == '\\') {
-        ++len;
-        c = peek_char(d, len);
+        c = peek_char(d, ++len);
       }
       if (c == '\n') {
         ++d->line_no;  // look for \n
       }
     }
+    d->slash_regexp = 0;
     return len;
   }
 
   // semicolon - should we return this at all?
   if (c == ';') {
+    d->slash_regexp = 1;
     return 1;
   }
 
   // control structures
   if (c == '{' || c == '}') {
+    d->slash_regexp = 1;
     return 1;
   }
 
   // array notation
   if (c == '[' || c == ']') {
+    d->slash_regexp = (c == '[');
     return 1;
   }
 
   // brackets
   if (c == '(' || c == ')') {
+    d->slash_regexp = (c == '(');
     return 1;
   }
 
@@ -159,6 +174,39 @@ int eat_raw_token(def *d) {
     }
   }
 
+  // this must be a regexp
+  if (d->slash_regexp && c == '/') {
+    int is_charexpr = 0;
+    // FIXME: consume regexp until /, unless escaped or 'within' [] ([ within [] is ignored)
+
+    c = next;
+    ++len;
+    for (;;) {
+      if (c == '[') {
+        is_charexpr = 1;
+      } else if (c == ']') {
+        is_charexpr = 0;
+      } else if (c == '\\') {
+        c = peek_char(d, ++len);
+      } else if (!is_charexpr && c == '/') {
+        c = peek_char(d, ++len);
+        break;
+      }
+      if (c == '\n') {
+        ++d->line_no;  // TODO: should never happen, invalid
+      }
+      c = peek_char(d, ++len);
+    }
+
+    // match trailing flags
+    while (isalnum(c)) {
+      c = peek_char(d, ++len);
+    }
+
+    d->slash_regexp = 0;
+    return len;
+  }
+
   // number: "0", ".01", "0x100"
   if (isnum(c) || (c == '.' && isnum(next))) {
     c = next;
@@ -169,20 +217,24 @@ int eat_raw_token(def *d) {
       }
       c = peek_char(d, ++len);
     }
+    d->slash_regexp = 0;
     return len;
   }
 
   // dot notation (after number)
   if (c == '.') {
-    // TODO: return symbol?
+    // TODO: match symbol?
+    d->slash_regexp = 1;
     return 1;
   }
 
   if (c == ',') {
+    d->slash_regexp = 0;
     return 1;
   }
 
   if (c == ':' || c == '?') {
+    d->slash_regexp = 1;
     return 1;
   }
 
@@ -269,6 +321,7 @@ int main() {
   d.len = strlen(d.buf);
   d.curr = 0;
   d.line_no = 1;
+  d.slash_regexp = 1;
 
   consume(&d);
 }
