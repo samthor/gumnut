@@ -12,21 +12,12 @@ typedef struct {
   int slash_regexp;  // whether the next slash is a regexp
 } def;
 
-#define TYPE_FOO 1
-#define TYPE_BAR 2
-
 typedef struct {
   char *p;
   int len;
   int after_whitespace;
   int line_no;
 } token;
-
-typedef struct {
-  struct node *cond; // wrapped conditional inside if(), while(), for() etc
-  char *token;
-  int type;
-} node;
 
 const char *ops = "><=!|&^+-/*%";
 
@@ -279,7 +270,7 @@ token eat_token(def *d) {
 
   if (out.len > 0) {
     out.p = d->buf + d->curr;
-    out.after_whitespace = isspace(d->curr + out.len);
+    out.after_whitespace = isspace(d->buf[d->curr + out.len]);
     d->curr += out.len;
   }
 
@@ -298,7 +289,7 @@ int consume(def *d) {
       }
       break;
     }
-    printf("%4d: %.*s\n", out.line_no, out.len, out.p);
+    printf("%c%4d: %.*s\n", out.after_whitespace ? '.' : ' ', out.line_no, out.len, out.p);
   }
 
   return 0;
