@@ -250,6 +250,15 @@ int eat_raw_token(def *d) {
     // FIXME: there's conditions around this-
     // 1. ops like ~, +, !, + ... they attach to the next token?
     // TODO: and some of them might mean slash_regexp (+ regexp? weird but valid).
+
+    /*
+      I think it's... multiples of some things (>, + etc) followed by optional ='s.
+      No changes in type (only //=, not //+).
+      Note that +-!^ etc are allowed on their own, some are not. (e.g. *foo).
+      Although hilariously I think ES7 has ** and //.
+      (*** is syntax error, ////////////// is not)
+    */
+
   }
 
   if (c != 0) {
