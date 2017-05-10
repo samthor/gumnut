@@ -56,36 +56,53 @@ int eat_whitespace(def *d) {
 
 int eat_raw_token(def *d) {
   int len = 0;
-  char c;
-  for (;;) {
-    c = peek_char(d, len);
-    int valid = (len ? isalnum(c) : isalpha(c)) || c == '$' || c == '_' || c > 127;
-    if (!valid) {
-      break;
-    }
-    ++len;
-  }
-  if (len) {
-    int regexp = 0;
-    char *s = d->buf + d->curr;
-    if (!strncmp(s, "await", len) || !strncmp(s, "yield", len)) {
-      // TODO: there's probably more statements that change behavior like this
-      regexp = 1;
-    }
+  char c = peek_char(d, len);
 
-    d->slash_regexp = regexp;
-
-    // FIXME: expect followons: square brackets, dot, comma, semicolon?
-    return len;  // found variable or symbol (or out of data)
-  }
-
+  // whitespace
   if (isspace(c)) {
     // FIXME: should never happen? consume whitespace?
     printf("panic: should never be isspace at eat_raw_token");
     return -1;
   }
 
-  // consume strings
+  // comments (C99 and long)
+  char next = peek_char(d, len+1);
+  if (c == '/') {
+    char *find = NULL;
+
+    if (next == '/') {
+      find = "\n";
+    } else if (next == '*') {
+      find = "*/";
+    }
+
+    if (find) {
+      const char *search = (const char *) d->buf + d->curr + 2;
+      char *at = strstr(search, find);
+      if (at == NULL) {
+        return d->len - d->curr;  // consumed whole string, not found
+      }
+      len = at - search + 2;  // add preamble
+
+      if (next == '/') {
+        return len;  // single line, done
+      }
+
+      // count \n's
+      char *newline = (char *) search;
+      for (;;) {
+        newline = strchr(newline, '\n');
+        if (!newline || newline >= at) {
+          break;
+        }
+        ++d->line_no;
+        ++newline;
+      }
+      return len + 2;  // eat "*/"
+    }
+  }
+
+  // strings
   if (c == '\'' || c == '"' || c == '`') {
     char start = c;
     while ((c = peek_char(d, ++len))) {
@@ -128,41 +145,10 @@ int eat_raw_token(def *d) {
     return 1;
   }
 
-  // comments (C99 and long)
-  char next = peek_char(d, len+1);
-  if (c == '/') {
-    char *find = NULL;
-
-    if (next == '/') {
-      find = "\n";
-    } else if (next == '*') {
-      find = "*/";
-    }
-
-    if (find) {
-      const char *search = (const char *) d->buf + d->curr + 2;
-      char *at = strstr(search, find);
-      if (at == NULL) {
-        return d->len - d->curr;  // consumed whole string, not found
-      }
-      len = at - search + 2;  // add preamble
-
-      if (next == '/') {
-        return len;  // single line, done
-      }
-
-      // count \n's
-      char *newline = (char *) search;
-      for (;;) {
-        newline = strchr(newline, '\n');
-        if (!newline || newline >= at) {
-          break;
-        }
-        ++d->line_no;
-        ++newline;
-      }
-      return len + 2;  // eat "*/"
-    }
+  // misc
+  if (c == ':' || c == '?' || c == ',') {
+    d->slash_regexp = 1;
+    return 1;
   }
 
   // this must be a regexp
@@ -212,23 +198,6 @@ int eat_raw_token(def *d) {
     return len;
   }
 
-  // dot notation (after number)
-  if (c == '.') {
-    // TODO: match symbol?
-    d->slash_regexp = 1;
-    return 1;
-  }
-
-  if (c == ',') {
-    d->slash_regexp = 0;
-    return 1;
-  }
-
-  if (c == ':' || c == '?') {
-    d->slash_regexp = 1;
-    return 1;
-  }
-
   // ops: i.e., anything made up of =<& etc
   for (;;) {
     if (!contains(ops, c)) {
@@ -258,7 +227,35 @@ int eat_raw_token(def *d) {
       Although hilariously I think ES7 has ** and //.
       (*** is syntax error, ////////////// is not)
     */
+  }
 
+  // dot notation (after number)
+  if (c == '.') {
+    d->slash_regexp = 1;
+    return 1;  // this doesn't match the symbol- it's valid to say e.g., "foo   .    bar".
+  }
+
+  // match symbols or statements
+  for (;;) {
+    c = peek_char(d, len);
+    int valid = (len ? isalnum(c) : isalpha(c)) || c == '$' || c == '_' || c > 127;
+    if (!valid) {
+      break;
+    }
+    ++len;
+  }
+  if (len) {
+    int regexp = 0;
+    char *s = d->buf + d->curr;
+    if (!strncmp(s, "await", len) || !strncmp(s, "yield", len)) {
+      // TODO: there's probably more statements that change behavior like this
+      regexp = 1;
+    }
+
+    d->slash_regexp = regexp;
+
+    // FIXME: expect followons: square brackets, dot, comma, semicolon?
+    return len;  // found variable or symbol (or out of data)
   }
 
   if (c != 0) {

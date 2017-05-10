@@ -8,3 +8,6 @@ x = .100.200*F123;
 //***/var y = 1;
 var.zzz;
 var q='string';
+
+
+q   . /* what */   banana;
