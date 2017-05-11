@@ -203,7 +203,10 @@ int eat_raw_token(def *d) {
 
   // dot notation (after number)
   if (c == '.') {
-    d->slash_regexp = 1;
+    if (next == '.' && peek_char(d, len+2) == '.') {
+      d->slash_regexp = 1;
+      return 3;  // found '...' operator
+    }
     return 1;  // this doesn't match the symbol- it's valid to say e.g., "foo   .    bar".
   }
 
@@ -269,11 +272,13 @@ int eat_raw_token(def *d) {
   if (len) {
     int regexp = 0;
     char *s = d->buf + d->curr;
-    if (!strncmp(s, "await", len) || !strncmp(s, "yield", len)) {
-      // TODO: there's probably more statements that change behavior like this
+
+    // FIXME: when these appear as "foo.await", they're not statements
+    // TODO: these statements need to be in, at least
+    // await export extends import instanceof new throw typeof yield
+    if (!strncmp(s, "await", 5) || !strncmp(s, "yield", 5)) {
       regexp = 1;
     }
-
     d->slash_regexp = regexp;
 
     // FIXME: expect followons: square brackets, dot, comma, semicolon?
