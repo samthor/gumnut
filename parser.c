@@ -37,10 +37,8 @@ int eat_whitespace(def *d) {
   int len = 0;
   for (;;) {
     char c = d->buf[d->curr];
-    if (!isspace(c)) {
+    if (!isspace(c) || c == '\n') {
       return len;
-    } else if (c == '\n') {
-      ++d->line_no;
     }
     ++d->curr;
     ++len;
@@ -62,7 +60,7 @@ int is_keyword(char *s, int len) {
 
   // TODO: do something better? strstr is probably fast D:
   // search for: space + candidate + space
-  char cand[13];
+  char cand[16];
   memcpy(cand+1, s, len);
   cand[0] = ' ';
   cand[len+1] = ' ';
@@ -76,6 +74,12 @@ int eat_raw_token(def *d) {
   char c = peek_char(d, len);
   if (!c) {
     return 0;
+  }
+
+  // newlines are magic in JS
+  if (c == '\n') {
+    ++d->line_no;
+    return 1;
   }
 
   // whitespace
@@ -342,6 +346,10 @@ int prsr_consume(char *buf) {
         return -1;
       }
       break;
+    }
+
+    if (*out.p == '\n') {
+      continue;  // don't display, javascript is dumb
     }
     printf("%c%4d: %.*s\n", out.after_whitespace ? '.' : ' ', out.line_no, out.len, out.p);
   }
