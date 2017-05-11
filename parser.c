@@ -3,13 +3,15 @@
 #include <ctype.h>
 #include "parser.h"
 
+#define NEXT_REGEXP 1  // next slash starts a regexp (not division)
+#define NEXT_ID     2  // next statement is an id, e.g. foo.await (await is id)
+
 typedef struct {
   char *buf;
   int curr;
   int len;
   int line_no;
-
-  int slash_regexp;  // whether the next slash is a regexp
+  int next_flags;
 } def;
 
 typedef struct {
@@ -52,6 +54,30 @@ int eat_whitespace(def *d) {
     ++d->curr;
     ++len;
   }
+}
+
+// nb. must start/end with space
+const char keywords[] = " await break case catch class const continue debugger default delete do else enum export extends finally for function if implements import in instanceof interface let new package private protected public return static super switch throw try typeof var void while with yield ";
+
+int is_keyword(char *s, int len) {
+  if (len > 10 || len < 2) {
+    return 0;  // no statements <2 or >10 ('instanceof')
+  }
+  for (int i = 0; i < len; ++i) {
+    if (s[i] < 'a' || s[i] > 'z') {
+      return 0;  // only a-z
+    }
+  }
+
+  // TODO: do something better? strstr is probably fast D:
+  // search for: space + candidate + space
+  char cand[13];
+  memcpy(cand+1, s, len);
+  cand[0] = ' ';
+  cand[len+1] = ' ';
+  cand[len+2] = 0;
+
+  return strstr(keywords, cand) != NULL;
 }
 
 int eat_raw_token(def *d) {
@@ -121,42 +147,42 @@ int eat_raw_token(def *d) {
         ++d->line_no;  // look for \n
       }
     }
-    d->slash_regexp = 0;
+    d->next_flags = 0;
     return len;
   }
 
   // semicolon - should we return this at all?
   if (c == ';') {
-    d->slash_regexp = 1;
+    d->next_flags = NEXT_REGEXP;
     return 1;
   }
 
   // control structures
   if (c == '{' || c == '}') {
-    d->slash_regexp = 1;
+    d->next_flags = NEXT_REGEXP;
     return 1;
   }
 
   // array notation
   if (c == '[' || c == ']') {
-    d->slash_regexp = (c == '[');
+    d->next_flags = (c == '[');
     return 1;
   }
 
   // brackets
   if (c == '(' || c == ')') {
-    d->slash_regexp = (c == '(');
+    d->next_flags = (c == '(');
     return 1;
   }
 
   // misc
   if (c == ':' || c == '?' || c == ',') {
-    d->slash_regexp = 1;
+    d->next_flags = NEXT_REGEXP;
     return 1;
   }
 
   // this must be a regexp
-  if (d->slash_regexp && c == '/') {
+  if (d->next_flags && c == '/') {
     int is_charexpr = 0;
 
     c = next;
@@ -183,7 +209,7 @@ int eat_raw_token(def *d) {
       c = peek_char(d, ++len);
     }
 
-    d->slash_regexp = 0;
+    d->next_flags = 0;
     return len;
   }
 
@@ -197,16 +223,17 @@ int eat_raw_token(def *d) {
       }
       c = peek_char(d, ++len);
     }
-    d->slash_regexp = 0;
+    d->next_flags = 0;
     return len;
   }
 
   // dot notation (after number)
   if (c == '.') {
     if (next == '.' && peek_char(d, len+2) == '.') {
-      d->slash_regexp = 1;
+      d->next_flags = NEXT_REGEXP;
       return 3;  // found '...' operator
     }
+    d->next_flags = NEXT_ID;
     return 1;  // this doesn't match the symbol- it's valid to say e.g., "foo   .    bar".
   }
 
@@ -224,7 +251,7 @@ int eat_raw_token(def *d) {
     } else {
       break;
     }
-    d->slash_regexp = 1;
+    d->next_flags = NEXT_REGEXP;
 
     while (len < allowed) {
       c = peek_char(d, ++len);
@@ -245,7 +272,7 @@ int eat_raw_token(def *d) {
     return len;
   } while (0);
 
-  // match symbols or statements
+  // keywords or vars
   do {
     if (c == '\\') {
       ++len;  // don't care, eat whatever aferwards
@@ -268,19 +295,16 @@ int eat_raw_token(def *d) {
     c = peek_char(d, ++len);
   } while (c);
   if (len) {
-    int regexp = 0;
     char *s = d->buf + d->curr;
 
-    // FIXME: when these appear as "foo.await", they're not statements
-    // TODO: these statements need to be in, at least
-    // await export extends import instanceof new throw typeof yield
-    if (!strncmp(s, "await", 5) || !strncmp(s, "yield", 5)) {
-      regexp = 1;
+    // if this is not an ID and is a keyword (e.g., await, export) then the next / is regexp
+    if (!(d->next_flags & NEXT_ID) && is_keyword(s, len)) {
+      d->next_flags = NEXT_REGEXP;
+    } else {
+      d->next_flags = 0;
     }
-    d->slash_regexp = regexp;
 
-    // FIXME: expect followons: square brackets, dot, comma, semicolon?
-    return len;  // found variable or symbol (or out of data)
+    return len;  // found varia
   }
 
   if (c != 0) {
@@ -314,7 +338,7 @@ int prsr_consume(char *buf) {
   d.len = strlen(buf);
   d.curr = 0;
   d.line_no = 1;
-  d.slash_regexp = 1;
+  d.next_flags = NEXT_REGEXP;
 
   for (;;) {
     token out = eat_token(&d);
