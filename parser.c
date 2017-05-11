@@ -11,24 +11,15 @@ typedef struct {
   int curr;
   int len;
   int line_no;
-  int next_flags;
+  int next_flags;  // state flags for parsing
 } def;
 
 typedef struct {
   char *p;
   int len;
-  int after_whitespace;
+  int after_whitespace;  // is there whitespace after this token?
   int line_no;
 } token;
-
-const char *ops = "><=!|&^+-/*%";
-
-int contains(const char *s, char c) {
-  if (!c) {
-    return 0;
-  }
-  return strchr(s, c) != NULL;
-}
 
 char peek_char(def *d, int len) {
   int out = d->curr + len;
@@ -260,7 +251,9 @@ int eat_raw_token(def *d) {
       }
     }
 
-    if (c == start && strchr("+-|&", start)) {
+    if (start == '=' && c == '>') {
+      ++len;  // arrow function
+    } else if (c == start && strchr("+-|&", start)) {
       ++len;  // eat --, ++, || or &&: but no more
     } else if (c == '=') {
       // consume a suffix '=' (or whole ===, !==)
