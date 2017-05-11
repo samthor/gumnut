@@ -57,6 +57,9 @@ int eat_whitespace(def *d) {
 int eat_raw_token(def *d) {
   int len = 0;
   char c = peek_char(d, len);
+  if (!c) {
+    return 0;
+  }
 
   // whitespace
   if (isspace(c)) {
@@ -67,40 +70,41 @@ int eat_raw_token(def *d) {
 
   // comments (C99 and long)
   char next = peek_char(d, len+1);
-  if (c == '/') {
-    char *find = NULL;
-
-    if (next == '/') {
+  do {
+    char *find;
+    if (c != '/') {
+      break;
+    } else if (next == '/') {
       find = "\n";
     } else if (next == '*') {
       find = "*/";
+    } else {
+      break;
     }
 
-    if (find) {
-      const char *search = (const char *) d->buf + d->curr + 2;
-      char *at = strstr(search, find);
-      if (at == NULL) {
-        return d->len - d->curr;  // consumed whole string, not found
-      }
-      len = at - search + 2;  // add preamble
-
-      if (next == '/') {
-        return len;  // single line, done
-      }
-
-      // count \n's
-      char *newline = (char *) search;
-      for (;;) {
-        newline = strchr(newline, '\n');
-        if (!newline || newline >= at) {
-          break;
-        }
-        ++d->line_no;
-        ++newline;
-      }
-      return len + 2;  // eat "*/"
+    const char *search = (const char *) d->buf + d->curr + 2;
+    char *at = strstr(search, find);
+    if (at == NULL) {
+      return d->len - d->curr;  // consumed whole string, not found
     }
-  }
+    len = at - search + 2;  // add preamble
+
+    if (next == '/') {
+      return len;  // single line, done
+    }
+
+    // count \n's
+    char *newline = (char *) search;
+    for (;;) {
+      newline = strchr(newline, '\n');
+      if (!newline || newline >= at) {
+        break;
+      }
+      ++d->line_no;
+      ++newline;
+    }
+    return len + 2;  // eat "*/"
+  } while (0);
 
   // strings
   if (c == '\'' || c == '"' || c == '`') {
@@ -154,11 +158,10 @@ int eat_raw_token(def *d) {
   // this must be a regexp
   if (d->slash_regexp && c == '/') {
     int is_charexpr = 0;
-    // FIXME: consume regexp until /, unless escaped or 'within' [] ([ within [] is ignored)
 
     c = next;
     ++len;
-    for (;;) {
+    do {
       if (c == '[') {
         is_charexpr = 1;
       } else if (c == ']') {
@@ -173,7 +176,7 @@ int eat_raw_token(def *d) {
         ++d->line_no;  // TODO: should never happen, invalid
       }
       c = peek_char(d, ++len);
-    }
+    } while (c);
 
     // match trailing flags
     while (isalnum(c)) {
@@ -198,52 +201,71 @@ int eat_raw_token(def *d) {
     return len;
   }
 
-  // ops: i.e., anything made up of =<& etc
-  for (;;) {
-    if (!contains(ops, c)) {
-      if (len > 0) {
-        return len;
-      }
-      break;
-    }
-    if (c == '=') {
-      // only ='s from here on in
-      while (c == '=') {
-        c = peek_char(d, ++len);
-      }
-      d->slash_regexp = 1;
-      return len;
-    }
-    c = peek_char(d, ++len);
-
-    // FIXME: there's conditions around this-
-    // 1. ops like ~, +, !, + ... they attach to the next token?
-    // TODO: and some of them might mean slash_regexp (+ regexp? weird but valid).
-
-    /*
-      I think it's... multiples of some things (>, + etc) followed by optional ='s.
-      No changes in type (only //=, not //+).
-      Note that +-!^ etc are allowed on their own, some are not. (e.g. *foo).
-      Although hilariously I think ES7 has ** and //.
-      (*** is syntax error, ////////////// is not)
-    */
-  }
-
   // dot notation (after number)
   if (c == '.') {
     d->slash_regexp = 1;
     return 1;  // this doesn't match the symbol- it's valid to say e.g., "foo   .    bar".
   }
 
+  // ops: i.e., anything made up of =<& etc
+  do {
+    const char start = c;
+    int allowed;  // how many ops of the same type we can safely consume
+
+    if (c == '=') {
+      allowed = 0;  // magic
+    } else if (strchr("&|^~!%/+-", c)) {
+      allowed = 1;
+    } else if (c == '*' || c == '<') {
+      allowed = 2;  // exponention operator **, or shift
+    } else if (c == '>') {
+      allowed = 3;  // right shift, or zero-fill right shift
+    } else {
+      break;
+    }
+    d->slash_regexp = 1;
+
+    while (len < allowed) {
+      c = peek_char(d, ++len);
+      if (c != start) {
+        break;
+      }
+    }
+
+    if (c == start && strchr("+-|&", start)) {
+      ++len;  // eat --, ++, || or &&: but no more
+    } else if (c == '=') {
+      // consume a suffix '=' (or whole ==, !==)
+      c = peek_char(d, ++len);
+      if (c == '=' && (start == '=' || start == '!')) {
+        ++len;
+      }
+    }
+    return len;
+  } while (0);
+
   // match symbols or statements
-  for (;;) {
-    c = peek_char(d, len);
-    int valid = (len ? isalnum(c) : isalpha(c)) || c == '$' || c == '_' || c > 127;
+  do {
+    if (c == '\\') {
+      ++len;  // don't care, eat whatever aferwards
+      c = peek_char(d, ++len);
+      if (c != '{') {
+        continue;
+      }
+      while (c && c != '}') {
+        c = peek_char(d, ++len);
+      }
+      ++len;
+      continue;
+    }
+
+    // nb. `c < 0` == `((unsigned char) c) > 127`
+    int valid = (len ? isalnum(c) : isalpha(c)) || c == '$' || c == '_' || c < 0;
     if (!valid) {
       break;
     }
-    ++len;
-  }
+    c = peek_char(d, ++len);
+  } while (c);
   if (len) {
     int regexp = 0;
     char *s = d->buf + d->curr;
@@ -260,7 +282,7 @@ int eat_raw_token(def *d) {
 
   if (c != 0) {
     // what are we?
-    printf("panic: unknown: %c%c", c, next);
+    printf("panic: unknown: %c %c\n", c, next);
   }
   return len;
 }
