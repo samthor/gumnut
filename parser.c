@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include <ctype.h>
+#include "parser.h"
 
 typedef struct {
   char *buf;
@@ -308,14 +308,20 @@ token eat_token(def *d) {
   return out;
 }
 
-int consume(def *d) {
+int prsr_consume(char *buf) {
+  def d;
+  d.buf = buf;
+  d.len = strlen(buf);
+  d.curr = 0;
+  d.line_no = 1;
+  d.slash_regexp = 1;
 
   for (;;) {
-    token out = eat_token(d);
+    token out = eat_token(&d);
 
     if (!out.p) {
-      if (d->curr < d->len) {
-        printf("can't parse reminder:\n%s\n", d->buf + d->curr);
+      if (d.curr < d.len) {
+        printf("can't parse reminder:\n%s\n", d.buf + d.curr);
         return -1;
       }
       break;
@@ -326,41 +332,3 @@ int consume(def *d) {
   return 0;
 }
 
-// reads stdin into buf, reallocating as nessecary. returns strlen(buf) or < 0 for error.
-int read_stdin(char **buf) {
-  int pos = 0;
-  int size = 1024;
-  *buf = malloc(size);
-
-  for (;;) {
-    if (pos >= size - 1) {
-      size *= 2;
-      *buf = realloc(*buf, size);
-    }
-    if (!fgets(*buf + pos, size - pos, stdin)) {
-      break;
-    }
-    pos += strlen(*buf + pos);
-  }
-  if (ferror(stdin)) {
-    return -1;
-  } 
-
-  return pos;
-}
-
-int main() {
-  char *buf;
-  if (read_stdin(&buf) < 0) {
-    return -1;
-  }
-
-  def d;
-  d.buf = buf;
-  d.len = strlen(d.buf);
-  d.curr = 0;
-  d.line_no = 1;
-  d.slash_regexp = 1;
-
-  consume(&d);
-}
