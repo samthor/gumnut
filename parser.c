@@ -215,9 +215,7 @@ int eat_raw_token(def *d) {
     const char start = c;
     int allowed;  // how many ops of the same type we can safely consume
 
-    if (c == '=') {
-      allowed = 0;  // magic
-    } else if (strchr("&|^~!%/+-", c)) {
+    if (strchr("=&|^~!%/+-", c)) {
       allowed = 1;
     } else if (c == '*' || c == '<') {
       allowed = 2;  // exponention operator **, or shift
@@ -238,7 +236,7 @@ int eat_raw_token(def *d) {
     if (c == start && strchr("+-|&", start)) {
       ++len;  // eat --, ++, || or &&: but no more
     } else if (c == '=') {
-      // consume a suffix '=' (or whole ==, !==)
+      // consume a suffix '=' (or whole ===, !==)
       c = peek_char(d, ++len);
       if (c == '=' && (start == '=' || start == '!')) {
         ++len;
