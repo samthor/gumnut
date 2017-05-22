@@ -14,13 +14,6 @@ typedef struct {
   int next_flags;  // state flags for parsing
 } def;
 
-typedef struct {
-  char *p;
-  int len;
-  int after_whitespace;  // is there whitespace after this token?
-  int line_no;
-} token;
-
 char peek_char(def *d, int len) {
   int out = d->curr + len;
   if (out < d->len) {
@@ -329,7 +322,7 @@ token eat_token(def *d) {
   return out;
 }
 
-int prsr_consume(char *buf) {
+int prsr_consume(char *buf, int (*fp)(token *)) {
   def d;
   d.buf = buf;
   d.len = strlen(buf);
@@ -348,10 +341,7 @@ int prsr_consume(char *buf) {
       break;
     }
 
-    if (*out.p == '\n') {
-      continue;  // don't display, javascript is dumb
-    }
-    printf("%c%4d: %.*s\n", out.after_whitespace ? '.' : ' ', out.line_no, out.len, out.p);
+    fp(&out);
   }
 
   return 0;

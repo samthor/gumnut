@@ -26,11 +26,20 @@ int read_stdin(char **buf) {
   return pos;
 }
 
+int render(token *out) {
+  if (*out->p == '\n') {
+    // don't display, javascript is dumb
+  } else {
+    printf("%c%4d: %.*s\n", out->after_whitespace ? '.' : ' ', out->line_no, out->len, out->p);
+  }
+  return 0;
+}
+
 int main() {
   char *buf;
   if (read_stdin(&buf) < 0) {
     return -1;
   }
 
-  return prsr_consume(buf);
+  return prsr_consume(buf, render);
 }
