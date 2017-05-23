@@ -30,13 +30,8 @@ int isnum(char c) {
   return c >= '0' && c <= '9';
 }
 
-// nb. must start/end with space
-const char keywords[] = " await break case catch class const continue debugger default delete do else enum export extends finally for function if implements import in instanceof interface let new package private protected public return static super switch throw try typeof var void while with yield ";
-
-int is_keyword(char *s, int len) {
-  if (len > 10 || len < 2) {
-    return 0;  // no statements <2 or >10 ('instanceof')
-  }
+// nb. buf must contain words start/end with space, aka " test foo "
+int in_space_string(const char *big, char *s, int len) {
   for (int i = 0; i < len; ++i) {
     if (s[i] < 'a' || s[i] > 'z') {
       return 0;  // only a-z
@@ -51,7 +46,23 @@ int is_keyword(char *s, int len) {
   cand[len+1] = ' ';
   cand[len+2] = 0;
 
-  return strstr(keywords, cand) != NULL;
+  return strstr(big, cand) != NULL;
+}
+
+int is_keyword(char *s, int len) {
+  if (len > 10 || len < 2) {
+    return 0;  // no statements <2 ('if' etc) or >10 ('instanceof')
+  }
+  static const char v[] = " await break case catch class const continue debugger default delete do else enum export extends finally for function if implements import in instanceof interface let new package private protected public return static super switch throw try typeof var void while with yield ";
+  return in_space_string(v, s, len);
+}
+
+int is_asi_keyword(char *s, int len) {
+  if (len > 9 || len < 5) {
+    return 0;  // no asi <5 ('yield' etc) or >9 ('continue')
+  }
+  static const char v[] = " break continue return throw yield ";
+  return in_space_string(v, s, len);
 }
 
 eat_out eat_raw_token(def *d) {
@@ -64,7 +75,7 @@ eat_out eat_raw_token(def *d) {
       ++d->line_no;
       return (eat_out) {1, PRSR_TYPE_NEWLINE};
     } else if (!c) {
-      return (eat_out) {0, 0};  // end of file
+      return (eat_out) {0, PRSR_TYPE_EOF};  // end of file
     } else if (!isspace(c)) {
       break;
     }
@@ -301,7 +312,7 @@ eat_out eat_raw_token(def *d) {
   } while (0);
 
   // found nothing :(
-  return (eat_out) {0, -1};
+  return (eat_out) {0, PRSR_TYPE_ERROR};
 }
 
 token eat_token(def *d) {
@@ -316,7 +327,7 @@ token eat_token(def *d) {
 
   if (out.type > 0 && out.len >= 0) {
     out.p = d->buf + d->curr;
-    out.whitespace_after = isspace(d->buf[d->curr + out.len]);
+    out.whitespace_after = isspace(d->buf[d->curr + out.len]);  // might hit '\0', is fine
     d->curr += out.len;
   }
 

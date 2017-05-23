@@ -9,6 +9,11 @@ typedef struct {
 
 int prsr_consume(char *, int (*fp)(token *));
 
+// empty: will not contain text
+#define PRSR_TYPE_EOF       0
+#define PRSR_TYPE_ERROR     -1
+#define PRSR_TYPE_ASI       22  // automatic semicolon insertion
+
 // fixed: will always be the same string
 #define PRSR_TYPE_NEWLINE   1
 #define PRSR_TYPE_SEMICOLON 4
