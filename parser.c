@@ -286,13 +286,15 @@ eat_out eat_raw_token(def *d) {
     } while (c);
 
     char *s = d->buf + d->curr;
-    int type = is_keyword(s, len) ? PRSR_TYPE_KEYWORD : PRSR_TYPE_VAR;
+    int type;
 
-    // if this is not an ID and is a keyword (e.g., await, export) then the next / is regexp
-    if (!(d->next_flags & NEXT_ID) && type == PRSR_TYPE_KEYWORD) {
-      d->next_flags = NEXT_REGEXP;
-    } else {
+    // if we expect an ID, or this is not a keyword
+    if (d->next_flags & NEXT_ID || !is_keyword(s, len)) {
       d->next_flags = 0;
+      type = PRSR_TYPE_VAR;  // if we expect an ID, this is always VAR, not KEYWORD
+    } else {
+      d->next_flags = NEXT_REGEXP;  // regexp after keywords
+      type = PRSR_TYPE_KEYWORD;
     }
 
     return (eat_out) {len, type};  // found keyword or var
@@ -312,7 +314,7 @@ token eat_token(def *d) {
   out.len = eo.len;
   out.type = eo.type;
 
-  if (out.len > 0) {
+  if (out.type > 0 && out.len >= 0) {
     out.p = d->buf + d->curr;
     out.whitespace_after = isspace(d->buf[d->curr + out.len]);
     d->curr += out.len;
