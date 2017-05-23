@@ -30,7 +30,7 @@ int render(token *out) {
   if (*out->p == '\n') {
     // don't display, javascript is dumb
   } else {
-    printf("%c%4d: %.*s\n", out->after_whitespace ? '.' : ' ', out->line_no, out->len, out->p);
+    printf("%c%4d: %.*s\n", out->whitespace_after ? '.' : ' ', out->line_no, out->len, out->p);
   }
   return 0;
 }

@@ -323,7 +323,7 @@ token eat_token(def *d) {
   eat_whitespace(d);
 
   out.p = NULL;
-  out.after_whitespace = 0;
+  out.whitespace_after = 0;
   out.line_no = d->line_no;
 
   eat_out eo = eat_raw_token(d);  // after d->line_no, as this might increase it
@@ -332,7 +332,7 @@ token eat_token(def *d) {
 
   if (out.len > 0) {
     out.p = d->buf + d->curr;
-    out.after_whitespace = isspace(d->buf[d->curr + out.len]);
+    out.whitespace_after = isspace(d->buf[d->curr + out.len]);
     d->curr += out.len;
   }
 

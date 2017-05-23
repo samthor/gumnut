@@ -2,7 +2,7 @@
 typedef struct {
   char *p;
   int len;
-  int after_whitespace;  // is there whitespace after this token?
+  int whitespace_after;  // is there whitespace after this token?
   int line_no;
   int type;
 } token;
