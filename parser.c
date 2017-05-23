@@ -1,10 +1,22 @@
 #include <string.h>
+#include <stdlib.h>
 #include <ctype.h>
+#include <inttypes.h>
 #include "parser.h"
 
-#define NEXT_REGEXP   1  // next slash starts a regexp (not division)
-#define NEXT_ID       2  // next statement is an id, e.g. foo.await (await is id)
-#define NEXT_RESTRICT 4  // we just had a continue/break/etc that forces ASI on newline
+#define NEXT_REGEXP   1   // next slash starts a regexp (not division)
+#define NEXT_ID       2   // next statement is an id, e.g. foo.await (await is id)
+#define NEXT_RESTRICT 4   // we just had a continue/break/etc that forces ASI on newline
+#define NEXT_NEWLINE  8   // was just a newline
+#define NEXT_CONTROL  16  // just had a control structure (if, while) that expects ()s
+
+#define STACK_CURLY    0  // is {}s
+#define STACK_SQUARE   1  // is []s
+#define STACK_ROUND    2  // is ()s
+#define STACK_TYPEMASK 3  // mask for types
+#define STACK_CONTROL  4  // brackets of a control structure, e.g. for/if/while (no ASIs)
+
+#define SIZE_STACK 256  // nb. 256 parses example GWT code correctly (ugh)
 
 typedef struct {
   char *buf;
@@ -12,6 +24,8 @@ typedef struct {
   int len;
   int line_no;
   int next_flags;  // state flags for parsing
+  int depth;
+  uint8_t stack[SIZE_STACK];
 } def;
 
 typedef struct {
@@ -29,6 +43,29 @@ char peek_char(def *d, int len) {
 
 int isnum(char c) {
   return c >= '0' && c <= '9';
+}
+
+inline int modify_stack(def *d, int inc, int type) {
+  if (inc) {
+    if (d->depth == SIZE_STACK - 1) {
+      return -1;
+    }
+    ++d->depth;
+    d->stack[d->depth] = type;
+    return 0;
+  }
+
+  uint8_t prev = d->stack[d->depth--];
+  if (d->depth < 0) {
+    return 1;
+  } else if ((prev & STACK_TYPEMASK) != type) {
+    return 2;
+  }
+  return 0;
+}
+
+inline int is_stack_set(def *d, int bit) {
+  return d->stack[d->depth] & bit;
 }
 
 // nb. buf must contain words start/end with space, aka " test foo "
@@ -57,6 +94,14 @@ int is_keyword(char *s, int len) {
   return in_space_string(v, s, len);
 }
 
+int is_control_keyword(char *s, int len) {
+  if (len > 5 || len < 2) {
+    return 0;  // no control <2 ('if' etc) or >5 ('while' etc)
+  }
+  static const char v[] = " if for switch while with ";
+  return in_space_string(v, s, len);
+}
+
 int is_asi_keyword(char *s, int len) {
   if (len > 9 || len < 5) {
     return 0;  // no asi <5 ('yield' etc) or >9 ('continue')
@@ -73,11 +118,12 @@ eat_out eat_raw_token(def *d) {
     // newlines are magic in JS
     if (c == '\n') {
       // after a restricted keyword, force ASI
-      if (d->next_flags & NEXT_RESTRICT) {
+      if (d->next_flags & NEXT_RESTRICT && !is_stack_set(d, STACK_CONTROL)) {
         d->next_flags = 0;
         return (eat_out) {0, PRSR_TYPE_ASI};
       }
       ++d->line_no;
+      d->next_flags |= NEXT_NEWLINE;
       return (eat_out) {1, PRSR_TYPE_NEWLINE};
     } else if (!c) {
       return (eat_out) {0, PRSR_TYPE_EOF};  // end of file
@@ -152,18 +198,33 @@ eat_out eat_raw_token(def *d) {
 
   // control structures
   if (c == '{' || c == '}') {
+    if (modify_stack(d, c == '{', STACK_CURLY)) {
+      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
+    }
     d->next_flags = NEXT_REGEXP;
     return (eat_out) {1, PRSR_TYPE_CONTROL};
   }
 
   // array notation
   if (c == '[' || c == ']') {
+    if (modify_stack(d, c == '[', STACK_SQUARE)) {
+      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
+    }
     d->next_flags = (c == '[' ? NEXT_REGEXP : 0);
     return (eat_out) {1, PRSR_TYPE_ARRAY};
   }
 
   // brackets
   if (c == '(' || c == ')') {
+    if (modify_stack(d, c == '(', STACK_ROUND)) {
+      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
+    }
+    if (c == '(') {
+      // we followed an if/while etc, mark as a control group
+      if (d->next_flags & NEXT_CONTROL) {
+        d->stack[d->depth] |= STACK_CONTROL;
+      }
+    }
     d->next_flags = (c == '(' ? NEXT_REGEXP : 0);
     return (eat_out) {1, PRSR_TYPE_BRACKET};
   }
@@ -251,7 +312,6 @@ eat_out eat_raw_token(def *d) {
     } else {
       break;
     }
-    d->next_flags = NEXT_REGEXP;
 
     while (len < allowed) {
       c = peek_char(d, ++len);
@@ -260,11 +320,14 @@ eat_out eat_raw_token(def *d) {
       }
     }
 
+    int asi = 0;
     int type = PRSR_TYPE_OP;
     if (start == '=' && c == '>') {
       type = PRSR_TYPE_ARROW;
+      asi = 1;
       ++len;  // arrow function
     } else if (c == start && strchr("+-|&", start)) {
+      asi = (start == '-' || start == '+');
       ++len;  // eat --, ++, || or &&: but no more
     } else if (c == '=') {
       // consume a suffix '=' (or whole ===, !==)
@@ -273,6 +336,13 @@ eat_out eat_raw_token(def *d) {
         ++len;
       }
     }
+    if (asi && !is_stack_set(d, STACK_CONTROL) && (d->next_flags & NEXT_NEWLINE)) {
+      // this causes the code to run 2x, but ASI is dumb anyway
+      d->next_flags &= ~NEXT_NEWLINE;
+      return (eat_out) {0, PRSR_TYPE_ASI};
+    }
+
+    d->next_flags = NEXT_REGEXP;
     return (eat_out) {len, type};
   } while (0);
 
@@ -312,6 +382,8 @@ eat_out eat_raw_token(def *d) {
       d->next_flags = NEXT_REGEXP;  // regexp after keywords
       if (is_asi_keyword(s, len)) {
         d->next_flags |= NEXT_RESTRICT;  // might force ASI (e.g., return\nfoo => return;\nfoo)
+      } else if (is_control_keyword(s, len)) {
+        d->next_flags |= NEXT_CONTROL;
       }
       type = PRSR_TYPE_KEYWORD;
     }
@@ -344,9 +416,9 @@ token eat_token(def *d) {
 
 int prsr_consume(char *buf, int (*fp)(token *)) {
   def d;
+  memset(&d, 0, sizeof(d));
   d.buf = buf;
   d.len = strlen(buf);
-  d.curr = 0;
   d.line_no = 1;
   d.next_flags = NEXT_REGEXP;
 
