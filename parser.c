@@ -31,18 +31,6 @@ int isnum(char c) {
   return c >= '0' && c <= '9';
 }
 
-int eat_whitespace(def *d) {
-  int len = 0;
-  for (;;) {
-    char c = d->buf[d->curr];
-    if (!isspace(c) || c == '\n') {
-      return len;
-    }
-    ++d->curr;
-    ++len;
-  }
-}
-
 // nb. must start/end with space
 const char keywords[] = " await break case catch class const continue debugger default delete do else enum export extends finally for function if implements import in instanceof interface let new package private protected public return static super switch throw try typeof var void while with yield ";
 
@@ -68,27 +56,23 @@ int is_keyword(char *s, int len) {
 }
 
 eat_out eat_raw_token(def *d) {
-  int len = 0;
-  char c = peek_char(d, len);
-  if (!c) {
-    return (eat_out) {0, -1};
-  }
-
-  // newlines are magic in JS
-  if (c == '\n') {
-    ++d->line_no;
-    return (eat_out) {1, PRSR_TYPE_NEWLINE};
-  }
-
-  // whitespace
-  if (isspace(c)) {
-    // FIXME: should never happen? consume whitespace?
-    printf("panic: should never be isspace at eat_raw_token");
-    return (eat_out) {-1, -1};
+  // consume whitespace (look for newline, zero char)
+  char c;
+  for (;; ++d->curr) {
+    c = peek_char(d, 0);
+    if (c == '\n') {
+      // newlines are magic in JS
+      ++d->line_no;
+      return (eat_out) {1, PRSR_TYPE_NEWLINE};
+    } else if (!c) {
+      return (eat_out) {0, 0};  // end of file
+    } else if (!isspace(c)) {
+      break;
+    }
   }
 
   // comments (C99 and long)
-  char next = peek_char(d, len+1);
+  char next = peek_char(d, 1);
   do {
     char *find;
     if (c != '/') {
@@ -106,7 +90,7 @@ eat_out eat_raw_token(def *d) {
     if (at == NULL) {
       return (eat_out) {d->len - d->curr, PRSR_TYPE_COMMENT};  // consumed whole string, not found
     }
-    len = at - search + 2;  // add preamble
+    int len = at - search + 2;  // add preamble
 
     if (next == '/') {
       return (eat_out) {len, PRSR_TYPE_COMMENT};  // single line, done
@@ -128,6 +112,7 @@ eat_out eat_raw_token(def *d) {
   // strings
   if (c == '\'' || c == '"' || c == '`') {
     char start = c;
+    int len = 0;
     while ((c = peek_char(d, ++len))) {
       // TODO: strchr for final, and check
       if (c == start) {
@@ -183,9 +168,9 @@ eat_out eat_raw_token(def *d) {
   // this must be a regexp
   if (d->next_flags && c == '/') {
     int is_charexpr = 0;
+    int len = 1;
 
     c = next;
-    ++len;
     do {
       if (c == '[') {
         is_charexpr = 1;
@@ -214,8 +199,8 @@ eat_out eat_raw_token(def *d) {
 
   // number: "0", ".01", "0x100"
   if (isnum(c) || (c == '.' && isnum(next))) {
+    int len = 1;
     c = next;
-    ++len;
     for (;;) {
       if (!(isalnum(c) || c == '.')) {  // letters, dots, etc- misuse is invalid, so eat anyway
         break;
@@ -228,7 +213,7 @@ eat_out eat_raw_token(def *d) {
 
   // dot notation (after number)
   if (c == '.') {
-    if (next == '.' && peek_char(d, len+2) == '.') {
+    if (next == '.' && peek_char(d, 2) == '.') {
       d->next_flags = NEXT_REGEXP;
       return (eat_out) {3, PRSR_TYPE_DOTDOTDOT};  // found '...' operator
     }
@@ -239,6 +224,7 @@ eat_out eat_raw_token(def *d) {
   // ops: i.e., anything made up of =<& etc
   do {
     const char start = c;
+    int len = 0;
     int allowed;  // how many ops of the same type we can safely consume
 
     if (strchr("=&|^~!%/+-", c)) {
@@ -277,27 +263,29 @@ eat_out eat_raw_token(def *d) {
 
   // keywords or vars
   do {
-    if (c == '\\') {
-      ++len;  // don't care, eat whatever aferwards
-      c = peek_char(d, ++len);
-      if (c != '{') {
+    int len = 0;
+    do {
+      if (c == '\\') {
+        ++len;  // don't care, eat whatever aferwards
+        c = peek_char(d, ++len);
+        if (c != '{') {
+          continue;
+        }
+        while (c && c != '}') {
+          c = peek_char(d, ++len);
+        }
+        ++len;
         continue;
       }
-      while (c && c != '}') {
-        c = peek_char(d, ++len);
-      }
-      ++len;
-      continue;
-    }
 
-    // nb. `c < 0` == `((unsigned char) c) > 127`
-    int valid = (len ? isalnum(c) : isalpha(c)) || c == '$' || c == '_' || c < 0;
-    if (!valid) {
-      break;
-    }
-    c = peek_char(d, ++len);
-  } while (c);
-  if (len) {
+      // nb. `c < 0` == `((unsigned char) c) > 127`
+      int valid = (len ? isalnum(c) : isalpha(c)) || c == '$' || c == '_' || c < 0;
+      if (!valid) {
+        break;
+      }
+      c = peek_char(d, ++len);
+    } while (c);
+
     char *s = d->buf + d->curr;
     int type = is_keyword(s, len) ? PRSR_TYPE_KEYWORD : PRSR_TYPE_VAR;
 
@@ -309,19 +297,14 @@ eat_out eat_raw_token(def *d) {
     }
 
     return (eat_out) {len, type};  // found keyword or var
-  }
+  } while (0);
 
-  if (c != 0) {
-    // what are we?
-    printf("panic: unknown: %c %c\n", c, next);
-  }
-  return (eat_out) {len, -1};
+  // found nothing :(
+  return (eat_out) {0, -1};
 }
 
 token eat_token(def *d) {
   token out;
-  eat_whitespace(d);
-
   out.p = NULL;
   out.whitespace_after = 0;
   out.line_no = d->line_no;
