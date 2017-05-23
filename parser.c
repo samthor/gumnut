@@ -14,6 +14,11 @@ typedef struct {
   int next_flags;  // state flags for parsing
 } def;
 
+typedef struct {
+  int len;
+  int type;
+} eat_out;
+
 char peek_char(def *d, int len) {
   int out = d->curr + len;
   if (out < d->len) {
@@ -62,24 +67,24 @@ int is_keyword(char *s, int len) {
   return strstr(keywords, cand) != NULL;
 }
 
-int eat_raw_token(def *d) {
+eat_out eat_raw_token(def *d) {
   int len = 0;
   char c = peek_char(d, len);
   if (!c) {
-    return 0;
+    return (eat_out) {0, -1};
   }
 
   // newlines are magic in JS
   if (c == '\n') {
     ++d->line_no;
-    return 1;
+    return (eat_out) {1, PRSR_TYPE_NEWLINE};
   }
 
   // whitespace
   if (isspace(c)) {
     // FIXME: should never happen? consume whitespace?
     printf("panic: should never be isspace at eat_raw_token");
-    return -1;
+    return (eat_out) {-1, -1};
   }
 
   // comments (C99 and long)
@@ -99,12 +104,12 @@ int eat_raw_token(def *d) {
     const char *search = (const char *) d->buf + d->curr + 2;
     char *at = strstr(search, find);
     if (at == NULL) {
-      return d->len - d->curr;  // consumed whole string, not found
+      return (eat_out) {d->len - d->curr, PRSR_TYPE_COMMENT};  // consumed whole string, not found
     }
     len = at - search + 2;  // add preamble
 
     if (next == '/') {
-      return len;  // single line, done
+      return (eat_out) {len, PRSR_TYPE_COMMENT};  // single line, done
     }
 
     // count \n's
@@ -117,7 +122,7 @@ int eat_raw_token(def *d) {
       ++d->line_no;
       ++newline;
     }
-    return len + 2;  // eat "*/"
+    return (eat_out) {len + 2, PRSR_TYPE_COMMENT};  // eat "*/"
   } while (0);
 
   // strings
@@ -136,37 +141,43 @@ int eat_raw_token(def *d) {
       }
     }
     d->next_flags = 0;
-    return len;
+    return (eat_out) {len, PRSR_TYPE_STRING};
   }
 
-  // semicolon - should we return this at all?
+  // semicolon
   if (c == ';') {
     d->next_flags = NEXT_REGEXP;
-    return 1;
+    return (eat_out) {1, PRSR_TYPE_SEMICOLON};
   }
 
   // control structures
   if (c == '{' || c == '}') {
     d->next_flags = NEXT_REGEXP;
-    return 1;
+    return (eat_out) {1, PRSR_TYPE_CONTROL};
   }
 
   // array notation
   if (c == '[' || c == ']') {
     d->next_flags = (c == '[');
-    return 1;
+    return (eat_out) {1, PRSR_TYPE_ARRAY};
   }
 
   // brackets
   if (c == '(' || c == ')') {
     d->next_flags = (c == '(');
-    return 1;
+    return (eat_out) {1, PRSR_TYPE_BRACKET};
   }
 
   // misc
   if (c == ':' || c == '?' || c == ',') {
     d->next_flags = NEXT_REGEXP;
-    return 1;
+    int type = PRSR_TYPE_COMMA;
+    if (c == ':') {
+      type = PRSR_TYPE_COLON;
+    } else if (c == '?') {
+      type = PRSR_TYPE_TERNARY;
+    }
+    return (eat_out) {1, type};
   }
 
   // this must be a regexp
@@ -198,7 +209,7 @@ int eat_raw_token(def *d) {
     }
 
     d->next_flags = 0;
-    return len;
+    return (eat_out) {len, PRSR_TYPE_REGEXP};
   }
 
   // number: "0", ".01", "0x100"
@@ -212,17 +223,17 @@ int eat_raw_token(def *d) {
       c = peek_char(d, ++len);
     }
     d->next_flags = 0;
-    return len;
+    return (eat_out) {len, PRSR_TYPE_NUMBER};
   }
 
   // dot notation (after number)
   if (c == '.') {
     if (next == '.' && peek_char(d, len+2) == '.') {
       d->next_flags = NEXT_REGEXP;
-      return 3;  // found '...' operator
+      return (eat_out) {3, PRSR_TYPE_DOTDOTDOT};  // found '...' operator
     }
     d->next_flags = NEXT_ID;
-    return 1;  // this doesn't match the symbol- it's valid to say e.g., "foo   .    bar".
+    return (eat_out) {1, PRSR_TYPE_DOT};  // it's valid to say e.g., "foo . bar", so separate token
   }
 
   // ops: i.e., anything made up of =<& etc
@@ -248,7 +259,9 @@ int eat_raw_token(def *d) {
       }
     }
 
+    int type = PRSR_TYPE_OP;
     if (start == '=' && c == '>') {
+      type = PRSR_TYPE_ARROW;
       ++len;  // arrow function
     } else if (c == start && strchr("+-|&", start)) {
       ++len;  // eat --, ++, || or &&: but no more
@@ -259,7 +272,7 @@ int eat_raw_token(def *d) {
         ++len;
       }
     }
-    return len;
+    return (eat_out) {len, type};
   } while (0);
 
   // keywords or vars
@@ -286,22 +299,23 @@ int eat_raw_token(def *d) {
   } while (c);
   if (len) {
     char *s = d->buf + d->curr;
+    int type = is_keyword(s, len) ? PRSR_TYPE_KEYWORD : PRSR_TYPE_VAR;
 
     // if this is not an ID and is a keyword (e.g., await, export) then the next / is regexp
-    if (!(d->next_flags & NEXT_ID) && is_keyword(s, len)) {
+    if (!(d->next_flags & NEXT_ID) && type == PRSR_TYPE_KEYWORD) {
       d->next_flags = NEXT_REGEXP;
     } else {
       d->next_flags = 0;
     }
 
-    return len;  // found varia
+    return (eat_out) {len, type};  // found keyword or var
   }
 
   if (c != 0) {
     // what are we?
     printf("panic: unknown: %c %c\n", c, next);
   }
-  return len;
+  return (eat_out) {len, -1};
 }
 
 token eat_token(def *d) {
@@ -311,7 +325,10 @@ token eat_token(def *d) {
   out.p = NULL;
   out.after_whitespace = 0;
   out.line_no = d->line_no;
-  out.len = eat_raw_token(d);
+
+  eat_out eo = eat_raw_token(d);  // after d->line_no, as this might increase it
+  out.len = eo.len;
+  out.type = eo.type;
 
   if (out.len > 0) {
     out.p = d->buf + d->curr;
