@@ -17,11 +17,11 @@ int prsr_consume(char *, int (*fp)(token *));
 // fixed: will always be the same string
 #define PRSR_TYPE_NEWLINE   1
 #define PRSR_TYPE_SEMICOLON 4
-#define PRSR_TYPE_DOTDOTDOT 7
+#define PRSR_TYPE_SPREAD    7
 #define PRSR_TYPE_DOT       8
 #define PRSR_TYPE_OP        9
 #define PRSR_TYPE_ARROW     10
-#define PRSR_TYPE_COMMA     19
+#define PRSR_TYPE_ELISON    19
 #define PRSR_TYPE_COLON     20
 #define PRSR_TYPE_TERNARY   21
 

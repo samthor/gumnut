@@ -171,7 +171,7 @@ eat_out eat_raw_token(def *d) {
   // misc
   if (c == ':' || c == '?' || c == ',') {
     d->next_flags = NEXT_REGEXP;
-    int type = PRSR_TYPE_COMMA;
+    int type = PRSR_TYPE_ELISON;
     if (c == ':') {
       type = PRSR_TYPE_COLON;
     } else if (c == '?') {
@@ -230,7 +230,7 @@ eat_out eat_raw_token(def *d) {
   if (c == '.') {
     if (next == '.' && peek_char(d, 2) == '.') {
       d->next_flags = NEXT_REGEXP;
-      return (eat_out) {3, PRSR_TYPE_DOTDOTDOT};  // found '...' operator
+      return (eat_out) {3, PRSR_TYPE_SPREAD};  // found '...' operator
     }
     d->next_flags = NEXT_ID;
     return (eat_out) {1, PRSR_TYPE_DOT};  // it's valid to say e.g., "foo . bar", so separate token
