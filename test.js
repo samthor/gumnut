@@ -2,6 +2,9 @@ var x;
 
 x = .100+200;
 
+return
+123;
+
 // long comment sup
 /*hello/
 

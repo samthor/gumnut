@@ -2,8 +2,9 @@
 #include <ctype.h>
 #include "parser.h"
 
-#define NEXT_REGEXP 1  // next slash starts a regexp (not division)
-#define NEXT_ID     2  // next statement is an id, e.g. foo.await (await is id)
+#define NEXT_REGEXP   1  // next slash starts a regexp (not division)
+#define NEXT_ID       2  // next statement is an id, e.g. foo.await (await is id)
+#define NEXT_RESTRICT 4  // we just had a continue/break/etc that forces ASI on newline
 
 typedef struct {
   char *buf;
@@ -32,12 +33,6 @@ int isnum(char c) {
 
 // nb. buf must contain words start/end with space, aka " test foo "
 int in_space_string(const char *big, char *s, int len) {
-  for (int i = 0; i < len; ++i) {
-    if (s[i] < 'a' || s[i] > 'z') {
-      return 0;  // only a-z
-    }
-  }
-
   // TODO: do something better? strstr is probably fast D:
   // search for: space + candidate + space
   char cand[16];
@@ -52,6 +47,11 @@ int in_space_string(const char *big, char *s, int len) {
 int is_keyword(char *s, int len) {
   if (len > 10 || len < 2) {
     return 0;  // no statements <2 ('if' etc) or >10 ('instanceof')
+  }
+  for (int i = 0; i < len; ++i) {
+    if (s[i] < 'a' || s[i] > 'z') {
+      return 0;  // only a-z
+    }
   }
   static const char v[] = " await break case catch class const continue debugger default delete do else enum export extends finally for function if implements import in instanceof interface let new package private protected public return static super switch throw try typeof var void while with yield ";
   return in_space_string(v, s, len);
@@ -70,8 +70,13 @@ eat_out eat_raw_token(def *d) {
   char c;
   for (;; ++d->curr) {
     c = peek_char(d, 0);
+    // newlines are magic in JS
     if (c == '\n') {
-      // newlines are magic in JS
+      // after a restricted keyword, force ASI
+      if (d->next_flags & NEXT_RESTRICT) {
+        d->next_flags = 0;
+        return (eat_out) {0, PRSR_TYPE_ASI};
+      }
       ++d->line_no;
       return (eat_out) {1, PRSR_TYPE_NEWLINE};
     } else if (!c) {
@@ -153,13 +158,13 @@ eat_out eat_raw_token(def *d) {
 
   // array notation
   if (c == '[' || c == ']') {
-    d->next_flags = (c == '[');
+    d->next_flags = (c == '[' ? NEXT_REGEXP : 0);
     return (eat_out) {1, PRSR_TYPE_ARRAY};
   }
 
   // brackets
   if (c == '(' || c == ')') {
-    d->next_flags = (c == '(');
+    d->next_flags = (c == '(' ? NEXT_REGEXP : 0);
     return (eat_out) {1, PRSR_TYPE_BRACKET};
   }
 
@@ -176,7 +181,7 @@ eat_out eat_raw_token(def *d) {
   }
 
   // this must be a regexp
-  if (d->next_flags && c == '/') {
+  if ((d->next_flags & NEXT_REGEXP) && c == '/') {
     int is_charexpr = 0;
     int len = 1;
 
@@ -305,6 +310,9 @@ eat_out eat_raw_token(def *d) {
       type = PRSR_TYPE_VAR;  // if we expect an ID, this is always VAR, not KEYWORD
     } else {
       d->next_flags = NEXT_REGEXP;  // regexp after keywords
+      if (is_asi_keyword(s, len)) {
+        d->next_flags |= NEXT_RESTRICT;  // might force ASI (e.g., return\nfoo => return;\nfoo)
+      }
       type = PRSR_TYPE_KEYWORD;
     }
 
