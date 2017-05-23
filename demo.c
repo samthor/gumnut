@@ -41,5 +41,11 @@ int main() {
     return -1;
   }
 
-  return prsr_consume(buf, render);
+  int rem = prsr_consume(buf, render);
+  if (rem > 0) {
+    printf("can't parse reminder:\n%s\n", buf + rem);
+    return -2;
+  }
+
+  return 0;
 }

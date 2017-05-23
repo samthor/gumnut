@@ -352,8 +352,7 @@ int prsr_consume(char *buf, int (*fp)(token *)) {
 
     if (!out.p) {
       if (d.curr < d.len) {
-        printf("can't parse reminder:\n%s\n", d.buf + d.curr);
-        return -1;
+        return d.curr;
       }
       break;
     }
