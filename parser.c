@@ -88,14 +88,15 @@ int in_space_string(const char *big, char *s, int len) {
 
 int is_keyword(char *s, int len) {
   if (len > 10 || len < 2) {
-    return 0;  // no statements <2 ('if' etc) or >10 ('instanceof')
+    return 0;  // no statements <2 ('if' etc) or >10 ('implements')
   }
   for (int i = 0; i < len; ++i) {
     if (s[i] < 'a' || s[i] > 'z') {
       return 0;  // only a-z
     }
   }
-  static const char v[] = " await break case catch class const continue debugger default delete do else enum export extends finally for function if implements import in instanceof interface let new package private protected public return static super switch throw try typeof var void while with yield ";
+  // nb. does not contain 'in' or 'instanceof', as they are ops
+  static const char v[] = " await break case catch class const continue debugger default delete do else enum export extends finally for function if implements import interface let new package private protected public return static super switch throw try typeof var void while with yield ";
   return in_space_string(v, s, len);
 }
 
@@ -258,6 +259,16 @@ eat_out eat_raw_token(def *d) {
       allowed = 2;  // exponention operator **, or shift
     } else if (c == '>') {
       allowed = 3;  // right shift, or zero-fill right shift
+    } else if (c == 'i' && next == 'n') {
+      // this _could_ be 'in' or 'instanceof'
+      if (isspace(peek_char(d, 2))) {
+        len = 2;
+      } else if (strstr(d->buf + d->curr + 2, "stanceof") && isspace(d->buf[d->curr + 10])) {
+        len = 10;
+      } else {
+        break;
+      }
+      return (eat_out) {len, PRSR_TYPE_OP};
     } else {
       break;
     }
