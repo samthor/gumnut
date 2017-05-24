@@ -4,17 +4,22 @@
 #include <inttypes.h>
 #include "parser.h"
 
-#define NEXT_REGEXP   1   // next slash starts a regexp (not division)
+#define NEXT_EXPR     1   // looking for an expr, and next slash starts a regexp (not divide)
 #define NEXT_ID       2   // next statement is an id, e.g. foo.await (await is id)
 #define NEXT_RESTRICT 4   // we just had a continue/break/etc that forces ASI on newline
 #define NEXT_NEWLINE  8   // was just a newline
-#define NEXT_CONTROL  16  // just had a control structure (if, while) that expects ()s
+#define NEXT_CONTROL  16  // we just had a control structure (if, while) that expects ()s
+#define NEXT_EMPTY    32  // would the next statement be effectively empty
+#define NEXT_AFTER_OP 64  // we just had an op (or "op-like" keyword)
 
-#define STACK_CURLY    0  // is {}s
-#define STACK_SQUARE   1  // is []s
-#define STACK_ROUND    2  // is ()s
-#define STACK_TYPEMASK 3  // mask for types
-#define STACK_CONTROL  4  // brackets of a control structure, e.g. for/if/while (no ASIs)
+#define STACK_CURLY       0   // is {}s
+#define STACK_SQUARE      1   // is []s
+#define STACK_ROUND       2   // is ()s
+#define STACK_TYPEMASK    3   // mask for types
+#define STACK_CONTROL     4   // brackets of a control structure, e.g. for/if/while (no ASIs)
+#define STACK_STATEMENT   8   // the next {} under us is a statement (e.g., var x = class{};)
+#define STACK_CURLY_DICT  16  // this {} is a dict
+#define STACK_CURLY_CLASS 32  // this {} is a class
 
 #define SIZE_STACK 256  // nb. 256 parses example GWT code correctly (ugh)
 
@@ -110,6 +115,10 @@ int is_asi_keyword(char *s, int len) {
   return in_space_string(v, s, len);
 }
 
+int is_class_function_keyword(char *s, int len) {
+  return (len == 5 && !memcmp(s, "class", 5)) || (len == 8 && !memcmp(s, "function", 8));
+}
+
 eat_out eat_raw_token(def *d) {
   // consume whitespace (look for newline, zero char)
   char c;
@@ -118,14 +127,19 @@ eat_out eat_raw_token(def *d) {
     // newlines are magic in JS
     if (c == '\n') {
       // after a restricted keyword, force ASI
-      if (d->next_flags & NEXT_RESTRICT && !is_stack_set(d, STACK_CONTROL)) {
-        d->next_flags = 0;
+      if ((d->next_flags & NEXT_RESTRICT) && !is_stack_set(d, STACK_CONTROL)) {
+        d->next_flags = NEXT_EXPR | NEXT_EMPTY;
         return (eat_out) {0, PRSR_TYPE_ASI};
       }
       ++d->line_no;
       d->next_flags |= NEXT_NEWLINE;
       return (eat_out) {1, PRSR_TYPE_NEWLINE};
     } else if (!c) {
+      // if the file is ending, and it would not be an empty statement, emit ASI
+      if (!(d->next_flags & NEXT_EMPTY) && !is_stack_set(d, STACK_CONTROL)) {
+        d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+        return (eat_out) {0, PRSR_TYPE_ASI};
+      }
       return (eat_out) {0, PRSR_TYPE_EOF};  // end of file
     } else if (!isspace(c)) {
       break;
@@ -192,16 +206,33 @@ eat_out eat_raw_token(def *d) {
 
   // semicolon
   if (c == ';') {
-    d->next_flags = NEXT_REGEXP;
+    d->next_flags = NEXT_EXPR | NEXT_EMPTY;
     return (eat_out) {1, PRSR_TYPE_SEMICOLON};
   }
 
   // control structures
-  if (c == '{' || c == '}') {
-    if (modify_stack(d, c == '{', STACK_CURLY)) {
+  if (c == '{') {
+    if (modify_stack(d, /* inc */ 1, STACK_CURLY)) {
       return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
     }
-    d->next_flags = NEXT_REGEXP;
+    d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+    return (eat_out) {1, PRSR_TYPE_CONTROL};
+  } else if (c == '}') {
+    // if we're ending a control structure and this would not be an empty statement, emit an ASI
+    if (!(d->next_flags & NEXT_EMPTY)) {
+      d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+      return (eat_out) {0, PRSR_TYPE_ASI};
+    }
+    if (modify_stack(d, /* dec */ 0, STACK_CURLY)) {
+      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
+    }
+    // if we expected a statement here, clear it
+    if (d->stack[d->depth] & STACK_STATEMENT) {
+      d->stack[d->depth] &= ~STACK_STATEMENT;
+      d->next_flags = 0;  // function/class statement, not a normal hoist (or if/while/etc)
+    } else {
+      d->next_flags = NEXT_EXPR | NEXT_EMPTY;  // hoisted, so following is empty
+    }
     return (eat_out) {1, PRSR_TYPE_CONTROL};
   }
 
@@ -210,7 +241,7 @@ eat_out eat_raw_token(def *d) {
     if (modify_stack(d, c == '[', STACK_SQUARE)) {
       return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
     }
-    d->next_flags = (c == '[' ? NEXT_REGEXP : 0);
+    d->next_flags = (c == '[' ? NEXT_EXPR : 0);
     return (eat_out) {1, PRSR_TYPE_ARRAY};
   }
 
@@ -224,14 +255,16 @@ eat_out eat_raw_token(def *d) {
       if (d->next_flags & NEXT_CONTROL) {
         d->stack[d->depth] |= STACK_CONTROL;
       }
+      d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+    } else {
+      d->next_flags = 0;  // end of (), op can follow
     }
-    d->next_flags = (c == '(' ? NEXT_REGEXP : 0);
     return (eat_out) {1, PRSR_TYPE_BRACKET};
   }
 
   // misc
   if (c == ':' || c == '?' || c == ',') {
-    d->next_flags = NEXT_REGEXP;
+    d->next_flags = NEXT_EXPR;
     int type = PRSR_TYPE_ELISON;
     if (c == ':') {
       type = PRSR_TYPE_COLON;
@@ -242,7 +275,7 @@ eat_out eat_raw_token(def *d) {
   }
 
   // this must be a regexp
-  if ((d->next_flags & NEXT_REGEXP) && c == '/') {
+  if ((d->next_flags & NEXT_EXPR) && c == '/') {
     int is_charexpr = 0;
     int len = 1;
 
@@ -290,7 +323,7 @@ eat_out eat_raw_token(def *d) {
   // dot notation (after number)
   if (c == '.') {
     if (next == '.' && peek_char(d, 2) == '.') {
-      d->next_flags = NEXT_REGEXP;
+      d->next_flags = NEXT_EXPR;
       return (eat_out) {3, PRSR_TYPE_SPREAD};  // found '...' operator
     }
     d->next_flags = NEXT_ID;
@@ -336,13 +369,27 @@ eat_out eat_raw_token(def *d) {
         ++len;
       }
     }
+
+    // insert ASI around ++, -- and =>
     if (asi && !is_stack_set(d, STACK_CONTROL) && (d->next_flags & NEXT_NEWLINE)) {
       // this causes the code to run 2x, but ASI is dumb anyway
-      d->next_flags &= ~NEXT_NEWLINE;
+      d->next_flags = NEXT_EXPR | NEXT_EMPTY;
       return (eat_out) {0, PRSR_TYPE_ASI};
     }
 
-    d->next_flags = NEXT_REGEXP;
+    // look for postfix/prefix ops
+    // nb. this conditional is a bit ugly, matches --, ++
+    if (asi && (start == '+' || start == '-')) {
+      if (d->next_flags & NEXT_EXPR) {
+        // prefix: do nothing
+      } else {
+        // postfix special-case: can have more ops after this
+        d->next_flags = 0;
+        return (eat_out) {len, type};
+      }
+    }
+
+    d->next_flags = NEXT_EXPR | NEXT_AFTER_OP;
     return (eat_out) {len, type};
   } while (0);
 
@@ -372,23 +419,37 @@ eat_out eat_raw_token(def *d) {
     } while (c);
 
     char *s = d->buf + d->curr;
-    int type;
+
+    // if we don't expect an expr, but there was a newline
+    if ((d->next_flags & NEXT_NEWLINE) && !(d->next_flags & NEXT_EXPR) && !(d->next_flags & NEXT_EMPTY)) {
+      // FIXME: this goes in a few places
+      d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+      return (eat_out) {0, PRSR_TYPE_ASI};
+    }
 
     // if we expect an ID, or this is not a keyword
     if (d->next_flags & NEXT_ID || !is_keyword(s, len)) {
       d->next_flags = 0;
-      type = PRSR_TYPE_VAR;  // if we expect an ID, this is always VAR, not KEYWORD
-    } else {
-      d->next_flags = NEXT_REGEXP;  // regexp after keywords
-      if (is_asi_keyword(s, len)) {
-        d->next_flags |= NEXT_RESTRICT;  // might force ASI (e.g., return\nfoo => return;\nfoo)
-      } else if (is_control_keyword(s, len)) {
-        d->next_flags |= NEXT_CONTROL;
-      }
-      type = PRSR_TYPE_KEYWORD;
+      return (eat_out) {len, PRSR_TYPE_VAR};  // found keyword or var
     }
 
-    return (eat_out) {len, type};  // found keyword or var
+    int prev_flags = d->next_flags;
+    d->next_flags = NEXT_EXPR | NEXT_AFTER_OP;
+
+    if (is_asi_keyword(s, len)) {
+      // might force ASI (e.g., return\nfoo => return;\nfoo)
+      d->next_flags |= NEXT_RESTRICT;
+    } else if (is_control_keyword(s, len)) {
+      // next bracketed expression is e.g. for() or if()
+      d->next_flags |= NEXT_CONTROL;
+    } else if ((prev_flags & NEXT_AFTER_OP) && is_class_function_keyword(s, len)) {
+      // this is a class or function _statement_ (not a hoisted def)
+      d->next_flags |= NEXT_CONTROL;
+      d->stack[d->depth] |= STACK_STATEMENT;
+      // TODO: if it's of a certain type, record that somehow...
+    }
+
+    return (eat_out) {len, PRSR_TYPE_KEYWORD};  // found keyword or var
   } while (0);
 
   // found nothing :(
@@ -420,7 +481,7 @@ int prsr_consume(char *buf, int (*fp)(token *)) {
   d.buf = buf;
   d.len = strlen(buf);
   d.line_no = 1;
-  d.next_flags = NEXT_REGEXP;
+  d.next_flags = NEXT_EXPR | NEXT_EMPTY;
 
   for (;;) {
     token out = eat_token(&d);
