@@ -12,16 +12,14 @@
 #define NEXT_EMPTY    32  // would the next statement be effectively empty
 #define NEXT_AFTER_OP 64  // we just had an op (or "op-like" keyword)
 
-#define STACK_CURLY       0   // is {}s
-#define STACK_SQUARE      1   // is []s
-#define STACK_ROUND       2   // is ()s
-#define STACK_TYPEMASK    3   // mask for types
-#define STACK_CONTROL     4   // brackets of a control structure, e.g. for/if/while (no ASIs)
-#define STACK_STATEMENT   8   // the next {} under us is a statement (e.g., var x = class{};)
-#define STACK_DO_PARENS   16  // the next-ish () is the do {} while (...); parens
-#define STACK_CURLY_DICT  32  // this {} is a dict
-#define STACK_CURLY_CLASS 64  // this {} is a class
-#define STACK_LEFTOVER    128  // FIXME: last bit
+#define STACK_CURLY     0   // is {}s
+#define STACK_SQUARE    1   // is []s
+#define STACK_ROUND     2   // is ()s
+#define STACK_TYPEMASK  3   // mask for types
+#define STACK_CONTROL   4   // brackets of a control structure, e.g. for/if/while (no ASIs)
+#define STACK_STATEMENT 8   // the next {} under us is a statement (e.g., var x = class{};)
+#define STACK_DO_PARENS 16  // the next-ish () is the do {} while (...); parens
+#define STACK_CURLY_OBJ 32  // this {} is a dict/class
 
 #define SIZE_STACK 256  // nb. 256 parses example GWT code correctly (ugh)
 
