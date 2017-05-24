@@ -18,8 +18,10 @@
 #define STACK_TYPEMASK    3   // mask for types
 #define STACK_CONTROL     4   // brackets of a control structure, e.g. for/if/while (no ASIs)
 #define STACK_STATEMENT   8   // the next {} under us is a statement (e.g., var x = class{};)
-#define STACK_CURLY_DICT  16  // this {} is a dict
-#define STACK_CURLY_CLASS 32  // this {} is a class
+#define STACK_DO_PARENS   16  // the next-ish () is the do {} while (...); parens
+#define STACK_CURLY_DICT  32  // this {} is a dict
+#define STACK_CURLY_CLASS 64  // this {} is a class
+#define STACK_LEFTOVER    128  // FIXME: last bit
 
 #define SIZE_STACK 256  // nb. 256 parses example GWT code correctly (ugh)
 
@@ -246,18 +248,33 @@ eat_out eat_raw_token(def *d) {
   }
 
   // brackets
-  if (c == '(' || c == ')') {
-    if (modify_stack(d, c == '(', STACK_ROUND)) {
+  if (c == '(') {
+    // we followed an if/while etc, mark as a control group
+    if (d->next_flags & NEXT_CONTROL) {
+      d->stack[d->depth] |= STACK_CONTROL;
+    }
+    if (modify_stack(d, /* inc */ 1, STACK_ROUND)) {
       return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
     }
-    if (c == '(') {
-      // we followed an if/while etc, mark as a control group
-      if (d->next_flags & NEXT_CONTROL) {
-        d->stack[d->depth] |= STACK_CONTROL;
-      }
-      d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+    d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+    return (eat_out) {1, PRSR_TYPE_BRACKET};
+  } else if (c == ')') {
+    if (modify_stack(d, /* dec */ 0, STACK_ROUND)) {
+      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
+    }
+    if (is_stack_set(d, STACK_CONTROL)) {
+      // control, look for expressions next
+      d->stack[d->depth] &= ~STACK_CONTROL;  // clear bit
+      d->next_flags = NEXT_EXPR;  // end of control (), e.g. for (;;)
     } else {
-      d->next_flags = 0;  // end of (), op can follow
+      // non-control (e.g., (1)), expect ops next
+      d->next_flags = 0;  // end of regular ()
+    }
+
+    // special-case do {} while ()
+    if (is_stack_set(d, STACK_DO_PARENS)) {
+      // nb. not really a newline, but effectively the same for ASI purposes
+      d->next_flags = NEXT_NEWLINE;
     }
     return (eat_out) {1, PRSR_TYPE_BRACKET};
   }
@@ -427,6 +444,14 @@ eat_out eat_raw_token(def *d) {
       return (eat_out) {0, PRSR_TYPE_ASI};
     }
 
+    if (is_stack_set(d, STACK_DO_PARENS)) {
+      if (len == 5 && !memcmp(s, "while", 5)) {
+        // this is fine
+      } else {
+        d->stack[d->depth] &= ~STACK_DO_PARENS;
+      }
+    }
+
     // if we expect an ID, or this is not a keyword
     if (d->next_flags & NEXT_ID || !is_keyword(s, len)) {
       d->next_flags = 0;
@@ -436,7 +461,10 @@ eat_out eat_raw_token(def *d) {
     int prev_flags = d->next_flags;
     d->next_flags = NEXT_EXPR | NEXT_AFTER_OP;
 
-    if (is_asi_keyword(s, len)) {
+    if (len == 2 && !memcmp(s, "do", 2)) {
+      // special-case "do"
+      d->stack[d->depth] |= STACK_DO_PARENS;
+    } else if (is_asi_keyword(s, len)) {
       // might force ASI (e.g., return\nfoo => return;\nfoo)
       d->next_flags |= NEXT_RESTRICT;
     } else if (is_control_keyword(s, len)) {
