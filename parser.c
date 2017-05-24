@@ -186,56 +186,10 @@ eat_out eat_raw_token(def *d) {
     return (eat_out) {len + 2, PRSR_TYPE_COMMENT};  // eat "*/"
   } while (0);
 
-  // strings
-  if (c == '\'' || c == '"' || c == '`') {
-    char start = c;
-    int len = 0;
-    while ((c = peek_char(d, ++len))) {
-      // TODO: strchr for final, and check
-      if (c == start) {
-        ++len;
-        break;
-      } else if (c == '\\') {
-        c = peek_char(d, ++len);
-      }
-      if (c == '\n') {
-        ++d->line_no;  // look for \n
-      }
-    }
-    d->next_flags = 0;
-    return (eat_out) {len, PRSR_TYPE_STRING};
-  }
-
   // semicolon
   if (c == ';') {
     d->next_flags = NEXT_EXPR | NEXT_EMPTY;
     return (eat_out) {1, PRSR_TYPE_SEMICOLON};
-  }
-
-  // control structures
-  if (c == '{') {
-    if (modify_stack(d, /* inc */ 1, STACK_CURLY)) {
-      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
-    }
-    d->next_flags = NEXT_EXPR | NEXT_EMPTY;
-    return (eat_out) {1, PRSR_TYPE_CONTROL};
-  } else if (c == '}') {
-    // if we're ending a control structure and this would not be an empty statement, emit an ASI
-    if (!(d->next_flags & NEXT_EMPTY)) {
-      d->next_flags = NEXT_EXPR | NEXT_EMPTY;
-      return (eat_out) {0, PRSR_TYPE_ASI};
-    }
-    if (modify_stack(d, /* dec */ 0, STACK_CURLY)) {
-      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
-    }
-    // if we expected a statement here, clear it
-    if (d->stack[d->depth] & STACK_STATEMENT) {
-      d->stack[d->depth] &= ~STACK_STATEMENT;
-      d->next_flags = 0;  // function/class statement, not a normal hoist (or if/while/etc)
-    } else {
-      d->next_flags = NEXT_EXPR | NEXT_EMPTY;  // hoisted, so following is empty
-    }
-    return (eat_out) {1, PRSR_TYPE_CONTROL};
   }
 
   // array notation
@@ -291,64 +245,11 @@ eat_out eat_raw_token(def *d) {
     return (eat_out) {1, type};
   }
 
-  // this must be a regexp
-  if ((d->next_flags & NEXT_EXPR) && c == '/') {
-    int is_charexpr = 0;
-    int len = 1;
-
-    c = next;
-    do {
-      if (c == '[') {
-        is_charexpr = 1;
-      } else if (c == ']') {
-        is_charexpr = 0;
-      } else if (c == '\\') {
-        c = peek_char(d, ++len);
-      } else if (!is_charexpr && c == '/') {
-        c = peek_char(d, ++len);
-        break;
-      }
-      if (c == '\n') {
-        ++d->line_no;  // TODO: should never happen, invalid
-      }
-      c = peek_char(d, ++len);
-    } while (c);
-
-    // match trailing flags
-    while (isalnum(c)) {
-      c = peek_char(d, ++len);
-    }
-
-    d->next_flags = 0;
-    return (eat_out) {len, PRSR_TYPE_REGEXP};
-  }
-
-  // number: "0", ".01", "0x100"
-  if (isnum(c) || (c == '.' && isnum(next))) {
-    int len = 1;
-    c = next;
-    for (;;) {
-      if (!(isalnum(c) || c == '.')) {  // letters, dots, etc- misuse is invalid, so eat anyway
-        break;
-      }
-      c = peek_char(d, ++len);
-    }
-    d->next_flags = 0;
-    return (eat_out) {len, PRSR_TYPE_NUMBER};
-  }
-
-  // dot notation (after number)
-  if (c == '.') {
-    if (next == '.' && peek_char(d, 2) == '.') {
-      d->next_flags = NEXT_EXPR;
-      return (eat_out) {3, PRSR_TYPE_SPREAD};  // found '...' operator
-    }
-    d->next_flags = NEXT_ID;
-    return (eat_out) {1, PRSR_TYPE_DOT};  // it's valid to say e.g., "foo . bar", so separate token
-  }
-
   // ops: i.e., anything made up of =<& etc
   do {
+    if (c == '/' && (d->next_flags & NEXT_EXPR)) {
+      break;
+    }
     const char start = c;
     int len = 0;
     int allowed;  // how many ops of the same type we can safely consume
@@ -410,6 +311,115 @@ eat_out eat_raw_token(def *d) {
     return (eat_out) {len, type};
   } while (0);
 
+  // dot notation that is NOT a number
+  if (c == '.' && !isnum(next)) {
+    if (next == '.' && peek_char(d, 2) == '.') {
+      d->next_flags = NEXT_EXPR;
+      return (eat_out) {3, PRSR_TYPE_SPREAD};  // found '...' operator
+    }
+    d->next_flags = NEXT_ID | NEXT_EXPR;  // nb. this allows "./foo/", but invalid anyway
+    return (eat_out) {1, PRSR_TYPE_DOT};  // it's valid to say e.g., "foo . bar", so separate token
+  }
+
+  // nb. from here down, these are all statements that cause ASI
+  // if we don't expect an expr, but there was a newline
+  if ((d->next_flags & NEXT_NEWLINE) && !(d->next_flags & NEXT_EXPR) && !(d->next_flags & NEXT_EMPTY)) {
+    d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+    return (eat_out) {0, PRSR_TYPE_ASI};
+  }
+
+  // strings
+  if (c == '\'' || c == '"' || c == '`') {
+    char start = c;
+    int len = 0;
+    while ((c = peek_char(d, ++len))) {
+      // TODO: strchr for final, and check
+      if (c == start) {
+        ++len;
+        break;
+      } else if (c == '\\') {
+        c = peek_char(d, ++len);
+      }
+      if (c == '\n') {
+        ++d->line_no;  // look for \n
+      }
+    }
+    d->next_flags = 0;
+    return (eat_out) {len, PRSR_TYPE_STRING};
+  }
+
+  // control structures
+  if (c == '{') {
+    if (modify_stack(d, /* inc */ 1, STACK_CURLY)) {
+      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
+    }
+    d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+    return (eat_out) {1, PRSR_TYPE_CONTROL};
+  } else if (c == '}') {
+    // if we're ending a control structure and this would not be an empty statement, emit an ASI
+    if (!(d->next_flags & NEXT_EMPTY)) {
+      d->next_flags = NEXT_EXPR | NEXT_EMPTY;
+      return (eat_out) {0, PRSR_TYPE_ASI};
+    }
+    if (modify_stack(d, /* dec */ 0, STACK_CURLY)) {
+      return (eat_out) {-1, PRSR_TYPE_UNEXPECTED};
+    }
+    // if we expected a statement here, clear it
+    if (d->stack[d->depth] & STACK_STATEMENT) {
+      d->stack[d->depth] &= ~STACK_STATEMENT;
+      d->next_flags = 0;  // function/class statement, not a normal hoist (or if/while/etc)
+    } else {
+      d->next_flags = NEXT_EXPR | NEXT_EMPTY;  // hoisted, so following is empty
+    }
+    return (eat_out) {1, PRSR_TYPE_CONTROL};
+  }
+
+  // this must be a regexp
+  if (c == '/') {
+    int is_charexpr = 0;
+    int len = 1;
+
+    c = next;
+    do {
+      if (c == '[') {
+        is_charexpr = 1;
+      } else if (c == ']') {
+        is_charexpr = 0;
+      } else if (c == '\\') {
+        c = peek_char(d, ++len);
+      } else if (!is_charexpr && c == '/') {
+        c = peek_char(d, ++len);
+        break;
+      }
+      if (c == '\n') {
+        ++d->line_no;  // TODO: should never happen, invalid
+      }
+      c = peek_char(d, ++len);
+    } while (c);
+
+    // match trailing flags
+    while (isalnum(c)) {
+      c = peek_char(d, ++len);
+    }
+
+    d->next_flags = 0;
+    return (eat_out) {len, PRSR_TYPE_REGEXP};
+  }
+
+  // number: "0", ".01", "0x100"
+  if (isnum(c) || (c == '.' && isnum(next))) {
+    int len = 1;
+    c = next;
+    for (;;) {
+      if (!(isalnum(c) || c == '.')) {  // letters, dots, etc- misuse is invalid, so eat anyway
+        break;
+      }
+      c = peek_char(d, ++len);
+    }
+    d->next_flags = 0;
+    return (eat_out) {len, PRSR_TYPE_NUMBER};
+  }
+
   // keywords or vars
   do {
     int len = 0;
@@ -437,13 +447,7 @@ eat_out eat_raw_token(def *d) {
 
     char *s = d->buf + d->curr;
 
-    // if we don't expect an expr, but there was a newline
-    if ((d->next_flags & NEXT_NEWLINE) && !(d->next_flags & NEXT_EXPR) && !(d->next_flags & NEXT_EMPTY)) {
-      // FIXME: this goes in a few places
-      d->next_flags = NEXT_EXPR | NEXT_EMPTY;
-      return (eat_out) {0, PRSR_TYPE_ASI};
-    }
-
+    // check for do/while combo, reset if it's missing
     if (is_stack_set(d, STACK_DO_PARENS)) {
       if (len == 5 && !memcmp(s, "while", 5)) {
         // this is fine
