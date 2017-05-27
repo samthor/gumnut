@@ -14,20 +14,6 @@
 #define FLAG__AFTER_OP    16
 #define FLAG__EXPECT_ID   32
 
-#define _STACK_SIZE 224
-
-typedef struct {
-  char *buf;
-  int curr;
-  int len;
-  int line_no;
-
-  // parsing state
-  uint8_t flags;
-  uint8_t depth;
-  uint8_t stack[_STACK_SIZE];
-} tokendef;
-
 typedef struct {
   int len;
   int type;
@@ -41,9 +27,9 @@ char peek_char(tokendef *d, int len) {
   return 0;
 }
 
-inline int modify_stack(tokendef *d, int inc, int type) {
+int modify_stack(tokendef *d, int inc, int type) {
   if (inc) {
-    if (d->depth == _STACK_SIZE - 1) {
+    if (d->depth == _TOKEN_STACK_SIZE - 1) {
       return -1;
     }
     ++d->depth;
@@ -330,6 +316,29 @@ eat_out next_token(tokendef *d) {
   return (eat_out) {0, -1};
 }
 
+int prsr_next_token(tokendef *d, token *out) {
+  out->p = NULL;
+  out->whitespace_after = 0;
+  out->line_no = d->line_no;
+
+  eat_out eo = next_token(d);  // after d->line_no, as this might increase it
+  out->len = eo.len;
+  out->type = eo.type;
+
+  if (out->type <= 0 || out->len < 0) {
+    if (d->curr < d->len) {
+      return d->curr;
+    }
+    return -1;
+  }
+
+  out->p = d->buf + d->curr;
+  d->curr += out->len;
+  out->whitespace_after = isspace(d->buf[d->curr]);  // might hit '\0', is fine
+
+  return 0;
+}
+
 int prsr_token(char *buf, int (*fp)(token *)) {
   tokendef d;
   memset(&d, 0, sizeof(d));
@@ -337,29 +346,10 @@ int prsr_token(char *buf, int (*fp)(token *)) {
   d.len = strlen(buf);
   d.line_no = 1;
 
-  for (;;) {
-    token out;
-    out.p = NULL;
-    out.whitespace_after = 0;
-    out.line_no = d.line_no;
-
-    eat_out eo = next_token(&d);  // after d->line_no, as this might increase it
-    out.len = eo.len;
-    out.type = eo.type;
-
-    if (out.type <= 0 || out.len < 0) {
-      if (d.curr < d.len) {
-        return d.curr;
-      }
-      break;
-    }
-
-    out.p = d.buf + d.curr;
-    out.whitespace_after = isspace(d.buf[d.curr + out.len]);  // might hit '\0', is fine
-    d.curr += out.len;
-
+  token out;
+  int ret;
+  while (!(ret = prsr_next_token(&d, &out))) {
     fp(&out);
   }
-
-  return 0;
+  return ret;
 }
