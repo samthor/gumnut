@@ -6,8 +6,6 @@ typedef struct {
   int curr;
   int len;
   int line_no;
-
-  // parsing state
   uint8_t flags;
   uint8_t depth;
   uint8_t stack[_TOKEN_STACK_SIZE];
@@ -21,7 +19,6 @@ typedef struct {
   int line_no;
 } token;
 
-int prsr_token(char *, int (*fp)(token *));
 int prsr_next_token(tokendef *, token *);
 
 // empty: will not containn text
