@@ -9,6 +9,7 @@
 #define STACK__PAREN      2  // is ()s
 #define STACK__TYPEMASK   3  // mask for types
 #define STACK__STATEMENT  4  // the next {} under us is a statement (e.g., var x = class{};)
+#define STACK__CONTROL    8  // the next () under is a control (e.g., if (...))
 
 #define FLAG__SLASH_IS_OP 8
 #define FLAG__AFTER_OP    16
@@ -113,18 +114,16 @@ eat_out next_token(tokendef *d) {
     _punct('?', TOKEN_TERNARY);
 #undef _punct
 
-#define _op(_letter, _inc, _stack, _type) case _letter: \
-    if (modify_stack(d, _inc, _stack)) { \
+#define _open_op(_letter, _stack, _type) case _letter: \
+    if (modify_stack(d, 1, _stack)) { \
       return (eat_out) {-1, -1}; \
     } \
     return (eat_out) {1, _type}
 
-    _op('[', 1, STACK__ARRAY, TOKEN_ARRAY);
-    _op(']', 0, STACK__ARRAY, TOKEN_ARRAY);
-    _op('(', 1, STACK__PAREN, TOKEN_PAREN);
-    _op(')', 0, STACK__PAREN, TOKEN_PAREN);
-    _op('{', 1, STACK__BRACE, TOKEN_BRACE);
-#undef _op
+    _open_op('{', STACK__BRACE, TOKEN_BRACE);
+    _open_op('[', STACK__ARRAY, TOKEN_ARRAY);
+    _open_op('(', STACK__PAREN, TOKEN_PAREN);
+#undef _open_op
 
     case '}':
       if (modify_stack(d, 0, STACK__BRACE)) {
@@ -138,6 +137,25 @@ eat_out next_token(tokendef *d) {
       }
 
       return (eat_out) {1, TOKEN_BRACE};
+
+    case ']':
+      if (modify_stack(d, 0, STACK__ARRAY)) {
+        return (eat_out) {-1, -1};
+      }
+      d->flags |= FLAG__SLASH_IS_OP;
+      return (eat_out) {1, TOKEN_ARRAY};
+
+    case ')':
+      if (modify_stack(d, 0, STACK__PAREN)) {
+        return (eat_out) {-1, -1};
+      }
+
+      // if they were regular parens, slash is an op (the alternative is if() ...)
+      if (!(d->stack[d->depth] & STACK__CONTROL)) {
+        d->flags |= FLAG__SLASH_IS_OP;
+      }
+
+      return (eat_out) {1, TOKEN_PAREN};
   }
 
   // ops: i.e., anything made up of =<& etc
@@ -303,6 +321,9 @@ eat_out next_token(tokendef *d) {
       if (candidate && is_hoist_keyword(s, len)) {
         // got hoist keyword (function, class) and inside ([ or after op: next {} is a statement
         d->stack[d->depth] |= STACK__STATEMENT;
+      } else if (!(d->stack[d->depth] & STACK__TYPEMASK) && is_control_keyword(s, len)) {
+        // got an if/for/while etc, next ()'s are control block
+        d->stack[d->depth] |= STACK__CONTROL;
       }
       return (eat_out) {len, TOKEN_KEYWORD};
     }

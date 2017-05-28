@@ -15,6 +15,13 @@ int prsr_token(char *buf, int (*fp)(token *)) {
   int ret;
   while (!(ret = prsr_next_token(&d, &out))) {
 
+    switch (out.type) {
+    case TOKEN_KEYWORD:
+      if (is_asi_keyword(out.p, out.len)) {
+        printf("got ASI keyword, blah\n");
+      }
+      break;
+    }
 
     fp(&out);
   }

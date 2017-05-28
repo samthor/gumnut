@@ -3,6 +3,9 @@
 #include <string.h>
 #include "token.h"
 
+// FIXME: from newparser.c
+int prsr_token(char *buf, int (*fp)(token *));
+
 // reads stdin into buf, reallocating as nessecary. returns strlen(buf) or < 0 for error.
 int read_stdin(char **buf) {
   int pos = 0;
