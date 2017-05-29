@@ -4,16 +4,20 @@
 #include "token.h"
 #include "utils.h"
 
-#define STACK__BRACE      0  // is {}s
-#define STACK__ARRAY      1  // is []s
-#define STACK__PAREN      2  // is ()s
-#define STACK__TYPEMASK   3  // mask for types
-#define STACK__STATEMENT  4  // the next {} under results in a statement (e.g., var x = class{};)
-#define STACK__CONTROL    8  // the next () under is a control (e.g., if (...))
+#define STACK__BRACE          0   // is {}s
+#define STACK__ARRAY          1   // is []s
+#define STACK__PAREN          2   // is ()s
+#define STACK__TYPEMASK       3   // mask for types
+#define STACK__OBJECT         4   // we are an object literal-ish
+#define STACK__OBJECT_VALUE   8   // between : and ,
+#define STACK__NEXT_STATEMENT 16  // the next {} under returns a statement (e.g., var x = class{};)
+#define STACK__NEXT_OBJECT    32  // the next {} is unambiguously an object literal-ish
+#define STACK__NEXT_CONTROL   64  // the next () under is a control (e.g., if (...))
 
-#define FLAG__SLASH_IS_OP 16
-#define FLAG__AFTER_OP    32
-#define FLAG__EXPECT_ID   64
+#define FLAG__SLASH_IS_OP    1
+#define FLAG__AFTER_OP       2
+#define FLAG__EXPECT_ID      4
+#define FLAG__EXPECT_LITERAL 8
 
 typedef struct {
   int len;
@@ -105,25 +109,50 @@ eat_out next_token(tokendef *d) {
   int flags = d->flags;
   d->flags = 0;
 
-  // various simple punctuation
+  // various simple punctuation and all remaining brackets
   switch (c) {
 #define _punct(_letter, _type) case _letter: return (eat_out) {1, _type};
     _punct(';', TOKEN_SEMICOLON);
-    _punct(',', TOKEN_ELISON);
-    _punct(':', TOKEN_COLON);
     _punct('?', TOKEN_TERNARY);
 #undef _punct
 
-#define _open_op(_letter, _stack, _type) case _letter: \
-    if (modify_stack(d, 1, _stack)) { \
-      return (eat_out) {-1, -1}; \
-    } \
-    return (eat_out) {1, _type}
+    case ':':
+      if (d->stack[d->depth] & STACK__OBJECT) {
+        d->stack[d->depth] |= STACK__OBJECT_VALUE;
+      }
+      return (eat_out) {1, TOKEN_COLON};
 
-    _open_op('{', STACK__BRACE, TOKEN_BRACE);
-    _open_op('[', STACK__ARRAY, TOKEN_ARRAY);
-    _open_op('(', STACK__PAREN, TOKEN_PAREN);
-#undef _open_op
+    case ',':
+      d->stack[d->depth] &= ~STACK__OBJECT_VALUE;
+      return (eat_out) {1, TOKEN_COLON};
+
+    case '(':
+      if (modify_stack(d, 1, STACK__PAREN)) {
+        return (eat_out) {-1, -1};
+      }
+      return (eat_out) {1, TOKEN_PAREN};
+
+    case '[':
+      if (modify_stack(d, 1, STACK__ARRAY)) {
+        return (eat_out) {-1, -1};
+      }
+      return (eat_out) {1, TOKEN_ARRAY};
+
+    case '{':
+      if (modify_stack(d, 1, STACK__BRACE)) {
+        return (eat_out) {-1, -1};
+      }
+
+      // nb. there are some nuanced, orphaned {}'s that can be interpreted as either a dict or a
+      // block. e.g.-
+      //   { if (x) { } }
+      // could be code with if, or a method if. but it's rare so assume 'orphaned' is block.
+      int prev = d->stack[d->depth - 1];
+      if ((flags & FLAG__AFTER_OP) || (prev & STACK__TYPEMASK) || (prev & STACK__NEXT_OBJECT)) {
+        d->stack[d->depth] |= STACK__OBJECT;
+      }
+
+      return (eat_out) {1, TOKEN_BRACE};
 
     case '}':
       if (modify_stack(d, 0, STACK__BRACE)) {
@@ -131,10 +160,10 @@ eat_out next_token(tokendef *d) {
       }
 
       // if that was the mandatory statement after a class/function, slash will be an op
-      if (d->stack[d->depth] & STACK__STATEMENT) {
-        d->stack[d->depth] &= STACK__TYPEMASK;
+      if (d->stack[d->depth] & STACK__NEXT_STATEMENT) {
         d->flags |= FLAG__SLASH_IS_OP;
       }
+      d->stack[d->depth] &= STACK__TYPEMASK;
 
       return (eat_out) {1, TOKEN_BRACE};
 
@@ -151,7 +180,7 @@ eat_out next_token(tokendef *d) {
       }
 
       // if they were regular parens, slash is an op (the alternative is if() ...)
-      if (!(d->stack[d->depth] & STACK__CONTROL)) {
+      if (!(d->stack[d->depth] & STACK__NEXT_CONTROL)) {
         d->flags |= FLAG__SLASH_IS_OP;
       }
 
@@ -317,17 +346,42 @@ eat_out next_token(tokendef *d) {
     if (!len) {
       break;
     }
+    char *s = d->buf + d->curr;
+
+    // if we expect a literal (e.g. class Foo, function Bar), short-circuit
+    if (flags & FLAG__EXPECT_LITERAL) {
+      return (eat_out) {len, TOKEN_LITERAL};
+    }
+
+    // special-case literal-ish, when on the left of :
+    if ((d->stack[d->depth] & STACK__OBJECT) && !(d->stack[d->depth] & STACK__OBJECT_VALUE)) {
+      if (len == 3 && (c == 'g' || c == 's') && !memcmp(s+1, "et", 2)) {
+        // matched 'get' or 'set', return as keyword
+        d->flags |= FLAG__EXPECT_LITERAL;
+        return (eat_out) {len, TOKEN_KEYWORD};
+      }
+      // otherwise, this is a literal name
+      return (eat_out) {len, TOKEN_LITERAL};
+    }
 
     // if we're not expecting a symbol, then look for keywords
-    char *s = d->buf + d->curr;
     if (!(flags & FLAG__EXPECT_ID) && is_keyword(s, len)) {
+      int hoist = is_hoist_keyword(s, len);
+      if (hoist) {
+        // look for function Foo, where Foo is a literal
+        d->flags |= FLAG__EXPECT_LITERAL;
+      }
       int candidate = (d->stack[d->depth] & STACK__TYPEMASK) || (flags & FLAG__AFTER_OP);
-      if (candidate && is_hoist_keyword(s, len)) {
+      if (candidate && hoist) {
         // got hoist keyword (function, class) and inside ([ or after op: next {} is a statement
-        d->stack[d->depth] |= STACK__STATEMENT;
+        d->stack[d->depth] |= STACK__NEXT_STATEMENT;
       } else if (!(d->stack[d->depth] & STACK__TYPEMASK) && is_control_keyword(s, len)) {
-        // got an if/for/while etc, next ()'s are control block
-        d->stack[d->depth] |= STACK__CONTROL;
+        // got an if/for/while etc, next ()'s are control
+        d->stack[d->depth] |= STACK__NEXT_CONTROL;
+      }
+      if (hoist && len == 5) {
+        // the class {} is an object literal-ish
+        d->stack[d->depth] |= STACK__NEXT_OBJECT;
       }
       return (eat_out) {len, TOKEN_KEYWORD};
     }
