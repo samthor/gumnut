@@ -187,7 +187,7 @@ eat_out next_token(tokendef *d) {
       return (eat_out) {1, TOKEN_PAREN};
   }
 
-  // ops: i.e., anything made up of =<& etc
+  // ops: i.e., anything made up of =<& etc, plus 'in' and 'instanceof'
   do {
     if (c == '/' && !(flags & FLAG__SLASH_IS_OP)) {
       break;
