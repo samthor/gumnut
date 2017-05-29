@@ -46,3 +46,9 @@ var \u{61};
 var obj1 = {__proto__};
 
 var fn = x => x+1;
+
+{
+  if (1) {
+    console.info('test');
+  }
+}
