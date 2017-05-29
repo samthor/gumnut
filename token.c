@@ -314,6 +314,10 @@ eat_out next_token(tokendef *d) {
       c = peek_char(d, ++len);
     } while (c);
 
+    if (!len) {
+      break;
+    }
+
     // if we're not expecting a symbol, then look for keywords
     char *s = d->buf + d->curr;
     if (!(flags & FLAG__EXPECT_ID) && is_keyword(s, len)) {
