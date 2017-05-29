@@ -32,6 +32,8 @@ int read_stdin(char **buf) {
 int render(token *out) {
   if (out->len == 1 && *out->p == '\n') {
     // don't display, javascript is dumb
+  } else if (out->type == TOKEN_ASI) {
+    printf(";%4d: \n", out->line_no);
   } else {
     printf("%c%4d: %.*s\n", out->whitespace_after ? '.' : ' ', out->line_no, out->len, out->p);
   }
