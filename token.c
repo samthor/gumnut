@@ -8,12 +8,12 @@
 #define STACK__ARRAY      1  // is []s
 #define STACK__PAREN      2  // is ()s
 #define STACK__TYPEMASK   3  // mask for types
-#define STACK__STATEMENT  4  // the next {} under us is a statement (e.g., var x = class{};)
+#define STACK__STATEMENT  4  // the next {} under results in a statement (e.g., var x = class{};)
 #define STACK__CONTROL    8  // the next () under is a control (e.g., if (...))
 
-#define FLAG__SLASH_IS_OP 8
-#define FLAG__AFTER_OP    16
-#define FLAG__EXPECT_ID   32
+#define FLAG__SLASH_IS_OP 16
+#define FLAG__AFTER_OP    32
+#define FLAG__EXPECT_ID   64
 
 typedef struct {
   int len;
