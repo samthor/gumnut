@@ -63,3 +63,7 @@ int is_decl_keyword(char *s, int len) {
   return (len == 3 && (!memcmp(s, "var", 3) || !memcmp(s, "let", 3))) ||
       (len == 5 && !memcmp(s, "const", 5));
 }
+
+int is_label_keyword(char *s, int len) {
+  return (len == 5 && !memcmp(s, "break", 5)) || (len == 8 && !memcmp(s, "continue", 8));
+}

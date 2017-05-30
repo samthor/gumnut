@@ -7,16 +7,16 @@
 #define STACK__BRACE          0   // is {}s
 #define STACK__ARRAY          1   // is []s
 #define STACK__PAREN          2   // is ()s
-#define STACK__TYPEMASK       3   // mask for types
 #define STACK__OBJECT         4   // we are an object literal-ish
-#define STACK__OBJECT_VALUE   8   // between : and ,
-#define STACK__NEXT_STATEMENT 16  // the next {} under returns a statement (e.g., var x = class{};)
-#define STACK__NEXT_OBJECT    32  // the next {} is unambiguously an object literal-ish
-#define STACK__NEXT_CONTROL   64  // the next () under is a control (e.g., if (...))
+#define STACK__TYPEMASK       6   // mask for types
+#define STACK__NEXT_STATEMENT 8   // the next {} under returns a statement (e.g., var x = class{};)
+#define STACK__NEXT_OBJECT    16  // the next {} is unambiguously an object literal-ish
+#define STACK__NEXT_CONTROL   32  // the next () under is a control (e.g., if (...))
 
 #define FLAG__SLASH_IS_OP    1
 #define FLAG__AFTER_OP       2
 #define FLAG__EXPECT_ID      4
+#define FLAG__EXPECT_LABEL   8
 
 typedef struct {
   int len;
@@ -48,6 +48,21 @@ int modify_stack(tokendef *d, int inc, int type) {
     return prev & STACK__TYPEMASK;
   }
   return 0;
+}
+
+eat_out next_token(tokendef *d);
+
+int next_real_type(tokendef *d) {
+  for (;;) {
+    eat_out eo = next_token(d);
+    if (eo.type <= 0 || eo.len < 0) {
+      return -1;
+    } else if (eo.type == TOKEN_COMMENT || eo.type == TOKEN_NEWLINE) {
+      d->curr += eo.len;
+      continue;
+    }
+    return eo.type;
+  }
 }
 
 eat_out next_token(tokendef *d) {
@@ -110,19 +125,18 @@ eat_out next_token(tokendef *d) {
 
   // various simple punctuation and all remaining brackets
   switch (c) {
-#define _punct(_letter, _type) case _letter: return (eat_out) {1, _type};
-    _punct(';', TOKEN_SEMICOLON);
-    _punct('?', TOKEN_TERNARY);
-#undef _punct
+    case ';':
+      return (eat_out) {1, TOKEN_SEMICOLON};
+
+    case '?':
+      d->flags |= FLAG__AFTER_OP;
+      return (eat_out) {1, TOKEN_TERNARY};
 
     case ':':
-      if (d->stack[d->depth] & STACK__OBJECT) {
-        d->stack[d->depth] |= STACK__OBJECT_VALUE;
-      }
+      d->flags |= FLAG__AFTER_OP;
       return (eat_out) {1, TOKEN_COLON};
 
     case ',':
-      d->stack[d->depth] &= ~STACK__OBJECT_VALUE;
       return (eat_out) {1, TOKEN_COLON};
 
     case '(':
@@ -147,14 +161,18 @@ eat_out next_token(tokendef *d) {
       //   { if (x) { } }
       // could be code with if, or a method if. but it's rare so assume 'orphaned' is block.
       int prev = d->stack[d->depth - 1];
-      if ((flags & FLAG__AFTER_OP) || (prev & STACK__TYPEMASK) || (prev & STACK__NEXT_OBJECT)) {
+      if ((prev & STACK__OBJECT) && !(flags & FLAG__AFTER_OP)) {
+        // inside an object, but not after an operation. this is probably foo() {}, i.e. a block
+        // (if it's not, it's invalid anyway)
+      } else if ((flags & FLAG__AFTER_OP) || (prev & STACK__TYPEMASK) || (prev & STACK__NEXT_OBJECT)) {
         d->stack[d->depth] |= STACK__OBJECT;
       }
 
       return (eat_out) {1, TOKEN_BRACE};
 
     case '}':
-      if (modify_stack(d, 0, STACK__BRACE)) {
+      // it's not clear whether we were an object, so allow it if we were
+      if (modify_stack(d, 0, STACK__BRACE | (d->stack[d->depth] & STACK__OBJECT))) {
         return (eat_out) {-1, -1};
       }
 
@@ -359,9 +377,14 @@ eat_out next_token(tokendef *d) {
       return (eat_out) {len, TOKEN_SYMBOL};
     }
 
+    // if we expect a label, short-circuit
+    if (flags & FLAG__EXPECT_LABEL) {
+      return (eat_out) {len, TOKEN_LABEL};
+    }
+
     // special-case literal-ish, when on the left of :
-    if ((d->stack[d->depth] & STACK__OBJECT) && !(d->stack[d->depth] & STACK__OBJECT_VALUE)) {
-      if (len == 3 && (c == 'g' || c == 's') && !memcmp(s+1, "et", 2)) {
+    if ((d->stack[d->depth] & STACK__OBJECT) && !(flags & FLAG__AFTER_OP)) {
+      if (len == 3 && (!memcmp(s, "get", 3) || !memcmp(s, "set", 3))) {
         // matched 'get' or 'set', return as keyword
         d->flags |= FLAG__EXPECT_ID;
         return (eat_out) {len, TOKEN_KEYWORD};
@@ -370,8 +393,32 @@ eat_out next_token(tokendef *d) {
       return (eat_out) {len, TOKEN_SYMBOL};
     }
 
+    int expr_keyword = is_expr_keyword(s, len);
+
+    // this is ambiguous: could be a label, symbol or var
+    if (!(flags & FLAG__AFTER_OP) && !(d->stack[d->depth] & STACK__OBJECT)) {
+      tokendef copy = *d;
+      copy.curr += len;
+      if (!expr_keyword) {
+        // if this is await/yield etc, then slash is regxp: otherwise, assume op
+        copy.flags |= FLAG__SLASH_IS_OP;
+      }
+
+      int type = next_real_type(&copy);
+      if (type == TOKEN_COLON) {
+        return (eat_out) {len, TOKEN_LABEL};
+      } else if (type == TOKEN_STRING) {
+        // found a backtick after a token: if we're await/yield etc, this is a keyword
+        // FIXME: this should only be for backticks
+        return (eat_out) {len, expr_keyword ? TOKEN_KEYWORD : TOKEN_SYMBOL};
+      } else if (type == TOKEN_OP) {
+        d->flags |= FLAG__SLASH_IS_OP;
+        return (eat_out) {len, TOKEN_SYMBOL};
+      }
+    }
+
     // look for keywords which start expressions
-    if (is_expr_keyword(s, len)) {
+    if (expr_keyword) {
       return (eat_out) {len, TOKEN_KEYWORD};
     }
     int expr = (d->stack[d->depth] & STACK__TYPEMASK) || (flags & FLAG__AFTER_OP);
@@ -403,6 +450,10 @@ eat_out next_token(tokendef *d) {
       if (is_decl_keyword(s, len)) {
         // var/let/const must have a following ID, can't have new/await etc
         d->flags |= (FLAG__EXPECT_ID | FLAG__AFTER_OP);
+        return (eat_out) {len, TOKEN_KEYWORD};
+      }
+      if (is_label_keyword(s, len)) {
+        d->flags |= FLAG__EXPECT_LABEL;
         return (eat_out) {len, TOKEN_KEYWORD};
       }
       if (is_keyword(s, len)) {
