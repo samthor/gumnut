@@ -38,7 +38,7 @@ int is_control_keyword(char *s, int len) {
   if (len > 5 || len < 2) {
     return 0;  // no control <2 ('if' etc) or >5 ('while' etc)
   }
-  static const char v[] = " if for switch while with ";
+  static const char v[] = " catch if for switch while with ";
   return in_space_string(v, s, len);
 }
 
@@ -52,4 +52,14 @@ int is_asi_keyword(char *s, int len) {
 
 int is_hoist_keyword(char *s, int len) {
   return (len == 5 && !memcmp(s, "class", 5)) || (len == 8 && !memcmp(s, "function", 8));
+}
+
+int is_expr_keyword(char *s, int len) {
+  return (len == 5 && (!memcmp(s, "await", 5) || !memcmp(s, "yield", 5))) ||
+      (len == 3 && !memcmp(s, "new", 3));
+}
+
+int is_decl_keyword(char *s, int len) {
+  return (len == 3 && (!memcmp(s, "var", 3) || !memcmp(s, "let", 3))) ||
+      (len == 5 && !memcmp(s, "const", 5));
 }

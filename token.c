@@ -17,7 +17,6 @@
 #define FLAG__SLASH_IS_OP    1
 #define FLAG__AFTER_OP       2
 #define FLAG__EXPECT_ID      4
-#define FLAG__EXPECT_LITERAL 8
 
 typedef struct {
   int len;
@@ -240,6 +239,12 @@ eat_out next_token(tokendef *d) {
         ++len;
       }
     }
+
+    if (!(flags & FLAG__SLASH_IS_OP)) {
+      // if we get an unexpected op, but expect an ID, pass it forward: this allows "function*foo"
+      d->flags |= (flags & FLAG__EXPECT_ID);
+    }
+
     return (eat_out) {len, TOKEN_OP};
   } while (0);
 
@@ -348,45 +353,66 @@ eat_out next_token(tokendef *d) {
     }
     char *s = d->buf + d->curr;
 
-    // if we expect a literal (e.g. class Foo, function Bar), short-circuit
-    if (flags & FLAG__EXPECT_LITERAL) {
-      return (eat_out) {len, TOKEN_LITERAL};
+    // if we expect a literal (e.g. class Foo, function Bar) or id (foo.var), short-circuit
+    if (flags & FLAG__EXPECT_ID) {
+      d->flags |= FLAG__SLASH_IS_OP;
+      return (eat_out) {len, TOKEN_SYMBOL};
     }
 
     // special-case literal-ish, when on the left of :
     if ((d->stack[d->depth] & STACK__OBJECT) && !(d->stack[d->depth] & STACK__OBJECT_VALUE)) {
       if (len == 3 && (c == 'g' || c == 's') && !memcmp(s+1, "et", 2)) {
         // matched 'get' or 'set', return as keyword
-        d->flags |= FLAG__EXPECT_LITERAL;
+        d->flags |= FLAG__EXPECT_ID;
         return (eat_out) {len, TOKEN_KEYWORD};
       }
       // otherwise, this is a literal name
-      return (eat_out) {len, TOKEN_LITERAL};
+      return (eat_out) {len, TOKEN_SYMBOL};
     }
 
-    // if we're not expecting a symbol, then look for keywords
-    if (!(flags & FLAG__EXPECT_ID) && is_keyword(s, len)) {
-      int hoist = is_hoist_keyword(s, len);
-      if (hoist) {
-        // look for function Foo, where Foo is a literal
-        d->flags |= FLAG__EXPECT_LITERAL;
-      }
-      int candidate = (d->stack[d->depth] & STACK__TYPEMASK) || (flags & FLAG__AFTER_OP);
-      if (candidate && hoist) {
-        // got hoist keyword (function, class) and inside ([ or after op: next {} is a statement
-        d->stack[d->depth] |= STACK__NEXT_STATEMENT;
-      } else if (!(d->stack[d->depth] & STACK__TYPEMASK) && is_control_keyword(s, len)) {
-        // got an if/for/while etc, next ()'s are control
-        d->stack[d->depth] |= STACK__NEXT_CONTROL;
-      }
-      if (hoist && len == 5) {
+    // look for keywords which start expressions
+    if (is_expr_keyword(s, len)) {
+      return (eat_out) {len, TOKEN_KEYWORD};
+    }
+    int expr = (d->stack[d->depth] & STACK__TYPEMASK) || (flags & FLAG__AFTER_OP);
+
+    // matched hoistable class or function
+    if (is_hoist_keyword(s, len)) {
+      // look for function Foo, where Foo is a literal
+      d->flags |= FLAG__EXPECT_ID;
+
+      if (len == 5) {
         // the class {} is an object literal-ish
         d->stack[d->depth] |= STACK__NEXT_OBJECT;
       }
+      if (expr) {
+        // next {} builds a statement
+        d->stack[d->depth] |= STACK__NEXT_STATEMENT;
+      }
+
       return (eat_out) {len, TOKEN_KEYWORD};
     }
 
-    // otherwise this is a symbol
+    // at this point, we must be an expression
+    if (!expr) {
+      if (is_control_keyword(s, len)) {
+        // got an if/for/while etc, next ()'s are control
+        d->stack[d->depth] |= STACK__NEXT_CONTROL;
+        return (eat_out) {len, TOKEN_KEYWORD};
+      }
+      if (is_decl_keyword(s, len)) {
+        // var/let/const must have a following ID, can't have new/await etc
+        d->flags |= (FLAG__EXPECT_ID | FLAG__AFTER_OP);
+        return (eat_out) {len, TOKEN_KEYWORD};
+      }
+      if (is_keyword(s, len)) {
+        // not explicitly an expression, match keywords
+        d->flags |= FLAG__AFTER_OP;
+        return (eat_out) {len, TOKEN_KEYWORD};
+      }
+    }
+
+    // nothing matched- must be a symbol
     d->flags |= FLAG__SLASH_IS_OP;
     return (eat_out) {len, TOKEN_SYMBOL};
   } while (0);
