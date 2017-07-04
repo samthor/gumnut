@@ -31,6 +31,8 @@ char peek_char(tokendef *d, int len) {
   return 0;
 }
 
+// increment or decrement the stack with a specific type: returns zero on success, -ve for error,
+// +ve for the type expected in a decrement
 int modify_stack(tokendef *d, int inc, int type) {
   if (inc) {
     if (d->depth == _TOKEN_STACK_SIZE - 1) {
@@ -52,6 +54,8 @@ int modify_stack(tokendef *d, int inc, int type) {
 
 eat_out next_token(tokendef *d);
 
+// find the next token type that isn't a comment, whitespace or newline: moves the passed tokendef
+// forward, so pass a copy
 int next_real_type(tokendef *d) {
   for (;;) {
     eat_out eo = next_token(d);
