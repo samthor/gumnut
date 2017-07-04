@@ -35,7 +35,7 @@ int render(token *out) {
   } else if (out->type == TOKEN_ASI) {
     printf(";%4d: \n", out->line_no);
   } else {
-    printf("%c%4d: %.*s\n", out->whitespace_after ? '.' : ' ', out->line_no, out->len, out->p);
+    printf("%c%4d: %.*s #%d\n", out->whitespace_after ? '.' : ' ', out->line_no, out->len, out->p, out->type);
   }
   return 0;
 }
