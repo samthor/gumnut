@@ -25,10 +25,9 @@ const exports = ready.then(wa => wa.instance.exports);
 
 const TOKENS = {
   EOF: 0,
-  ASI: 1,
+  SEMICOLON: 1,
 
   NEWLINE: 2,
-  SEMICOLON: 3,
   SPREAD: 4,
   DOT: 5,
   OP: 6,
@@ -87,8 +86,11 @@ window.addEventListener('load', (ev) => {
       switch (token.type) {
       case TOKENS.NEWLINE:
         return;
-      case TOKENS.ASI:
-        node.textContent = ';';
+      case TOKENS.SEMICOLON:
+        if (!s) {
+          node.textContent = ';';
+          node.classList.add('_asi');
+        }
         break;
       }
 
@@ -182,7 +184,7 @@ document.addEventListener('drop', (ev) => {
     background: red;
     color: white;
   }
-  pre span.asi {
+  pre span._asi {
     background: green;
     color: white;
   }

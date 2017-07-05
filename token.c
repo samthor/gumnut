@@ -14,15 +14,15 @@
 #define STACK__NEXT_CONTROL   32  // the next () under is a control (e.g., if (...))
 #define STACK__NEXT_DO_PARENS 64  // the next () is do {} while () parens
 
-#define FLAG__SLASH_IS_OP    1   // if we see a /, it's division (not regex)
-#define FLAG__AFTER_OP       2   // we expect to see a variable next (had op or 'excepts' var)
-#define FLAG__EXPECT_ID      4   // the next symbol is a name, not a keyword (e.g., foo.return)
-#define FLAG__EXPECT_LABEL   8   // we just had a break/continue that can target a label
-#define FLAG__MUST_ASI       16  // appears after parens owned by do/while
-#define FLAG__RESTRICT       32  // just had a restricted keyword, newline generates ASI
-#define FLAG__NEWLINE        64  // just after a newline
+#define FLAG__SLASH_IS_OP    1    // if we see a /, it's division (not regex)
+#define FLAG__AFTER_OP       2    // we expect to see an expr next (had op or 'expects' it)
+#define FLAG__EXPECT_ID      4    // the next symbol is a name, not a keyword (e.g., foo.return)
+#define FLAG__EXPECT_LABEL   8    // we just had a break/continue, or we know a : is next
+#define FLAG__MUST_ASI       16   // appears after parens owned by do/while
+#define FLAG__RESTRICT       32   // just had a restricted keyword, newline generates ASI
+#define FLAG__NEWLINE        64   // just after a newline
 
-#define FLAG__MASK_BRACE_ASI (1 | 2 | 4 | 8 | 16)  // generate ASI before } in these cases
+#define FLAG__MASK_BRACE_ASI (1 | 4 | 16)  // generate ASI before } in these cases
 
 typedef struct {
   int len;
@@ -75,6 +75,12 @@ int next_real_type(tokendef *d) {
   }
 }
 
+int reset_semicolon(tokendef *d) {
+  d->flags = 0;
+  d->stack[d->depth] &= STACK__TYPEMASK;
+  return 0;
+}
+
 eat_out next_token(tokendef *d) {
   // consume whitespace (look for newline, zero char)
   char c;
@@ -84,8 +90,8 @@ eat_out next_token(tokendef *d) {
     if (c == '\n') {
       // after a restricted keyword, force ASI
       if ((d->flags & FLAG__RESTRICT)) {
-        d->flags = 0;
-        return (eat_out) {0, TOKEN_ASI};
+        reset_semicolon(d);
+        return (eat_out) {0, TOKEN_SEMICOLON};
       }
       ++d->line_no;
       d->flags |= FLAG__NEWLINE;
@@ -93,8 +99,8 @@ eat_out next_token(tokendef *d) {
     } else if (!c) {
       // ending file, at top level, and non-empty statement
       if (d->depth == 1 && (d->flags & FLAG__MASK_BRACE_ASI)) {
-        d->flags = 0;
-        return (eat_out) {0, TOKEN_ASI};
+        reset_semicolon(d);
+        return (eat_out) {0, TOKEN_SEMICOLON};
       }
       return (eat_out) {0, TOKEN_EOF};  // end of file
     } else if (!isspace(c)) {
@@ -144,9 +150,10 @@ eat_out next_token(tokendef *d) {
   int flags = d->flags;
   d->flags = 0;
 
-  // various simple punctuation and all remaining brackets
+  // various simple punctuation and non-control brackets
   switch (c) {
     case ';':
+      reset_semicolon(d);
       return (eat_out) {1, TOKEN_SEMICOLON};
 
     case '?':
@@ -154,7 +161,10 @@ eat_out next_token(tokendef *d) {
       return (eat_out) {1, TOKEN_TERNARY};
 
     case ':':
-      d->flags |= FLAG__AFTER_OP;
+      if (d->prev_type != TOKEN_LABEL) {
+        // this is actually part of a ternary, so next is expr
+        d->flags |= FLAG__AFTER_OP;
+      }
       return (eat_out) {1, TOKEN_COLON};
 
     case ',':
@@ -171,48 +181,6 @@ eat_out next_token(tokendef *d) {
         return (eat_out) {-1, -1};
       }
       return (eat_out) {1, TOKEN_ARRAY};
-
-    case '{':
-      if (modify_stack(d, 1, STACK__BRACE)) {
-        return (eat_out) {-1, -1};
-      }
-
-      // nb. there are some nuanced, orphaned {}'s that can be interpreted as either a dict or a
-      // block. e.g.-
-      //   { if (x) { } }
-      // could be code with if, or a method if. but it's rare so assume 'orphaned' is block.
-      int prev = d->stack[d->depth - 1];
-      if ((prev & STACK__OBJECT) && !(flags & FLAG__AFTER_OP)) {
-        // inside an object, but not after an operation. this is probably foo() {}, i.e. a block
-        // (if it's not, it's invalid anyway)
-      } else if ((flags & FLAG__AFTER_OP) || (prev & STACK__TYPEMASK) || (prev & STACK__NEXT_OBJECT)) {
-        d->stack[d->depth] |= STACK__OBJECT;
-      }
-
-      return (eat_out) {1, TOKEN_BRACE};
-
-    case '}':
-      // emit ASI if this ended an empty statement
-      if ((d->stack[d->depth] & STACK__TYPEMASK) == STACK__BRACE) {
-        if ((flags & FLAG__MASK_BRACE_ASI)) {
-          d->flags = 0;
-          return (eat_out) {0, TOKEN_ASI};
-        }
-      }
-
-      // it's not clear whether we were an object, so allow it if we were (STACK__BRACE == 0)
-      if (modify_stack(d, 0, STACK__BRACE | (d->stack[d->depth] & STACK__OBJECT))) {
-        return (eat_out) {-1, -1};
-      }
-
-      // if that was the mandatory statement after a class/function, slash will be an op
-      if (d->stack[d->depth] & STACK__NEXT_STATEMENT) {
-        d->flags |= FLAG__SLASH_IS_OP;
-      }
-
-      // retain NEXT_DO_PARENS (as we might be at the "} while" ... bit)
-      d->stack[d->depth] &= (STACK__TYPEMASK | STACK__NEXT_DO_PARENS);
-      return (eat_out) {1, TOKEN_BRACE};
 
     case ']':
       if (modify_stack(d, 0, STACK__ARRAY)) {
@@ -238,7 +206,7 @@ eat_out next_token(tokendef *d) {
         d->flags |= (FLAG__NEWLINE | FLAG__MUST_ASI);
       }
 
-      d->stack[d->depth] &= STACK__TYPEMASK;
+      d->stack[d->depth] &= (STACK__TYPEMASK | STACK__NEXT_STATEMENT);
       return (eat_out) {1, TOKEN_PAREN};
   }
 
@@ -283,14 +251,15 @@ eat_out next_token(tokendef *d) {
     }
 
     if (start == '=' && c == '>') {
-      // arrow function: nb. if this is after a newline, it's invalid (doesn't generate ASI)
+      // arrow function: nb. if this is after a newline, it's invalid (doesn't generate ASI), ignore
+      d->stack[d->depth] |= STACK__NEXT_STATEMENT;
       return (eat_out) {2, TOKEN_ARROW};
     } else if (c == start && strchr("+-|&", start)) {
       if (start == '-' || start == '+') {
-        // if we had a newline, and aren't in a control structure's brackets
-        if ((flags & FLAG__NEWLINE) && !(d->stack[d->depth-1] & STACK__NEXT_CONTROL)) {
-          d->flags = 0;
-          return (eat_out) {0, TOKEN_ASI};
+        // if we had a newline, not after an op, and aren't in a control structure's brackets
+        if (!(flags & FLAG__AFTER_OP) && (flags & FLAG__NEWLINE) && !(d->stack[d->depth-1] & STACK__NEXT_CONTROL)) {
+          reset_semicolon(d);
+          return (eat_out) {0, TOKEN_SEMICOLON};
         }
         // if we're a postfix, allow more ops
         if (flags & FLAG__SLASH_IS_OP) {
@@ -326,8 +295,55 @@ eat_out next_token(tokendef *d) {
   // nb. from here down, these are all statements that cause ASI
   // if we don't expect an expr, but there was a newline
   if ((flags & FLAG__NEWLINE) && (flags & FLAG__MASK_BRACE_ASI)) {
-    d->flags = 0;
-    return (eat_out) {0, TOKEN_ASI};
+    reset_semicolon(d);
+    return (eat_out) {0, TOKEN_SEMICOLON};
+  }
+
+  // control brackets (after ASI)
+  switch (c) {
+    case '{':
+      if (modify_stack(d, 1, STACK__BRACE)) {
+        return (eat_out) {-1, -1};
+      }
+
+      // nb. there are some nuanced, orphaned {}'s that can be interpreted as either a dict or a
+      // block. e.g.-
+      //   { if (x) { } }
+      // could be code with if, or a method if. but it's rare so assume 'orphaned' is block.
+      int prev = d->stack[d->depth - 1];
+      if ((prev & STACK__OBJECT) && !(flags & FLAG__AFTER_OP)) {
+        // inside an object, but not after an operation. this is probably foo() {}, i.e. a block
+        // (if it's not, it's invalid anyway)
+      } else if (d->prev_type == TOKEN_ARROW) {
+        // do nothing, this is a control block
+      } else if ((flags & FLAG__AFTER_OP) || (prev & STACK__TYPEMASK) || (prev & STACK__NEXT_OBJECT)) {
+        d->stack[d->depth] |= STACK__OBJECT;
+      }
+
+      return (eat_out) {1, TOKEN_BRACE};
+
+    case '}':
+      // emit ASI if this ended an empty statement
+      if ((d->stack[d->depth] & STACK__TYPEMASK) == STACK__BRACE) {
+        if ((flags & FLAG__MASK_BRACE_ASI)) {
+          reset_semicolon(d);
+          return (eat_out) {0, TOKEN_SEMICOLON};
+        }
+      }
+
+      // it's not clear whether we were an object, so allow it if we were (STACK__BRACE == 0)
+      if (modify_stack(d, 0, STACK__BRACE | (d->stack[d->depth] & STACK__OBJECT))) {
+        return (eat_out) {-1, -1};
+      }
+
+      // if that was the mandatory statement after a class/function, slash will be an op
+      if (d->stack[d->depth] & STACK__NEXT_STATEMENT) {
+        d->flags |= FLAG__SLASH_IS_OP;
+      }
+
+      // retain NEXT_DO_PARENS (as we might be at the "} while" ... bit)
+      d->stack[d->depth] &= (STACK__TYPEMASK | STACK__NEXT_DO_PARENS);
+      return (eat_out) {1, TOKEN_BRACE};
   }
 
   // strings
@@ -460,6 +476,7 @@ eat_out next_token(tokendef *d) {
       }
       int type = next_real_type(&copy);
       if (type == TOKEN_COLON) {
+        d->flags |= FLAG__EXPECT_LABEL;
         return (eat_out) {len, TOKEN_LABEL};
       } else if (type == TOKEN_STRING) {
         // found a backtick after a token: if we're await/yield etc, this is a keyword
@@ -562,5 +579,8 @@ int prsr_next_token(tokendef *d, token *out) {
   d->curr += out->len;
   out->whitespace_after = isspace(d->buf[d->curr]);  // might hit '\0', is fine
 
+  if (out->type != TOKEN_COMMENT && out->type != TOKEN_NEWLINE) {
+    d->prev_type = out->type;  // store interesting type
+  }
   return 0;
 }

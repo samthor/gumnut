@@ -11,6 +11,7 @@ typedef struct {
   int curr;
   int len;
   int line_no;
+  int prev_type;  // except comments and newlines
   uint8_t flags;
   uint8_t depth;  // must be >=1
   uint8_t stack[_TOKEN_STACK_SIZE];
@@ -28,11 +29,10 @@ int prsr_next_token(tokendef *, token *);
 
 // empty: will not contain text
 #define TOKEN_EOF       0
-#define TOKEN_ASI       1
 
 // fixed: will always be the same, or in the same set
+#define TOKEN_SEMICOLON 1   // might be blank for ASI
 #define TOKEN_NEWLINE   2
-#define TOKEN_SEMICOLON 3
 #define TOKEN_SPREAD    4
 #define TOKEN_DOT       5
 #define TOKEN_OP        6   // includes 'in', 'instanceof'

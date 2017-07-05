@@ -27,10 +27,11 @@ int is_keyword(char *s, int len) {
     }
   }
   // nb. does not contain 'in' or 'instanceof', as they are ops
+  // does not contain 'super', treated as symbol
   static const char v[] =
     " await break case catch class const continue debugger default delete do else enum export"
     " extends finally for function if implements import interface let new package private"
-    " protected public return static super switch throw try typeof var void while with yield ";
+    " protected public return static switch throw try typeof var void while with yield ";
   return in_space_string(v, s, len);
 }
 
