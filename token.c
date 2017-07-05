@@ -317,7 +317,11 @@ eat_out next_token(tokendef *d) {
       } else if (d->prev_type == TOKEN_ARROW) {
         // do nothing, this is a control block
       } else if ((flags & FLAG__AFTER_OP) || (prev & STACK__TYPEMASK) || (prev & STACK__NEXT_OBJECT)) {
-        d->stack[d->depth] |= STACK__OBJECT;
+        if ((prev & STACK__NEXT_STATEMENT) && !(prev & STACK__NEXT_OBJECT)) {
+          // this is a function {}, do nothing
+        } else {
+          d->stack[d->depth] |= STACK__OBJECT;
+        }
       }
 
       return (eat_out) {1, TOKEN_BRACE};
