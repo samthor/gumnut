@@ -133,11 +133,40 @@ window.addEventListener('load', (ev) => {
     let rAF;
     const dedup = () => {
       window.cancelAnimationFrame(rAF);
-      rAF = window.requestAnimationFrame(update);
+      rAF = window.requestAnimationFrame(() => {
+        let v = null;
+        if (input.value.length <= 4096) {
+          // just give up if it's too large
+          v = window.encodeURIComponent(input.value);
+        }
+        if (v) {
+          window.history.replaceState(null, null, '#' + v);
+        } else {
+          window.history.replaceState(null, null, window.location.pathname);
+        }
+        update();
+      });
     };
     input.oninput = dedup;
     dedup();
   });
+});
+
+document.addEventListener('dragover', (ev) => {
+  ev.preventDefault();
+});
+document.addEventListener('drop', (ev) => {
+  ev.preventDefault();
+  const file = ev.dataTransfer.files[0];
+
+  if (!file) { return; }
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    input.value = ev.target.result;
+    input.dispatchEvent(new CustomEvent('input'));
+  };
+  reader.readAsText(file);
 });
 
 </script>
@@ -172,9 +201,13 @@ window.addEventListener('load', (ev) => {
 </head>
 <body>
 
-<textarea id="input" rows="20" cols="100">var x = 1;
-console.info(x);
-++x;</textarea>
+<textarea id="input" rows="20" cols="100"></textarea>
+<script>
+window.addEventListener('hashchange', (ev) => {
+  input.value = window.decodeURIComponent(window.location.hash.substr(1));
+});
+window.dispatchEvent(new CustomEvent('hashchange'));
+</script>
 
 <div id="stats">
 </div>
