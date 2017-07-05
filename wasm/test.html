@@ -1,56 +1,27 @@
 <!DOCTYPE html>
 <html>
 <head>
+<script src="utils.js"></script>
 <script>
-
-async function createWebAssembly(path, importObject) {
-  const bytes = await window.fetch(path).then(x => x.arrayBuffer());
-  return WebAssembly.instantiate(bytes, importObject);
-}
-
-const memory = new WebAssembly.Memory({initial: 256, maximum: 256});
-const env = {
-  'abortStackOverflow': () => { throw new Error('abortStackOverflow'); },
-  'table': new WebAssembly.Table({initial: 0, maximum: 0, element: 'anyfunc'}),
-  'tableBase': 0,
-  'memory': memory,
-  'memoryBase': 1024,
-  'STACKTOP': 0,
-  'STACK_MAX': memory.buffer.byteLength,
-  'DYNAMICTOP_PTR': 0,
-  'getTotalMemory': () => { console.info('getTotalMemory'); return 1; },
-};
-const importObject = {env};
-
-const addException = (key) => env[key] = () => { throw new Error(key); };
-const keys = 'abortStackOverflow';
-// const keys = 'abort abortOnCannotGrowMemory abortStackOverflow enlargeMemory ___setErrNo _abort ___syscall140 _emscripten_memcpy_big ___lock ___syscall6';
-keys.split(/\s+/).forEach(addException);
-
+  
+const importObject = (function() {
+  const memory = new WebAssembly.Memory({initial: 256, maximum: 256});
+  const env = {
+    'abortStackOverflow': () => { throw new Error('abortStackOverflow'); },
+    'table': new WebAssembly.Table({initial: 0, maximum: 0, element: 'anyfunc'}),
+    'tableBase': 0,
+    'memory': memory,
+    'memoryBase': 1024,
+    'STACKTOP': 0,
+    'STACK_MAX': memory.buffer.byteLength,
+    'DYNAMICTOP_PTR': 0,
+  };
+  return {env};
+}());
 
 const ready = createWebAssembly('runner.wasm', importObject)
-    .then(wa => wa.instance.exports)
     .catch(err => console.warn('err loading wasm', err));
-
-function encodeToArray(s, array) {
-  let i = 0;
-  for (let si = 0; si < s.length; ++si) {
-    const c = s.charCodeAt(si);
-    if (c >= 128) {
-      throw new Error('non-ascii not yet supported: ' + c);
-    }
-    array[i++] = c;
-  }
-  array[i++] = 0;
-}
-
-function copyToMemory(s) {
-  const array = new Uint8Array(memory.buffer);
-  const startAt = array.length - ((s.length + 1) * 4);
-  const writeTo = new Uint8Array(memory.buffer, startAt);
-  encodeToArray(s, writeTo);
-  return startAt;
-}
+const exports = ready.then(wa => wa.instance.exports);
 
 const TOKENS = {
   EOF: 0,
@@ -91,6 +62,9 @@ window.addEventListener('load', (ev) => {
   const append = (text, type='') => {
     const node = document.createElement('span');
     node.textContent = text;
+    if (type[0] !== '_') {
+      node.title = type.toLowerCase();
+    }
     node.className = type.toLowerCase();
     output.appendChild(document.createTextNode(' '));
     output.appendChild(node);
@@ -117,13 +91,18 @@ window.addEventListener('load', (ev) => {
         node.textContent = ';';
         break;
       }
+
+      node.tabIndex = 0;
     });
   };
 
-  ready.then(exports => {
+  ready.then((wa) => {
+    const exports = wa.instance.exports;
+    const memory = wa.importObject.env.memory;
+
     const update = () => {
       const raw = input.value;
-      const pointer = copyToMemory(raw);
+      const pointer = copyToMemory(memory, raw);
       exports._prsr_setup(pointer);
 
       const tokens = [];
@@ -140,10 +119,10 @@ window.addEventListener('load', (ev) => {
           len: exports._prsr_get_len(),
           lineNo: exports._prsr_get_line_no(),
         };
-        tokens.push(token);
         if (token.type === 0) {
-          break;
+          break;  // don't include EOF
         }
+        tokens.push(token);
       }
       const took = performance.now() - start;
       stats.textContent = took.toLocaleString({minimumSignificantDigits: 8}) + 'ms';
@@ -166,6 +145,9 @@ window.addEventListener('load', (ev) => {
   textarea {
     font-family: monospace;
     resize: none;
+  }
+  pre {
+    cursor: pointer;
   }
   pre span._lineno {
     background: red;
