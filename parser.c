@@ -6,7 +6,7 @@
 
 int prsr_token(char *buf, int (*fp)(token *)) {
   tokendef d;
-  memset(&d, 0, sizeof(d));
+  bzero(&d, sizeof(d));
   d.buf = buf;
   d.len = strlen(buf);
   d.depth = 1;

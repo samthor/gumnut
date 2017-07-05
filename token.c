@@ -539,6 +539,10 @@ eat_out next_token(tokendef *d) {
 }
 
 int prsr_next_token(tokendef *d, token *out) {
+  if (d->len < 0) {
+    return -1;
+  }
+
   out->p = NULL;
   out->whitespace_after = 0;
   out->line_no = d->line_no;
@@ -547,11 +551,11 @@ int prsr_next_token(tokendef *d, token *out) {
   out->len = eo.len;
   out->type = eo.type;
 
-  if (out->type <= 0 || out->len < 0) {
-    if (d->curr < d->len) {
-      return d->curr;
-    }
-    return -1;
+  if (out->type == TOKEN_EOF) {
+    d->len = -1;  // use -ve len to indicate done
+  }
+  if (out->type < 0 || out->len < 0) {
+    return d->curr;
   }
 
   out->p = d->buf + d->curr;

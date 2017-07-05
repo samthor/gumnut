@@ -1,4 +1,6 @@
 
+#include <inttypes.h>
+
 #ifndef _TOKEN_H
 #define _TOKEN_H
 
