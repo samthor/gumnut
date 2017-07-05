@@ -256,8 +256,8 @@ eat_out next_token(tokendef *d) {
       return (eat_out) {2, TOKEN_ARROW};
     } else if (c == start && strchr("+-|&", start)) {
       if (start == '-' || start == '+') {
-        // if we had a newline, not after an op, and aren't in a control structure's brackets
-        if (!(flags & FLAG__AFTER_OP) && (flags & FLAG__NEWLINE) && !(d->stack[d->depth-1] & STACK__NEXT_CONTROL)) {
+        // if we had a newline, not after an op, and are in a control structure
+        if (!(flags & FLAG__AFTER_OP) && (flags & FLAG__NEWLINE) && !(d->stack[d->depth] & STACK__TYPEMASK)) {
           reset_semicolon(d);
           return (eat_out) {0, TOKEN_SEMICOLON};
         }
@@ -294,7 +294,7 @@ eat_out next_token(tokendef *d) {
 
   // nb. from here down, these are all statements that cause ASI
   // if we don't expect an expr, but there was a newline
-  if ((flags & FLAG__NEWLINE) && (flags & FLAG__MASK_BRACE_ASI)) {
+  if ((flags & FLAG__NEWLINE) && (flags & FLAG__MASK_BRACE_ASI) && !(d->stack[d->depth] & STACK__TYPEMASK)) {
     reset_semicolon(d);
     return (eat_out) {0, TOKEN_SEMICOLON};
   }
@@ -324,11 +324,9 @@ eat_out next_token(tokendef *d) {
 
     case '}':
       // emit ASI if this ended an empty statement
-      if ((d->stack[d->depth] & STACK__TYPEMASK) == STACK__BRACE) {
-        if ((flags & FLAG__MASK_BRACE_ASI)) {
-          reset_semicolon(d);
-          return (eat_out) {0, TOKEN_SEMICOLON};
-        }
+      if (!(d->stack[d->depth] & STACK__TYPEMASK) && (flags & FLAG__MASK_BRACE_ASI)) {
+        reset_semicolon(d);
+        return (eat_out) {0, TOKEN_SEMICOLON};
       }
 
       // it's not clear whether we were an object, so allow it if we were (STACK__BRACE == 0)

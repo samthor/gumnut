@@ -1,7 +1,4 @@
 * what does ${foo} mean inside template literals? should we treat it as a thing?
 
-* this should ASI on 2nd line, but it does not-
-var q = () => /200/
-{
-  return 1;
-}
+* left side of "for" allows declarations (but nothing else), yield keyword
+==> keywords are accepted everywhere here but just invalid
