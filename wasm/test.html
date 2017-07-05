@@ -28,40 +28,18 @@ const keys = 'abortStackOverflow';
 keys.split(/\s+/).forEach(addException);
 
 
-createWebAssembly('runner.wasm', importObject).then(wa => {
-  const exports = wa.instance.exports;
-  console.info('got exports', exports);
-  window.exports = exports;
-}).catch(err => console.warn('err loading wasm', err));
+const ready = createWebAssembly('runner.wasm', importObject)
+    .then(wa => wa.instance.exports)
+    .catch(err => console.warn('err loading wasm', err));
 
 function encodeToArray(s, array) {
   let i = 0;
-  for (let ci = 0; ci < s.length; ++ci) {
-    const c = s.charCodeAt(ci);
-    if (c < 128) {
-      array[i++] = c;
-      continue;
+  for (let si = 0; si < s.length; ++si) {
+    const c = s.charCodeAt(si);
+    if (c >= 128) {
+      throw new Error('non-ascii not yet supported: ' + c);
     }
-    if (c < 2048) {
-      array[i++] = c >> 6 | 192;
-    } else {
-      if (c > 0xd7ff && c < 0xdc00) {
-        if (++ci === s.length) {
-          throw new Error('incomplete surrogate pair');
-        }
-        let c2 = s.charCodeAt(ci);
-        if (c2 < 0xdc00 || c2 > 0xdfff) {
-          throw new Error('surrogate pair out of range');
-        }
-        c = 0x10000 + ((c & 0x03ff) << 10) + (c2 & 0x03ff);
-        array[i++] = c >> 18 | 240;
-        array[i++] = c >> 12 & 63 | 128;
-      } else { // c <= 0xffff
-        array[i++] = c >> 12 | 224;
-      }
-      array[i++] = c >> 6 & 63 | 128;
-    }
-    array[i++] = c & 63 | 128;
+    array[i++] = c;
   }
   array[i++] = 0;
 }
@@ -74,92 +52,113 @@ function copyToMemory(s) {
   return startAt;
 }
 
-const TOKENS ={
-  _EOF: 0,
-  _ASI: 1,
+const TOKENS = {
+  EOF: 0,
+  ASI: 1,
 
-  _NEWLINE: 2,
-  _SEMICOLON: 3,
-  _SPREAD: 4,
-  _DOT: 5,
-  _OP: 6,
-  _ARROW: 7,
-  _ELISON: 8,
-  _COLON: 9,
-  _TERNARY: 10,
-  _BRACE: 11,
-  _ARRAY: 12,
-  _PAREN: 13,
+  NEWLINE: 2,
+  SEMICOLON: 3,
+  SPREAD: 4,
+  DOT: 5,
+  OP: 6,
+  ARROW: 7,
+  ELISON: 8,
+  COLON: 9,
+  TERNARY: 10,
+  BRACE: 11,
+  ARRAY: 12,
+  PAREN: 13,
 
-  _COMMENT: 14,
-  _STRING: 15,
-  _REGEXP: 16,
-  _NUMBER: 17,
-  _SYMBOL: 18,
-  _KEYWORD: 19,
-  _LABEL: 20,
+  COMMENT: 14,
+  STRING: 15,
+  REGEXP: 16,
+  NUMBER: 17,
+  SYMBOL: 18,
+  KEYWORD: 19,
+  LABEL: 20,
 };
 
+const REVERSE = (function() {
+  const m = new Map();
+  Object.keys(TOKENS).forEach((key) => {
+    m.set(TOKENS[key], key);
+  });
+  return m;
+}());
+
+
 window.addEventListener('load', (ev) => {
-  go.onclick = () => {
-    const raw = input.value;
-    const pointer = copyToMemory(raw);
-    exports._prsr_setup(pointer);
+  const append = (text, type='') => {
+    const node = document.createElement('span');
+    node.textContent = text;
+    node.className = type.toLowerCase();
+    output.appendChild(document.createTextNode(' '));
+    output.appendChild(node);
+    return node;
+  };
 
-    const tokens = [];
-    console.time();
-    for (;;) {
-      const next = exports._prsr_run();
-      if (next !== 0) {
-        console.warn('got err at', next);
-        break;
-      }
-      const token = {
-        type: exports._prsr_get_type(),
-        at: exports._prsr_get_at(),
-        len: exports._prsr_get_len(),
-      };
-      tokens.push(token);
-      if (token.type === 0) {
-        break;
-      }
-    }
-    console.timeEnd();
-
+  const render = (tokens, raw) => {
+    let lineNo = undefined;
     output.textContent = '';
     tokens.forEach(token => {
+      if (token.lineNo !== lineNo) {
+        lineNo = token.lineNo;
+        append(token.lineNo, '_lineno');
+      }
 
-      console.info(token);
-
+      // TODO: this works because the input is all ASCII right now
       const s = raw.substr(token.at, token.len);
-      const node = document.createElement('span');
-      node.textContent = s;
-      output.appendChild(node);
+      const node = append(s, REVERSE.get(token.type));
 
       switch (token.type) {
-      case TOKENS._ASI:
-        node.className = 'asi';
+      case TOKENS.NEWLINE:
+        return;
+      case TOKENS.ASI:
         node.textContent = ';';
         break;
-      case TOKENS._COMMENT:
-        node.className = 'comment';
-        break;
-      case TOKENS._KEYWORD:
-        node.className = 'keyword';
-        break;
-      case TOKENS._NUMBER:
-      case TOKENS._STRING:
-      case TOKENS._REGEXP:
-        node.className = 'value';
-        break;
       }
-
-      if (token.type !== 2) {
-        output.appendChild(document.createTextNode(' '));
-      }
-
     });
   };
+
+  ready.then(exports => {
+    const update = () => {
+      const raw = input.value;
+      const pointer = copyToMemory(raw);
+      exports._prsr_setup(pointer);
+
+      const tokens = [];
+      const start = performance.now();
+      for (;;) {
+        const next = exports._prsr_run();
+        if (next !== 0) {
+          console.warn('got err at', next);
+          break;
+        }
+        const token = {
+          type: exports._prsr_get_type(),
+          at: exports._prsr_get_at(),
+          len: exports._prsr_get_len(),
+          lineNo: exports._prsr_get_line_no(),
+        };
+        tokens.push(token);
+        if (token.type === 0) {
+          break;
+        }
+      }
+      const took = performance.now() - start;
+      stats.textContent = took.toLocaleString({minimumSignificantDigits: 8}) + 'ms';
+
+      render(tokens, raw);
+    };
+
+    let rAF;
+    const dedup = () => {
+      window.cancelAnimationFrame(rAF);
+      rAF = window.requestAnimationFrame(update);
+    };
+    input.oninput = dedup;
+    dedup();
+  });
 });
 
 </script>
@@ -167,6 +166,10 @@ window.addEventListener('load', (ev) => {
   textarea {
     font-family: monospace;
     resize: none;
+  }
+  pre span._lineno {
+    background: red;
+    color: white;
   }
   pre span.asi {
     background: green;
@@ -178,7 +181,9 @@ window.addEventListener('load', (ev) => {
   pre span.keyword {
     color: purple;
   }
-  pre span.value {
+  pre span.number,
+  pre span.string,
+  pre span.regexp {
     color: red;
   }
 </style>
@@ -189,7 +194,8 @@ window.addEventListener('load', (ev) => {
 console.info(x);
 ++x;</textarea>
 
-<button id="go">Go</button>
+<div id="stats">
+</div>
 
 <pre id="output"></pre>
 
