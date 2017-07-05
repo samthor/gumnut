@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "token.h"
-#include "parser.h"
+#include "../token.h"
+#include "../parser.h"
 
 // reads stdin into buf, reallocating as nessecary. returns strlen(buf) or < 0 for error.
 int read_stdin(char **buf) {

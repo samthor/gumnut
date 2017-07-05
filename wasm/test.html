@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script>
+
+async function createWebAssembly(path, importObject) {
+  const bytes = await window.fetch(path).then(x => x.arrayBuffer());
+  return WebAssembly.instantiate(bytes, importObject);
+}
+
+const memory = new WebAssembly.Memory({initial: 256, maximum: 256});
+const env = {
+  'abortStackOverflow': () => { throw new Error('abortStackOverflow'); },
+  'table': new WebAssembly.Table({initial: 0, maximum: 0, element: 'anyfunc'}),
+  'tableBase': 0,
+  'memory': memory,
+  'memoryBase': 1024,
+  'STACKTOP': 0,
+  'STACK_MAX': memory.buffer.byteLength,
+  'DYNAMICTOP_PTR': 0,
+  'getTotalMemory': () => { console.info('getTotalMemory'); return 1; },
+};
+const importObject = {env};
+
+const addException = (key) => env[key] = () => { throw new Error(key); };
+const keys = 'abortStackOverflow';
+// const keys = 'abort abortOnCannotGrowMemory abortStackOverflow enlargeMemory ___setErrNo _abort ___syscall140 _emscripten_memcpy_big ___lock ___syscall6';
+keys.split(/\s+/).forEach(addException);
+
+
+createWebAssembly('runner.wasm', importObject).then(wa => {
+  const exports = wa.instance.exports;
+  console.info('got exports', exports);
+  window.exports = exports;
+}).catch(err => console.warn('err loading wasm', err));
+
+function encodeToArray(s, array) {
+  let i = 0;
+  for (let ci = 0; ci < s.length; ++ci) {
+    const c = s.charCodeAt(ci);
+    if (c < 128) {
+      array[i++] = c;
+      continue;
+    }
+    if (c < 2048) {
+      array[i++] = c >> 6 | 192;
+    } else {
+      if (c > 0xd7ff && c < 0xdc00) {
+        if (++ci === s.length) {
+          throw new Error('incomplete surrogate pair');
+        }
+        let c2 = s.charCodeAt(ci);
+        if (c2 < 0xdc00 || c2 > 0xdfff) {
+          throw new Error('surrogate pair out of range');
+        }
+        c = 0x10000 + ((c & 0x03ff) << 10) + (c2 & 0x03ff);
+        array[i++] = c >> 18 | 240;
+        array[i++] = c >> 12 & 63 | 128;
+      } else { // c <= 0xffff
+        array[i++] = c >> 12 | 224;
+      }
+      array[i++] = c >> 6 & 63 | 128;
+    }
+    array[i++] = c & 63 | 128;
+  }
+  array[i++] = 0;
+}
+
+function copyToMemory(s) {
+  const array = new Uint8Array(memory.buffer);
+  const startAt = array.length - ((s.length + 1) * 4);
+  const writeTo = new Uint8Array(memory.buffer, startAt);
+  encodeToArray(s, writeTo);
+  return startAt;
+}
+
+const TOKENS ={
+  _EOF: 0,
+  _ASI: 1,
+
+  _NEWLINE: 2,
+  _SEMICOLON: 3,
+  _SPREAD: 4,
+  _DOT: 5,
+  _OP: 6,
+  _ARROW: 7,
+  _ELISON: 8,
+  _COLON: 9,
+  _TERNARY: 10,
+  _BRACE: 11,
+  _ARRAY: 12,
+  _PAREN: 13,
+
+  _COMMENT: 14,
+  _STRING: 15,
+  _REGEXP: 16,
+  _NUMBER: 17,
+  _SYMBOL: 18,
+  _KEYWORD: 19,
+  _LABEL: 20,
+};
+
+window.addEventListener('load', (ev) => {
+  go.onclick = () => {
+    const raw = input.value;
+    const pointer = copyToMemory(raw);
+    exports._prsr_setup(pointer);
+
+    const tokens = [];
+    console.time();
+    for (;;) {
+      const next = exports._prsr_run();
+      if (next !== 0) {
+        console.warn('got err at', next);
+        break;
+      }
+      const token = {
+        type: exports._prsr_get_type(),
+        at: exports._prsr_get_at(),
+        len: exports._prsr_get_len(),
+      };
+      tokens.push(token);
+      if (token.type === 0) {
+        break;
+      }
+    }
+    console.timeEnd();
+
+    output.textContent = '';
+    tokens.forEach(token => {
+
+      console.info(token);
+
+      const s = raw.substr(token.at, token.len);
+      const node = document.createElement('span');
+      node.textContent = s;
+      output.appendChild(node);
+
+      switch (token.type) {
+      case TOKENS._ASI:
+        node.className = 'asi';
+        node.textContent = ';';
+        break;
+      case TOKENS._COMMENT:
+        node.className = 'comment';
+        break;
+      case TOKENS._KEYWORD:
+        node.className = 'keyword';
+        break;
+      case TOKENS._NUMBER:
+      case TOKENS._STRING:
+      case TOKENS._REGEXP:
+        node.className = 'value';
+        break;
+      }
+
+      if (token.type !== 2) {
+        output.appendChild(document.createTextNode(' '));
+      }
+
+    });
+  };
+});
+
+</script>
+<style>
+  textarea {
+    font-family: monospace;
+    resize: none;
+  }
+  pre span.asi {
+    background: green;
+    color: white;
+  }
+  pre span.comment {
+    color: green;
+  }
+  pre span.keyword {
+    color: purple;
+  }
+  pre span.value {
+    color: red;
+  }
+</style>
+</head>
+<body>
+
+<textarea id="input" rows="20" cols="100">var x = 1;
+console.info(x);
+++x;</textarea>
+
+<button id="go">Go</button>
+
+<pre id="output"></pre>
+
+</body>
+</html>
