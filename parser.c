@@ -1,8 +1,8 @@
 #include <string.h>
-#include <ctype.h>
 #include <inttypes.h>
 #include "token.h"
 #include "utils.h"
+#include "parser.h"
 
 int prsr_token(char *buf, int (*fp)(token *)) {
   tokendef d;
