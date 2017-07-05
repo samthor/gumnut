@@ -37,3 +37,6 @@ parser
 
 # macOS
 .DS_Store
+
+# local js
+/*.js
