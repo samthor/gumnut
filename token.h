@@ -7,7 +7,7 @@ typedef struct {
   int len;
   int line_no;
   uint8_t flags;
-  uint8_t depth;
+  uint8_t depth;  // must be >=1
   uint8_t stack[_TOKEN_STACK_SIZE];
 } tokendef;
 

@@ -34,6 +34,17 @@ int is_keyword(char *s, int len) {
   return in_space_string(v, s, len);
 }
 
+int is_reserved_word(char *s, int len) {
+  if (is_keyword(s, len)) {
+    return 1;
+  }
+  if (len < 4 || len > 5) {
+    return 0;
+  }
+  static const char v[] = " null true false ";
+  return in_space_string(v, s, len);
+}
+
 int is_control_keyword(char *s, int len) {
   if (len > 5 || len < 2) {
     return 0;  // no control <2 ('if' etc) or >5 ('while' etc)

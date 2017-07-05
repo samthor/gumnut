@@ -12,11 +12,17 @@
 #define STACK__NEXT_STATEMENT 8   // the next {} under returns a statement (e.g., var x = class{};)
 #define STACK__NEXT_OBJECT    16  // the next {} is unambiguously an object literal-ish
 #define STACK__NEXT_CONTROL   32  // the next () under is a control (e.g., if (...))
+#define STACK__NEXT_DO_PARENS 64  // the next () is do {} while () parens
 
-#define FLAG__SLASH_IS_OP    1
-#define FLAG__AFTER_OP       2
-#define FLAG__EXPECT_ID      4
-#define FLAG__EXPECT_LABEL   8
+#define FLAG__SLASH_IS_OP    1   // if we see a /, it's division (not regex)
+#define FLAG__AFTER_OP       2   // we expect to see a variable next (had op or 'excepts' var)
+#define FLAG__EXPECT_ID      4   // the next symbol is a name, not a keyword (e.g., foo.return)
+#define FLAG__EXPECT_LABEL   8   // we just had a break/continue that can target a label
+#define FLAG__MUST_ASI       16  // appears after parens owned by do/while
+#define FLAG__RESTRICT       32  // just had a restricted keyword, newline generates ASI
+#define FLAG__NEWLINE        64  // just after a newline
+
+#define FLAG__MASK_BRACE_ASI (1 | 2 | 4 | 8 | 16)  // generate ASI before } in these cases
 
 typedef struct {
   int len;
@@ -35,7 +41,7 @@ char peek_char(tokendef *d, int len) {
 // +ve for the type expected in a decrement
 int modify_stack(tokendef *d, int inc, int type) {
   if (inc) {
-    if (d->depth == _TOKEN_STACK_SIZE - 1) {
+    if (!d->depth || d->depth == _TOKEN_STACK_SIZE - 1) {
       return -1;
     }
     ++d->depth;
@@ -44,7 +50,7 @@ int modify_stack(tokendef *d, int inc, int type) {
   }
 
   uint8_t prev = d->stack[d->depth--];
-  if (d->depth < 0) {
+  if (d->depth < 1) {
     return -2;
   } else if ((prev & STACK__TYPEMASK) != type) {
     return prev & STACK__TYPEMASK;
@@ -76,9 +82,20 @@ eat_out next_token(tokendef *d) {
     c = peek_char(d, 0);
     // newlines are magic in JS
     if (c == '\n') {
+      // after a restricted keyword, force ASI
+      if ((d->flags & FLAG__RESTRICT)) {
+        d->flags = 0;
+        return (eat_out) {0, TOKEN_ASI};
+      }
       ++d->line_no;
+      d->flags |= FLAG__NEWLINE;
       return (eat_out) {1, TOKEN_NEWLINE};
     } else if (!c) {
+      // ending file, at top level, and non-empty statement
+      if (d->depth == 1 && (d->flags & FLAG__MASK_BRACE_ASI)) {
+        d->flags = 0;
+        return (eat_out) {0, TOKEN_ASI};
+      }
       return (eat_out) {0, TOKEN_EOF};  // end of file
     } else if (!isspace(c)) {
       break;
@@ -175,7 +192,15 @@ eat_out next_token(tokendef *d) {
       return (eat_out) {1, TOKEN_BRACE};
 
     case '}':
-      // it's not clear whether we were an object, so allow it if we were
+      // emit ASI if this ended an empty statement
+      if ((d->stack[d->depth] & STACK__TYPEMASK) == STACK__BRACE) {
+        if ((flags & FLAG__MASK_BRACE_ASI)) {
+          d->flags = 0;
+          return (eat_out) {0, TOKEN_ASI};
+        }
+      }
+
+      // it's not clear whether we were an object, so allow it if we were (STACK__BRACE == 0)
       if (modify_stack(d, 0, STACK__BRACE | (d->stack[d->depth] & STACK__OBJECT))) {
         return (eat_out) {-1, -1};
       }
@@ -184,8 +209,9 @@ eat_out next_token(tokendef *d) {
       if (d->stack[d->depth] & STACK__NEXT_STATEMENT) {
         d->flags |= FLAG__SLASH_IS_OP;
       }
-      d->stack[d->depth] &= STACK__TYPEMASK;
 
+      // retain NEXT_DO_PARENS (as we might be at the "} while" ... bit)
+      d->stack[d->depth] &= (STACK__TYPEMASK | STACK__NEXT_DO_PARENS);
       return (eat_out) {1, TOKEN_BRACE};
 
     case ']':
@@ -193,6 +219,8 @@ eat_out next_token(tokendef *d) {
         return (eat_out) {-1, -1};
       }
       d->flags |= FLAG__SLASH_IS_OP;
+
+      d->stack[d->depth] &= STACK__TYPEMASK;
       return (eat_out) {1, TOKEN_ARRAY};
 
     case ')':
@@ -205,6 +233,12 @@ eat_out next_token(tokendef *d) {
         d->flags |= FLAG__SLASH_IS_OP;
       }
 
+      // special-case do {} while (), basically treat as newline for ASI purposes
+      if (d->stack[d->depth] & STACK__NEXT_DO_PARENS) {
+        d->flags |= (FLAG__NEWLINE | FLAG__MUST_ASI);
+      }
+
+      d->stack[d->depth] &= STACK__TYPEMASK;
       return (eat_out) {1, TOKEN_PAREN};
   }
 
@@ -249,10 +283,20 @@ eat_out next_token(tokendef *d) {
     }
 
     if (start == '=' && c == '>') {
-      // arrow function
+      // arrow function: nb. if this is after a newline, it's invalid (doesn't generate ASI)
       return (eat_out) {2, TOKEN_ARROW};
     } else if (c == start && strchr("+-|&", start)) {
-      // FIXME: catch ++ or -- ?
+      if (start == '-' || start == '+') {
+        // if we had a newline, and aren't in a control structure's brackets
+        if ((flags & FLAG__NEWLINE) && !(d->stack[d->depth-1] & STACK__NEXT_CONTROL)) {
+          d->flags = 0;
+          return (eat_out) {0, TOKEN_ASI};
+        }
+        // if we're a postfix, allow more ops
+        if (flags & FLAG__SLASH_IS_OP) {
+          d->flags = FLAG__SLASH_IS_OP;  // removes FLAG__AFTER_OP
+        }
+      }
       ++len;  // eat --, ++, || or &&: but no more
     } else if (c == '=') {
       // consume a suffix '=' (or whole ===, !==)
@@ -270,20 +314,6 @@ eat_out next_token(tokendef *d) {
     return (eat_out) {len, TOKEN_OP};
   } while (0);
 
-  // number: "0", ".01", "0x100"
-  if (isnum(c) || (c == '.' && isnum(next))) {
-    int len = 1;
-    c = next;
-    for (;;) {
-      if (!(isalnum(c) || c == '.')) {  // letters, dots, etc- misuse is invalid, so eat anyway
-        break;
-      }
-      c = peek_char(d, ++len);
-    }
-    d->flags |= FLAG__SLASH_IS_OP;
-    return (eat_out) {len, TOKEN_NUMBER};
-  }
-
   // dot notation
   if (c == '.') {
     if (next == '.' && peek_char(d, 2) == '.') {
@@ -291,6 +321,13 @@ eat_out next_token(tokendef *d) {
     }
     d->flags |= FLAG__EXPECT_ID;
     return (eat_out) {1, TOKEN_DOT};  // it's valid to say e.g., "foo . bar", so separate token
+  }
+
+  // nb. from here down, these are all statements that cause ASI
+  // if we don't expect an expr, but there was a newline
+  if ((flags & FLAG__NEWLINE) && (flags & FLAG__MASK_BRACE_ASI)) {
+    d->flags = 0;
+    return (eat_out) {0, TOKEN_ASI};
   }
 
   // strings
@@ -311,6 +348,20 @@ eat_out next_token(tokendef *d) {
     }
     d->flags |= FLAG__SLASH_IS_OP;
     return (eat_out) {len, TOKEN_STRING};
+  }
+
+  // number: "0", ".01", "0x100"
+  if (isnum(c) || (c == '.' && isnum(next))) {
+    int len = 1;
+    c = next;
+    for (;;) {
+      if (!(isalnum(c) || c == '.')) {  // letters, dots, etc- misuse is invalid, so eat anyway
+        break;
+      }
+      c = peek_char(d, ++len);
+    }
+    d->flags |= FLAG__SLASH_IS_OP;
+    return (eat_out) {len, TOKEN_NUMBER};
   }
 
   // regexp
@@ -400,14 +451,13 @@ eat_out next_token(tokendef *d) {
     int expr_keyword = is_expr_keyword(s, len);
 
     // this is ambiguous: could be a label, symbol or var
-    if (!(flags & FLAG__AFTER_OP) && !(d->stack[d->depth] & STACK__OBJECT)) {
+    if (!(flags & FLAG__AFTER_OP) && !(d->stack[d->depth] & STACK__OBJECT) && !is_reserved_word(s, len)) {
       tokendef copy = *d;
       copy.curr += len;
       if (!expr_keyword) {
         // if this is await/yield etc, then slash is regxp: otherwise, assume op
         copy.flags |= FLAG__SLASH_IS_OP;
       }
-
       int type = next_real_type(&copy);
       if (type == TOKEN_COLON) {
         return (eat_out) {len, TOKEN_LABEL};
@@ -446,25 +496,37 @@ eat_out next_token(tokendef *d) {
 
     // at this point, we must be an expression
     if (!expr) {
-      if (is_control_keyword(s, len)) {
-        // got an if/for/while etc, next ()'s are control
-        d->stack[d->depth] |= STACK__NEXT_CONTROL;
-        return (eat_out) {len, TOKEN_KEYWORD};
+      if (d->stack[d->depth] & STACK__NEXT_DO_PARENS) {
+        if (len != 5 || memcmp(s, "while", 5)) {
+          // we only expect "while" here: could generate a syntax error
+          d->stack[d->depth] &= ~STACK__NEXT_DO_PARENS;
+        }
       }
-      if (is_decl_keyword(s, len)) {
-        // var/let/const must have a following ID, can't have new/await etc
-        d->flags |= (FLAG__EXPECT_ID | FLAG__AFTER_OP);
+      do {
+        if (len == 2 && !memcmp(s, "do", 2)) {
+          // got a "do", which isn't really a control, but implies it in future
+          d->stack[d->depth] |= STACK__NEXT_DO_PARENS;
+        } else if (is_control_keyword(s, len)) {
+          // got an if/for/while etc, next ()'s are control
+          d->stack[d->depth] |= STACK__NEXT_CONTROL;
+        } else if (is_decl_keyword(s, len)) {
+          // var/let/const must have a following ID, can't have new/await etc
+          d->flags |= (FLAG__EXPECT_ID | FLAG__AFTER_OP);
+        } else if (is_label_keyword(s, len)) {
+          // break or continue, expects a label to follow
+          d->flags |= FLAG__EXPECT_LABEL;
+        } else if (is_asi_keyword(s, len)) {
+          // this is just a type of keyword, but which generates an ASI
+          d->flags |= (FLAG__AFTER_OP | FLAG__RESTRICT);
+        } else if (is_keyword(s, len)) {
+          // not explicitly an expression, match keywords
+          d->flags |= FLAG__AFTER_OP;
+        } else {
+          // probably a symbol
+          break;
+        }
         return (eat_out) {len, TOKEN_KEYWORD};
-      }
-      if (is_label_keyword(s, len)) {
-        d->flags |= FLAG__EXPECT_LABEL;
-        return (eat_out) {len, TOKEN_KEYWORD};
-      }
-      if (is_keyword(s, len)) {
-        // not explicitly an expression, match keywords
-        d->flags |= FLAG__AFTER_OP;
-        return (eat_out) {len, TOKEN_KEYWORD};
-      }
+      } while (0);
     }
 
     // nothing matched- must be a symbol
