@@ -14,7 +14,7 @@ int prsr_setup(char *buf) {
   return 0;
 }
 
-int prsr_run(char *buf) {
+int prsr_run() {
   return prsr_next_token(&shared_token, &out);
 }
 
