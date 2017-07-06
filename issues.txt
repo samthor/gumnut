@@ -1,4 +1,14 @@
-* what does ${foo} mean inside template literals? should we treat it as a thing?
+* a thing inside template literals (e.g. `blah ${foo}`) is effectively just the same as code-
+  'blah ' + foo;
 
 * left side of "for" allows declarations (but nothing else), yield keyword
 ==> keywords are accepted everywhere here but just invalid
+
+* async is a keyword if immediately followed by a function
+  ... easy for 'function'
+  ... not easy for arrow functions, as we have to-
+     async (lots, of, stuff, including, expr = function() {}, blah) => {}
+  look for 1. parens, 2. **function args**, 3. close parens, 4. arrow.
+  !!! otherwise it's an expr itself
+
+* await is a 
