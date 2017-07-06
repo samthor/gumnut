@@ -1,4 +1,4 @@
 #!/bin/bash
 
 set -eu
-gcc -o demo demo.c ../*.c
+gcc -o demo demo.c ../{token,parser}.c

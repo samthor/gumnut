@@ -46,7 +46,7 @@ int read_stdin(char **buf) {
 int render(token *out) {
   if (out->len == 1 && *out->p == '\n') {
     // don't display, javascript is dumb
-  } else if (out->type == TOKEN_ASI) {
+  } else if (out->type == TOKEN_NEWLINE && out->len == 0) {
     printf(";%4d: \n", out->line_no);
   } else {
     printf("%c%4d: %.*s #%d\n", out->whitespace_after ? '.' : ' ', out->line_no, out->len, out->p, out->type);
@@ -60,7 +60,7 @@ int main() {
     return -1;
   }
 
-  int rem = prsr_token(buf, render);
+  int rem = prsr_token_fp(buf, render);
   if (rem > 0) {
     printf("can't parse reminder:\n%s\n", buf + rem);
     return -2;

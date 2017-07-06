@@ -17,21 +17,31 @@
 #include <string.h>
 #include <inttypes.h>
 #include "token.h"
-#include "utils.h"
 #include "parser.h"
 
-int prsr_token(char *buf, int (*fp)(token *)) {
-  tokendef d;
+typedef struct {
+  tokendef td;
+  int prev_type;  // except comments and newlines
+  uint8_t flags;
+  uint8_t depth;  // must be >=1
+  uint8_t stack[_TOKEN_STACK_SIZE];
+} parserdef;
+
+int prsr_token_fp(char *buf, int (*fp)(token *)) {
+  parserdef d;
   bzero(&d, sizeof(d));
-  d.buf = buf;
-  d.len = strlen(buf);
-  d.depth = 1;
-  d.line_no = 1;
+  d.td.buf = buf;
+  d.td.len = strlen(buf);
+  d.td.line_no = 1;
 
   token out;
   int ret;
-  while (!(ret = prsr_next_token(&d, &out))) {
+  // FIXME: in practice we don't want to call this
+  while (!(ret = prsr_next_token(&d.td, 0, &out))) {
     fp(&out);
+    if (!out.type) {
+      break;
+    }
   }
   return ret;
 }

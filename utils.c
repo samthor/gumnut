@@ -62,11 +62,12 @@ int is_reserved_word(char *s, int len) {
   return in_space_string(v, s, len);
 }
 
+// whether this is a control keyword that is not an expr
 int is_control_keyword(char *s, int len) {
   if (len > 5 || len < 2) {
     return 0;  // no control <2 ('if' etc) or >5 ('while' etc)
   }
-  static const char v[] = " catch if for switch while with ";
+  static const char v[] = " catch do if for switch while with ";
   return in_space_string(v, s, len);
 }
 
@@ -78,13 +79,19 @@ int is_asi_keyword(char *s, int len) {
   return in_space_string(v, s, len);
 }
 
+// keywords that may cause declarations (function is hoisted, class _technically_ isn't)
 int is_hoist_keyword(char *s, int len) {
   return (len == 5 && !memcmp(s, "class", 5)) || (len == 8 && !memcmp(s, "function", 8));
 }
 
+// keywords that operate on something and return a value
+//   e.g. 'void 1' returns undefined
 int is_expr_keyword(char *s, int len) {
-  return (len == 5 && (!memcmp(s, "await", 5) || !memcmp(s, "yield", 5))) ||
-      (len == 3 && !memcmp(s, "new", 3));
+  if (len < 3 || len > 6) {
+    return 0;
+  }
+  static const char v[] = " await delete new typeof void yield ";
+  return is_space_string(v, s, len);
 }
 
 int is_decl_keyword(char *s, int len) {
@@ -92,6 +99,7 @@ int is_decl_keyword(char *s, int len) {
       (len == 5 && !memcmp(s, "const", 5));
 }
 
+// keywords that may optionally have a label (and only a label) following them
 int is_label_keyword(char *s, int len) {
   return (len == 5 && !memcmp(s, "break", 5)) || (len == 8 && !memcmp(s, "continue", 8));
 }

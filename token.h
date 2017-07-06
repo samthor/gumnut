@@ -26,10 +26,6 @@ typedef struct {
   int curr;
   int len;
   int line_no;
-  int prev_type;  // except comments and newlines
-  uint8_t flags;
-  uint8_t depth;  // must be >=1
-  uint8_t stack[_TOKEN_STACK_SIZE];
 } tokendef;
 
 typedef struct {
@@ -40,7 +36,7 @@ typedef struct {
   int line_no;
 } token;
 
-int prsr_next_token(tokendef *, token *);
+int prsr_next_token(tokendef *d, int slash_is_op, token *out);
 
 // empty: will not contain text
 #define TOKEN_EOF       0
@@ -68,5 +64,8 @@ int prsr_next_token(tokendef *, token *);
 #define TOKEN_SYMBOL    18
 #define TOKEN_KEYWORD   19
 #define TOKEN_LABEL     20
+
+// internal use only
+#define TOKEN_LIT       21
 
 #endif//_TOKEN_H
