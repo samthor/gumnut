@@ -33,6 +33,7 @@ int prsr_next_token(tokendef *, token *);
 // fixed: will always be the same, or in the same set
 #define TOKEN_SEMICOLON 1   // might be blank for ASI
 #define TOKEN_NEWLINE   2
+#define TOKEN_COMMA     3
 #define TOKEN_SPREAD    4
 #define TOKEN_DOT       5
 #define TOKEN_OP        6   // includes 'in', 'instanceof'

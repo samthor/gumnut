@@ -168,7 +168,7 @@ eat_out next_token(tokendef *d) {
       return (eat_out) {1, TOKEN_COLON};
 
     case ',':
-      return (eat_out) {1, TOKEN_COLON};
+      return (eat_out) {1, TOKEN_COMMA};
 
     case '(':
       if (modify_stack(d, 1, STACK__PAREN)) {
@@ -478,7 +478,6 @@ eat_out next_token(tokendef *d) {
       }
       int type = next_real_type(&copy);
       if (type == TOKEN_COLON) {
-        d->flags |= FLAG__EXPECT_LABEL;
         return (eat_out) {len, TOKEN_LABEL};
       } else if (type == TOKEN_STRING) {
         // found a backtick after a token: if we're await/yield etc, this is a keyword

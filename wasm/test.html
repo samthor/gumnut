@@ -28,6 +28,7 @@ const TOKENS = {
   SEMICOLON: 1,
 
   NEWLINE: 2,
+  COMMA: 3,
   SPREAD: 4,
   DOT: 5,
   OP: 6,
@@ -55,7 +56,6 @@ const REVERSE = (function() {
   });
   return m;
 }());
-
 
 window.addEventListener('load', (ev) => {
   const append = (text, type='') => {
@@ -193,11 +193,18 @@ document.addEventListener('drop', (ev) => {
   }
   pre span.keyword {
     color: purple;
+    font-weight: bold;
   }
   pre span.number,
   pre span.string,
   pre span.regexp {
     color: red;
+  }
+  pre span.label {
+    color: brown;
+  }
+  pre span.symbol {
+    color: blue;
   }
 </style>
 </head>
