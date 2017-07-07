@@ -263,3 +263,12 @@ int prsr_next_token(tokendef *d, int slash_is_op, token *out) {
   d->curr += out->len;
   return 0;
 }
+
+tokendef prsr_init(char *p) {
+  tokendef d;
+  bzero(&d, sizeof(d));
+  d.buf = p;
+  d.len = strlen(p);
+  d.line_no = 1;
+  return d;
+}

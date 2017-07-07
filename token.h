@@ -19,8 +19,6 @@
 #ifndef _TOKEN_H
 #define _TOKEN_H
 
-#define _TOKEN_STACK_SIZE 224
-
 typedef struct {
   char *buf;
   int curr;
@@ -32,11 +30,11 @@ typedef struct {
   char *p;
   int len;
   int type;
-  int whitespace_after;  // is there whitespace after this token?
   int line_no;
 } token;
 
 int prsr_next_token(tokendef *d, int slash_is_op, token *out);
+tokendef prsr_init(char *p);
 
 // empty: will not contain text
 #define TOKEN_EOF       0

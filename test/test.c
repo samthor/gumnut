@@ -44,21 +44,20 @@ const char *pretty_types[] = {
   "SYMBOL",
   "KEYWORD",
   "LABEL",
+  "LIT",
   NULL
 };
 
 int run_testdef(testdef *td) {
-  tokendef d;
+  parserdef d;
   bzero(&d, sizeof(d));
-  d.buf = (char *) td->input;
-  d.len = strlen(d.buf);
+  d.td = prsr_init((char *) td->input);
   d.depth = 1;
-  d.line_no = 1;
 
   token out;
   int ret;
   int i = 0;
-  while (!(ret = prsr_next_token(&d, &out))) {
+  while (!(ret = prsr_next(&d, &out))) {
     int expect = td->expected[i];
     if (!expect) {
       if (out.type != 0) {

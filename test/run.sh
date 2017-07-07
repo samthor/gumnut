@@ -2,6 +2,6 @@
 
 set -eu
 
-gcc -fnested-functions ../*.c *.c -o ./suite
+gcc -fnested-functions ../{parser,token,utils}.c *.c -o ./suite
 ./suite
 

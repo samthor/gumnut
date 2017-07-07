@@ -64,10 +64,10 @@ int is_reserved_word(char *s, int len) {
 
 // whether this is a control keyword that is not an expr
 int is_control_keyword(char *s, int len) {
-  if (len > 5 || len < 2) {
-    return 0;  // no control <2 ('if' etc) or >5 ('while' etc)
+  if (len > 7 || len < 2) {
+    return 0;  // no control <2 ('if' etc) or >5 ('finally' etc)
   }
-  static const char v[] = " catch do if for switch while with ";
+  static const char v[] = " catch do if finally for switch try while with ";
   return in_space_string(v, s, len);
 }
 
@@ -86,12 +86,26 @@ int is_hoist_keyword(char *s, int len) {
 
 // keywords that operate on something and return a value
 //   e.g. 'void 1' returns undefined
+//   yield is weird, it doesn't work as "yield + 1": needs "(yield) + 1"
 int is_expr_keyword(char *s, int len) {
   if (len < 3 || len > 6) {
     return 0;
   }
   static const char v[] = " await delete new typeof void yield ";
-  return is_space_string(v, s, len);
+  return in_space_string(v, s, len);
+}
+
+int is_begin_expr_keyword(char *s, int len) {
+  if (len < 3 || len > 6) {
+    return 0;
+  }
+  static const char v[] = " var let const return throw ";
+  return in_space_string(v, s, len);
+}
+
+int is_op_keyword(char *s, int len) {
+  return (len == 2 || len == 10) &&
+      !memcmp(s, "in", 2) && (len == 2 || !memcmp(s+2, "stanceof", 8));
 }
 
 int is_decl_keyword(char *s, int len) {

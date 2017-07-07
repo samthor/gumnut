@@ -16,4 +16,19 @@
 
 #include "token.h"
 
-int prsr_token_fp(char *buf, int (*fp)(token *));
+#define ERROR__VALUE_NO_EXPR -1
+
+#define _TOKEN_STACK_SIZE 224
+
+typedef struct {
+  tokendef td;
+  int prev_type;  // except comments and newlines
+  uint8_t flags;
+  uint8_t depth;  // must be >=1
+  uint8_t stack[_TOKEN_STACK_SIZE];
+  int emit_asi;
+  token pending_asi;
+} parserdef;
+
+int prsr_next(parserdef *p, token *out);
+int prsr_fp(char *buf, int (*fp)(token *));
