@@ -31,12 +31,10 @@
 #define STATE__EXPECT_LABEL   7
 #define STATE__ARROW          8
 
-// flags for parser
-#define PARSER__RESTRICT        1  // causes ASI on newline
-
 // flags for default states
 #define FLAG__VALUE           1  // nb. don't re-use
-#define FLAG__INITIAL         2  // allows 'var' etc, as well as function/class statements
+#define FLAG__RESTRICT        2
+#define FLAG__INITIAL         4  // allows 'var' etc, as well as function/class statements
 
 // flags for STATE__CONTROL
 #define FLAG__DO_WHILE        4
@@ -62,6 +60,9 @@ int stack_dec(parserdef *p) {
 }
 
 int chunk_normal_semicolon(parserdef *p, token *out) {
+  if (p->curr->state == STATE__STATEMENT) {
+    stack_dec(p);  // err should never happen
+  }
   if (p->curr->state == STATE__BLOCK) {
     p->curr->flag = FLAG__INITIAL;
     if (!out) {
@@ -77,6 +78,7 @@ int chunk_inner(parserdef *p, token *out) {
   int len = out->len;
 
   switch (curr->state) {
+    case STATE__STATEMENT:
     case STATE__BLOCK:
     case STATE__PARENS:
     case STATE__ARRAY:
@@ -85,7 +87,6 @@ int chunk_inner(parserdef *p, token *out) {
     // TODO: implement complex states here:
     // * function/class
     // * object literal
-    // * control blocks (+do/while)
 
     case STATE__CONTROL:
       if (!(curr->flag & FLAG__SEEN_PAREN) && out->type == TOKEN_PAREN && s[0] == '(') {
@@ -95,13 +96,9 @@ int chunk_inner(parserdef *p, token *out) {
       }
 
       // FIXME: This doesn't work for do/while, which allows "do console.info; while (0);"
-      // FIXME: we need a notion of "single statement" (returns on newline)
-      if (out->type == TOKEN_BRACE && s[0] == '{') {
-        curr->state = STATE__BLOCK;  // swap state
-        curr->flag = FLAG__INITIAL;
-        return 0;
-      }
-      stack_dec(p);
+      // swap for single statement
+      curr->state = STATE__STATEMENT;
+      curr->flag = FLAG__INITIAL;
       break;
 
     case STATE__EXPECT_ID:
@@ -121,13 +118,9 @@ int chunk_inner(parserdef *p, token *out) {
       break;
 
     case STATE__ARROW:
-      if (out->type == TOKEN_BRACE && s[0] == '{') {
-        curr->state = STATE__BLOCK;  // swap state
-        curr->flag = FLAG__INITIAL;
-        return 0;
-      } 
-      // FIXME: swap out for 'statement'
-      stack_dec(p);
+      // swap for single statement
+      curr->state = STATE__STATEMENT;
+      curr->flag = FLAG__INITIAL;
       break;
 
     default:
@@ -138,6 +131,12 @@ int chunk_inner(parserdef *p, token *out) {
   // zero states
   switch (out->type) {
     case TOKEN_EOF:
+      // close any pending statements
+      while (curr->state == STATE__STATEMENT) {
+        printf("closing STATEMENT\n");
+        stack_dec(p);
+        curr = p->curr;
+      }
       if (curr->state != STATE__BLOCK || curr != (p->stack + 1)) {
         return ERROR__STACK;
       } else if (!(curr->flag & FLAG__INITIAL)) {
@@ -145,8 +144,8 @@ int chunk_inner(parserdef *p, token *out) {
       }
       return 0;
     case TOKEN_NEWLINE:
-      if (p->flag & PARSER__RESTRICT) {
-        p->flag = 0;
+      if (curr->flag & FLAG__RESTRICT) {
+        curr->flag = 0;
         return chunk_normal_semicolon(p, NULL);
       }
       // fall-through
@@ -209,7 +208,7 @@ int chunk_inner(parserdef *p, token *out) {
       if (s[0] == '{') {
         // this is a block if we're the first expr (orphaned block)
         if (flag & FLAG__INITIAL) {
-          curr->flag |= FLAG__INITIAL;  // restore to intial after this
+          curr->flag = FLAG__INITIAL;  // reset for after
           return stack_inc(p, STATE__BLOCK, FLAG__INITIAL);
         }
         return stack_inc(p, STATE__OBJECT, 0);
@@ -219,6 +218,12 @@ int chunk_inner(parserdef *p, token *out) {
           err = chunk_normal_semicolon(p, NULL);  // ASI if something is pending
         }
         stack_dec(p);
+
+        // if this was also the end of a statement, close it
+        // FIXME: is this sustainable? should we let passes have their post-way?
+        if (p->curr->state == STATE__STATEMENT) {
+          stack_dec(p);
+        }
         return err;
       }
       return ERROR__UNEXPECTED;
@@ -236,10 +241,18 @@ int chunk_inner(parserdef *p, token *out) {
 
   // look for initial tokens
   if ((flag & FLAG__INITIAL) && is_begin_expr_keyword(s, len)) {
+    if (s[0] == 'r' || s[0] == 't') {  // return, throw
+      curr->flag |= FLAG__RESTRICT;
+    }
     out->type = TOKEN_KEYWORD;
     return 0;
   }
   // FIXME: for some reason everything but "let" is still a keyword even in invalid places.
+
+  // if this was a value, and we had a newline, emit ASI
+  if (!(flag & FLAG__INITIAL) && (flag & FLAG__VALUE) && p->prev_type == TOKEN_NEWLINE) {
+    return chunk_normal_semicolon(p, NULL);
+  }
 
   // next token should also be part of expr
   if (is_expr_keyword(s, len)) {
@@ -248,24 +261,31 @@ int chunk_inner(parserdef *p, token *out) {
   }
 
   // TODO: look for 'async' and lookahead +1 for 'function'
+  // nb. the "async () => {}" case is probably not gonna happen? mucho lookaheado
   // TODO: lookahead for :'s
-  // TODO: look for case, default
+  // TODO: look for 'case', 'default'
 
-  int restrict_keyword = 0;
-
-  // found a function or class
+  // found a control keyword
   if (is_control_keyword(s, len)) {
+    curr->flag = FLAG__INITIAL;  // reset for after
     int flag = 0;
     if (s[0] == 'd') {
       flag = FLAG__DO_WHILE;
     }
+    out->type = TOKEN_SYMBOL;
     return stack_inc(p, STATE__CONTROL, flag);
   } else if (is_hoist_keyword(s, len)) {
     // TODO: statement or expr based on STATE__ZERO/STATE__EXOR
     return ERROR__TODO;
   } else if (is_label_keyword(s, len)) {
-    p->flag |= PARSER__RESTRICT;
+    curr->flag |= FLAG__RESTRICT;
+    out->type = TOKEN_SYMBOL;
     return stack_inc(p, STATE__EXPECT_LABEL, 0);
+  } else if (is_asi_keyword(s, len)) {
+    // this should just catch 'yield'
+    curr->flag |= FLAG__RESTRICT;
+    out->type = TOKEN_SYMBOL;
+    return 0;
   }
 
   curr->flag |= FLAG__VALUE;
