@@ -31,7 +31,7 @@ const char *pretty_types[] = {
   "DOT",
   "OP",
   "ARROW",
-  "ELISON",
+  NULL,  // was ELISON, now unused
   "COLON",
   "TERNARY",
   "BRACE",
