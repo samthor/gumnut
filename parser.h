@@ -23,11 +23,17 @@
 #define _TOKEN_STACK_SIZE 224
 
 typedef struct {
+  uint8_t type;
+  uint8_t state;
+} parserstack;
+
+typedef struct {
   tokendef td;
   int prev_type;  // except comments and newlines
   uint8_t flags;
   uint8_t depth;  // must be >=1
   uint8_t stack[_TOKEN_STACK_SIZE];
+  uint8_t stack_next;
   token pending_asi;
 } parserdef;
 

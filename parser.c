@@ -30,6 +30,8 @@
 
 #define STACK__EXPR           16  // is expr- no var/const/throw, and hoisted are statements
 #define STACK__VALUE          32  // currently have 'value' (thus / is op, not regexp)
+#define STACK__HOIST_BRACE    64  // next {} is for a function/class, and _might_ be a value
+
 // TODO: can't have VALUE without EXPR
 
 #define FLAG__EXPECT_ID       1
@@ -41,17 +43,17 @@
 
 int modify_stack(parserdef *p, int inc, int type) {
   if (inc) {
-    if (++p->depth == _TOKEN_STACK_SIZE) {
+    if (++p->depth == _TOKEN_STACK_SIZE - 1) {
       p->flags |= FLAG__ERROR_STACK;
     }
-    uint8_t s = p->stack[p->depth];  // retain values set here
-    p->stack[p->depth] = (s & ~STACK__TYPEMASK) | (type & STACK__TYPEMASK);
+    p->stack[p->depth] = (p->stack_next & ~STACK__TYPEMASK) | (type & STACK__TYPEMASK);
+    p->stack_next = 0;
   } else {
     uint8_t prev = p->stack[p->depth];
     if ((prev & STACK__TYPEMASK) != type || p->depth == 1) {
       p->flags |= FLAG__ERROR_STACK;
     }
-    p->stack[p->depth+1] = 0;  // in case we set STACK__CONTROL etc but never used it
+    p->stack_next = 0;  // in case we set STACK__CONTROL etc but never used it
     p->stack[p->depth] = 0;
     --p->depth;
   }
@@ -59,9 +61,9 @@ int modify_stack(parserdef *p, int inc, int type) {
 }
 
 #define stack_has(p, op) (p->stack[p->depth] & (op))
-#define stack_next_has(p, op) (p->stack[p->depth+1] & (op))
+#define stack_next_has(p, op) (p->stack_next & (op))
 #define stack_set(p, op) (p->stack[p->depth] |= (op))
-#define stack_next_set(p, op) (p->stack[p->depth+1] |= (op))
+#define stack_next_set(p, op) (p->stack_next |= (op))
 #define stack_clear(p, op) (p->stack[p->depth] &= ~(op))
 
 int chunk_inner(parserdef *p, token *out) {
@@ -85,12 +87,7 @@ int chunk_inner(parserdef *p, token *out) {
   int flags = p->flags;
   p->flags = 0;
 
-  // we're a colon following a label, no state changes
-  if (out->type == TOKEN_COLON && p->prev_type == TOKEN_LABEL) {
-    return 0;
-  }
-
-  // brackets
+  // returnable cases
   switch (out->type) {
     case TOKEN_PAREN:
       if (out->p[0] == '(') {
@@ -99,6 +96,8 @@ int chunk_inner(parserdef *p, token *out) {
         if (!next_control && !stack_has(p, STACK__EXPR)) {
           // this will probably result in a value
           stack_set(p, STACK__EXPR | STACK__VALUE);
+        } else if (stack_has(p, STACK__VALUE)) {
+          // this is a function call or function-like call
         }
 
         // inside a control, this is effectively an expr (some exceptions... for (var...))
@@ -137,13 +136,13 @@ int chunk_inner(parserdef *p, token *out) {
           p->flags |= FLAG__INVALID_PROD;
         }
         modify_stack(p, 0, STACK__BRACE);
+
+        if (stack_has(p, STACK__HOIST_BRACE)) {
+          
+        }
       }
-
       return 0;
-  }
 
-  // simple cases
-  switch (out->type) {
     case TOKEN_NEWLINE:
     case TOKEN_SEMICOLON:
       // some cases handled by caller
@@ -157,12 +156,18 @@ int chunk_inner(parserdef *p, token *out) {
     case TOKEN_NUMBER:
     case TOKEN_STRING:
       stack_set(p, STACK__VALUE);
+      return 0;
+
+    case TOKEN_COLON:
+      // we're a colon following a label, no state changes
+      if (p->prev_type == TOKEN_LABEL) {
+        return 0;
+      }
       // fall-through
 
     case TOKEN_COMMA:
     case TOKEN_TERNARY:
-    case TOKEN_COLON:
-      stack_set(p, STACK__EXPR);
+      stack_set(p, STACK__EXPR | STACK__VALUE);
       return 0;
 
     case TOKEN_OP:
@@ -217,6 +222,9 @@ int chunk_inner(parserdef *p, token *out) {
       out->type = TOKEN_KEYWORD;
       p->flags |= FLAG__EXPECT_ID;
 
+      // whatever happens, the next {} is a hoisted thing
+      stack_set(p, STACK__HOIST_BRACE);
+
       if (out->len == 5) {
         // this class {} is an object literal
         stack_next_set(p, STACK__OBJECT);
@@ -226,7 +234,6 @@ int chunk_inner(parserdef *p, token *out) {
         // next {} builds a value
         stack_set(p, STACK__VALUE);
       }
-      printf("got hoist, is expr=%d value=%d\n", stack_has(p, STACK__EXPR), stack_has(p, STACK__VALUE));
 
       break;
     }
@@ -288,6 +295,7 @@ int prsr_next(parserdef *p, token *out) {
     return ret;
   }
 
+  // ASI and semicolon resets
   if ((p->flags & FLAG__INVALID_PROD) && !stack_has(p, STACK__TYPEMASK)) {
     // only ASI in normal {} control
   } else if ((p->flags & FLAG__INVALID_PROD) || out->type == TOKEN_SEMICOLON) {
@@ -315,7 +323,6 @@ int prsr_next(parserdef *p, token *out) {
   } else if (stack_has(p, STACK__VALUE) && !stack_has(p, STACK__EXPR)) {
     return ERROR__VALUE_NO_EXPR;
   }
-
   return 0;
 }
 
