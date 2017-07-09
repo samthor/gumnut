@@ -16,8 +16,9 @@
 
 #include "token.h"
 
-#define ERROR__VALUE_NO_EXPR -1
+#define ERROR__VALUE_NO_EXPR -1  // internal error
 #define ERROR__STACK         -2
+#define ERROR__SYNTAX        -3
 
 #define _TOKEN_STACK_SIZE 224
 
@@ -27,7 +28,6 @@ typedef struct {
   uint8_t flags;
   uint8_t depth;  // must be >=1
   uint8_t stack[_TOKEN_STACK_SIZE];
-  int emit_asi;
   token pending_asi;
 } parserdef;
 

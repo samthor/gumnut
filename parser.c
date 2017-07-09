@@ -36,21 +36,26 @@
 #define FLAG__EXPECT_LABEL    2
 #define FLAG__RESTRICT        4
 
+#define FLAG__INVALID_PROD    64   // invalid grammar production, emit ASI if possible
+#define FLAG__ERROR_STACK     128  // invalid stack state
+
 int modify_stack(parserdef *p, int inc, int type) {
   if (inc) {
-    ++p->depth;
+    if (++p->depth == _TOKEN_STACK_SIZE) {
+      p->flags |= FLAG__ERROR_STACK;
+    }
     uint8_t s = p->stack[p->depth];  // retain values set here
     p->stack[p->depth] = (s & ~STACK__TYPEMASK) | (type & STACK__TYPEMASK);
-    return 0;
+  } else {
+    uint8_t prev = p->stack[p->depth];
+    if ((prev & STACK__TYPEMASK) != type || p->depth == 1) {
+      p->flags |= FLAG__ERROR_STACK;
+    }
+    p->stack[p->depth+1] = 0;  // in case we set STACK__CONTROL etc but never used it
+    p->stack[p->depth] = 0;
+    --p->depth;
   }
-  uint8_t prev = p->stack[p->depth];
-  if ((prev & STACK__TYPEMASK) != type) {
-    return prev & STACK__TYPEMASK;
-  }
-  p->stack[p->depth+1] = 0;  // in case we set STACK__CONTROL etc but never used it
-  p->stack[p->depth] = 0;
-  --p->depth;
-  return 0;
+  return p->flags & FLAG__ERROR_STACK;
 }
 
 #define stack_has(p, op) (p->stack[p->depth] & (op))
@@ -69,8 +74,7 @@ int chunk_inner(parserdef *p, token *out) {
   switch (out->type) {
     case TOKEN_NEWLINE:
       if (p->flags & FLAG__RESTRICT) {
-        p->flags = 0;
-        p->emit_asi = 1;
+        p->flags = FLAG__INVALID_PROD;
       }
       // fall-through
 
@@ -130,7 +134,7 @@ int chunk_inner(parserdef *p, token *out) {
       } else {
         // emit ASI if this ended with an open expr
         if (!stack_has(p, STACK__OBJECT) && stack_has(p, STACK__EXPR)) {
-          p->emit_asi = 1;
+          p->flags |= FLAG__INVALID_PROD;
         }
         modify_stack(p, 0, STACK__BRACE);
       }
@@ -166,7 +170,7 @@ int chunk_inner(parserdef *p, token *out) {
         if (p->prev_type != TOKEN_NEWLINE) {
           return 0;  // only a postfix if there was a value, and prev wasn't newline
         }
-        p->emit_asi = 1;
+        p->flags |= FLAG__INVALID_PROD;
       }
       stack_clear(p, STACK__VALUE);
       return 0;
@@ -284,15 +288,9 @@ int prsr_next(parserdef *p, token *out) {
     return ret;
   }
 
-  // look for stack growth/death
-  if (p->depth == _TOKEN_STACK_SIZE - 1 || !p->depth) {
-    return ERROR__STACK;
-  }
-
-  if (p->emit_asi && !stack_has(p, STACK__TYPEMASK)) {
+  if ((p->flags & FLAG__INVALID_PROD) && !stack_has(p, STACK__TYPEMASK)) {
     // only ASI in normal {} control
-    p->emit_asi = 0;
-  } else if (p->emit_asi || out->type == TOKEN_SEMICOLON) {
+  } else if ((p->flags & FLAG__INVALID_PROD) || out->type == TOKEN_SEMICOLON) {
     // clear state if we see a semicolon
     stack_clear(p, STACK__VALUE | STACK__EXPR);
     if (stack_has(p, STACK__CONTROL)) {
@@ -300,18 +298,21 @@ int prsr_next(parserdef *p, token *out) {
     }
 
     // requested that we emit an ASI before this token, so store and return an ASI
-    if (p->emit_asi) {
-      p->emit_asi = 0;
+    if ((p->flags & FLAG__INVALID_PROD)) {
+      p->flags &= ~FLAG__INVALID_PROD;
       p->pending_asi = *out;
       out->len = 0;
       out->type = TOKEN_SEMICOLON;
-      p->prev_type = TOKEN_SEMICOLON;  // for next chunk_inner call
-      return 0;
     }
   }
   p->prev_type = out->type;
 
-  if (stack_has(p, STACK__VALUE) && !stack_has(p, STACK__EXPR)) {
+  // error cases
+  if (p->flags & FLAG__INVALID_PROD) {
+    return ERROR__SYNTAX;
+  } else if (p->flags & FLAG__ERROR_STACK) {
+    return ERROR__STACK;  // stack too big or small, invalid value
+  } else if (stack_has(p, STACK__VALUE) && !stack_has(p, STACK__EXPR)) {
     return ERROR__VALUE_NO_EXPR;
   }
 
