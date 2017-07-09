@@ -117,3 +117,8 @@ int is_decl_keyword(char *s, int len) {
 int is_label_keyword(char *s, int len) {
   return (len == 5 && !memcmp(s, "break", 5)) || (len == 8 && !memcmp(s, "continue", 8));
 }
+
+// is ++ or --
+int is_double_addsub(char *s, int len) {
+  return len == 2 && (s[0] == '+' || s[0] == '-') && s[0] == s[1];
+}

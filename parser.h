@@ -17,6 +17,7 @@
 #include "token.h"
 
 #define ERROR__VALUE_NO_EXPR -1
+#define ERROR__STACK         -2
 
 #define _TOKEN_STACK_SIZE 224
 

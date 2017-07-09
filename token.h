@@ -47,7 +47,6 @@ tokendef prsr_init(char *p);
 #define TOKEN_DOT       5
 #define TOKEN_OP        6   // includes 'in', 'instanceof'
 #define TOKEN_ARROW     7   // arrow function =>
-#define TOKEN_ELISON    8
 #define TOKEN_COLON     9
 #define TOKEN_TERNARY   10
 #define TOKEN_BRACE     11
