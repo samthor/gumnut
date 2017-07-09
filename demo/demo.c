@@ -66,7 +66,10 @@ int main() {
   if (rem > 0) {
     printf("can't parse reminder:\n%s\n", buf + rem);
     return -2;
+  } else if (rem < 0) {
+    printf("syntax error: %d\n", rem);
   }
+  
 
   return 0;
 }

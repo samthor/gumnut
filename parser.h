@@ -16,24 +16,26 @@
 
 #include "token.h"
 
-#define ERROR__VALUE_NO_EXPR -1  // internal error
-#define ERROR__STACK         -2
-#define ERROR__SYNTAX        -3
+#define ERROR__SYNTAX_ASI    -1
+#define ERROR__SYNTAX        -2
+#define ERROR__UNEXPECTED    -3
+#define ERROR__STACK         -4
+#define ERROR__TODO          -5
 
-#define _TOKEN_STACK_SIZE 224
+#define __STACK_SIZE 512
 
 typedef struct {
-  uint8_t type;
   uint8_t state;
+  uint8_t flag;
 } parserstack;
 
 typedef struct {
   tokendef td;
   int prev_type;  // except comments and newlines
-  uint8_t flags;
-  uint8_t depth;  // must be >=1
-  uint8_t stack[_TOKEN_STACK_SIZE];
-  uint8_t stack_next;
+  uint8_t flag;
+  int8_t move;
+  parserstack stack[__STACK_SIZE];
+  parserstack *curr;
   token pending_asi;
 } parserdef;
 

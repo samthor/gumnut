@@ -20,264 +20,256 @@
 #include "parser.h"
 #include "utils.h"
 
-#define STACK__BRACE          0   // is {}s
-#define STACK__ARRAY          1   // is []s
-#define STACK__PAREN          2   // is ()s
-#define STACK__TYPEMASK       3   // mask for types
+#define STATE__ZERO          -1  // zero stack state
+#define STATE__BLOCK          0  // execution block
+#define STATE__STATEMENT      1  // single statement only
+#define STATE__PARENS         2  // (...) block: on its own, call or def
+#define STATE__ARRAY          3  // array or index into array
+#define STATE__CONTROL        4  // generic control statement: xx (foo) {}
+#define STATE__OBJECT         5
+#define STATE__EXPECT_ID      6
+#define STATE__EXPECT_LABEL   7
+#define STATE__ARROW          8
 
-#define STACK__OBJECT         4   // is object literal
-#define STACK__CONTROL        8   // is a control stack
+// flags for parser
+#define PARSER__RESTRICT        1  // causes ASI on newline
 
-#define STACK__EXPR           16  // is expr- no var/const/throw, and hoisted are statements
-#define STACK__VALUE          32  // currently have 'value' (thus / is op, not regexp)
-#define STACK__HOIST_BRACE    64  // next {} is for a function/class, and _might_ be a value
+// flags for default states
+#define FLAG__VALUE           1  // nb. don't re-use
+#define FLAG__INITIAL         2  // allows 'var' etc, as well as function/class statements
 
-// TODO: can't have VALUE without EXPR
+// flags for STATE__CONTROL
+#define FLAG__DO_WHILE        4
+#define FLAG__SEEN_PAREN      8
 
-#define FLAG__EXPECT_ID       1
-#define FLAG__EXPECT_LABEL    2
-#define FLAG__RESTRICT        4
 
-#define FLAG__INVALID_PROD    64   // invalid grammar production, emit ASI if possible
-#define FLAG__ERROR_STACK     128  // invalid stack state
-
-int modify_stack(parserdef *p, int inc, int type) {
-  if (inc) {
-    if (++p->depth == _TOKEN_STACK_SIZE - 1) {
-      p->flags |= FLAG__ERROR_STACK;
-    }
-    p->stack[p->depth] = (p->stack_next & ~STACK__TYPEMASK) | (type & STACK__TYPEMASK);
-    p->stack_next = 0;
-  } else {
-    uint8_t prev = p->stack[p->depth];
-    if ((prev & STACK__TYPEMASK) != type || p->depth == 1) {
-      p->flags |= FLAG__ERROR_STACK;
-    }
-    p->stack_next = 0;  // in case we set STACK__CONTROL etc but never used it
-    p->stack[p->depth] = 0;
-    --p->depth;
+int stack_inc(parserdef *p, int state, int flag) {
+  ++p->curr;
+  p->curr->state = state;
+  p->curr->flag = flag;
+  if (p->curr - p->stack == __STACK_SIZE - 1) {
+    return -1;
   }
-  return p->flags & FLAG__ERROR_STACK;
+  return 0;
 }
 
-#define stack_has(p, op) (p->stack[p->depth] & (op))
-#define stack_next_has(p, op) (p->stack_next & (op))
-#define stack_set(p, op) (p->stack[p->depth] |= (op))
-#define stack_next_set(p, op) (p->stack_next |= (op))
-#define stack_clear(p, op) (p->stack[p->depth] &= ~(op))
+int stack_dec(parserdef *p) {
+  --p->curr;
+  if (p->curr == p->stack) {
+    return -1;
+  }
+  return 0;
+}
+
+int chunk_normal_semicolon(parserdef *p, token *out) {
+  if (p->curr->state == STATE__BLOCK) {
+    p->curr->flag = FLAG__INITIAL;
+    if (!out) {
+      return ERROR__SYNTAX_ASI;  // this is an ASI, be helpful to caller
+    }
+  }
+  return 0;
+}
 
 int chunk_inner(parserdef *p, token *out) {
-  int ret = prsr_next_token(&p->td, stack_has(p, STACK__VALUE), out);
-  if (ret) {
-    return ret; 
+  parserstack *curr = p->curr;
+  char *s = out->p;
+  int len = out->len;
+
+  switch (curr->state) {
+    case STATE__BLOCK:
+    case STATE__PARENS:
+    case STATE__ARRAY:
+      break;  // secret tip about writing JS parsers: these are all just expression lists
+
+    // TODO: implement complex states here:
+    // * function/class
+    // * object literal
+    // * control blocks (+do/while)
+
+    case STATE__CONTROL:
+      if (!(curr->flag & FLAG__SEEN_PAREN) && out->type == TOKEN_PAREN && s[0] == '(') {
+        curr->flag |= FLAG__SEEN_PAREN;
+        stack_inc(p, STATE__PARENS, FLAG__INITIAL);
+        return 0;
+      }
+
+      // FIXME: This doesn't work for do/while, which allows "do console.info; while (0);"
+      // FIXME: we need a notion of "single statement" (returns on newline)
+      if (out->type == TOKEN_BRACE && s[0] == '{') {
+        curr->state = STATE__BLOCK;  // swap state
+        curr->flag = FLAG__INITIAL;
+        return 0;
+      }
+      stack_dec(p);
+      break;
+
+    case STATE__EXPECT_ID:
+      stack_dec(p);
+      if (out->type == TOKEN_LIT) {
+        out->type = TOKEN_SYMBOL;
+        return 0;
+      }
+      break;
+
+    case STATE__EXPECT_LABEL:
+      stack_dec(p);
+      if (out->type == TOKEN_LIT) {
+        out->type = TOKEN_LABEL;
+        return 0;
+      }
+      break;
+
+    case STATE__ARROW:
+      if (out->type == TOKEN_BRACE && s[0] == '{') {
+        curr->state = STATE__BLOCK;  // swap state
+        curr->flag = FLAG__INITIAL;
+        return 0;
+      } 
+      // FIXME: swap out for 'statement'
+      stack_dec(p);
+      break;
+
+    default:
+      printf("got unhandled state: %d\n", curr->state);
+      return ERROR__TODO;
   }
 
-  // tokens ignored for parsing
+  // zero states
   switch (out->type) {
+    case TOKEN_EOF:
+      if (curr->state != STATE__BLOCK || curr != (p->stack + 1)) {
+        return ERROR__STACK;
+      } else if (!(curr->flag & FLAG__INITIAL)) {
+        return chunk_normal_semicolon(p, NULL);;
+      }
+      return 0;
     case TOKEN_NEWLINE:
-      if (p->flags & FLAG__RESTRICT) {
-        p->flags = FLAG__INVALID_PROD;
+      if (p->flag & PARSER__RESTRICT) {
+        p->flag = 0;
+        return chunk_normal_semicolon(p, NULL);
       }
       // fall-through
-
     case TOKEN_COMMENT:
       return 0;
   }
 
-  int flags = p->flags;
-  p->flags = 0;
+  // replace 'in' and 'instanceof' with op
+  if (out->type == TOKEN_LIT && is_op_keyword(s, len)) {
+    out->type = TOKEN_OP;
+  } else if (out->type == TOKEN_OP && is_double_addsub(s, len)) {
+    // ++/--: if flag is a value; op in a block and after a newline; maybe yield an ASI
+    if ((curr->flag & FLAG__VALUE) && (p->prev_type == TOKEN_NEWLINE)) {
+      return chunk_normal_semicolon(p, NULL);
+    }
+    return 0;  // the addsub doesn't change flags anyway
+  }
 
-  // returnable cases
+  int flag = curr->flag;
+  curr->flag = 0;
+
+  // non-literal tokens
   switch (out->type) {
-    case TOKEN_PAREN:
-      if (out->p[0] == '(') {
-        // left-hand side: look for whether this will be a value when done
-        int next_control = stack_next_has(p, STACK__CONTROL);
-        if (!next_control && !stack_has(p, STACK__EXPR)) {
-          // this will probably result in a value
-          stack_set(p, STACK__EXPR | STACK__VALUE);
-        } else if (stack_has(p, STACK__VALUE)) {
-          // this is a function call or function-like call
-        }
-
-        // inside a control, this is effectively an expr (some exceptions... for (var...))
-        modify_stack(p, 1, STACK__PAREN);
-        stack_set(p, STACK__EXPR);
-      } else {
-        // right-hand: just close
-        modify_stack(p, 0, STACK__PAREN);
-      }
+    case TOKEN_TERNARY:
+    case TOKEN_COLON:
+    case TOKEN_COMMA:
+    case TOKEN_OP:
       return 0;
 
-    case TOKEN_ARRAY:
-      if (out->p[0] == '[') {
-        // left-hand: open and set expr
-        modify_stack(p, 1, STACK__ARRAY);
-        stack_set(p, STACK__EXPR);
-      } else {
-        modify_stack(p, 0, STACK__ARRAY);
-      }
-      return 0;
-
-    case TOKEN_BRACE:
-      if (out->p[0] == '{') {
-        // if we're in an open expr, this is an object
-        int is_value = stack_has(p, STACK__VALUE);
-
-        if (p->prev_type != TOKEN_ARROW && stack_has(p, STACK__EXPR) && !stack_has(p, STACK__VALUE)) {
-          stack_next_set(p, STACK__OBJECT);
-        }
-        modify_stack(p, 1, STACK__BRACE);
-        // FIXME: functions probably seen as object..
-        printf("open brace, object=%d value=%d\n", stack_has(p, STACK__OBJECT), is_value);
-      } else {
-        // emit ASI if this ended with an open expr
-        if (!stack_has(p, STACK__OBJECT) && stack_has(p, STACK__EXPR)) {
-          p->flags |= FLAG__INVALID_PROD;
-        }
-        modify_stack(p, 0, STACK__BRACE);
-
-        if (stack_has(p, STACK__HOIST_BRACE)) {
-          
-        }
-      }
-      return 0;
-
-    case TOKEN_NEWLINE:
     case TOKEN_SEMICOLON:
-      // some cases handled by caller
-      return 0;
+      return chunk_normal_semicolon(p, out);
 
-    case TOKEN_DOT:
-      p->flags |= FLAG__EXPECT_ID;
-      return 0;
-
+    case TOKEN_STRING:
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
-    case TOKEN_STRING:
-      stack_set(p, STACK__VALUE);
+      curr->flag = FLAG__VALUE;
       return 0;
 
-    case TOKEN_COLON:
-      // we're a colon following a label, no state changes
-      if (p->prev_type == TOKEN_LABEL) {
-        return 0;
+    case TOKEN_ARROW:
+      curr->flag = FLAG__VALUE;
+      return stack_inc(p, STATE__ARROW, 0);
+
+    case TOKEN_PAREN:
+      if (s[0] == '(') {
+        return stack_inc(p, STATE__PARENS, 0);
+      } else if (curr->state == STATE__PARENS) {
+        return stack_dec(p);
       }
-      // fall-through
+      return ERROR__UNEXPECTED;
 
-    case TOKEN_COMMA:
-    case TOKEN_TERNARY:
-      stack_set(p, STACK__EXPR | STACK__VALUE);
-      return 0;
+    case TOKEN_ARRAY:
+      if (s[0] == '[') {
+        return stack_inc(p, STATE__ARRAY, 0);
+      } else if (curr->state == STATE__ARRAY) {
+        return stack_dec(p);
+      }
+      return ERROR__UNEXPECTED;
 
-    case TOKEN_OP:
-      if (stack_has(p, STACK__VALUE) && is_double_addsub(out->p, out->len)) {
-        if (p->prev_type != TOKEN_NEWLINE) {
-          return 0;  // only a postfix if there was a value, and prev wasn't newline
+    case TOKEN_BRACE:
+      if (s[0] == '{') {
+        // this is a block if we're the first expr (orphaned block)
+        if (flag & FLAG__INITIAL) {
+          curr->flag |= FLAG__INITIAL;  // restore to intial after this
+          return stack_inc(p, STATE__BLOCK, FLAG__INITIAL);
         }
-        p->flags |= FLAG__INVALID_PROD;
+        return stack_inc(p, STATE__OBJECT, 0);
+      } else if (curr->state == STATE__BLOCK && curr > p->stack) {   // only look for BLOCK here
+        int err = 0;
+        if (!(flag & FLAG__INITIAL)) {
+          err = chunk_normal_semicolon(p, NULL);  // ASI if something is pending
+        }
+        stack_dec(p);
+        return err;
       }
-      stack_clear(p, STACK__VALUE);
-      return 0;
+      return ERROR__UNEXPECTED;
+
+    case TOKEN_DOT:
+      return stack_inc(p, STATE__EXPECT_ID, 0);
 
     case TOKEN_LIT:
-      break;
+      break;  // continues excitement below
 
     default:
-      return 0;
+      printf("got unhandled token in chunk_inner: %d\n", out->type);
+      return ERROR__TODO;
   }
 
-  // TODO: check for LHS of object literal
+  // look for initial tokens
+  if ((flag & FLAG__INITIAL) && is_begin_expr_keyword(s, len)) {
+    out->type = TOKEN_KEYWORD;
+    return 0;
+  }
+  // FIXME: for some reason everything but "let" is still a keyword even in invalid places.
 
-  out->type = TOKEN_SYMBOL;  // assume symbol
-  do {
-
-    // short-circuit for IDs (e.g. 'class Foo', 'foo.bar')
-    if (flags & FLAG__EXPECT_ID) {
-      return 0;  // explicitly return
-    }
-
-    // we just had a continue or break, must be a label
-    if (flags & FLAG__EXPECT_LABEL) {
-      out->type = TOKEN_LABEL;
-      break;
-    }
-
-    // look for in/instanceof, which are always ops
-    if (is_op_keyword(out->p, out->len)) {
-      out->type = TOKEN_OP;
-      stack_clear(p, STACK__VALUE);
-      break;
-    }
-
-    // look for await etc, which act a bit like ops (e.g., 'var x = await foo')
-    if (is_expr_keyword(out->p, out->len)) {
-      out->type = TOKEN_KEYWORD;
-      stack_clear(p, STACK__VALUE);
-      break;
-    }
-
-    // hoist or looks like a hoist
-    if (is_hoist_keyword(out->p, out->len)) {
-      out->type = TOKEN_KEYWORD;
-      p->flags |= FLAG__EXPECT_ID;
-
-      // whatever happens, the next {} is a hoisted thing
-      stack_set(p, STACK__HOIST_BRACE);
-
-      if (out->len == 5) {
-        // this class {} is an object literal
-        stack_next_set(p, STACK__OBJECT);
-      }
-
-      if (stack_has(p, STACK__EXPR)) {
-        // next {} builds a value
-        stack_set(p, STACK__VALUE);
-      }
-
-      break;
-    }
-
-    // set restrict on ASI
-    if (is_asi_keyword(out->p, out->len)) {
-      out->type = TOKEN_KEYWORD;
-      p->flags |= FLAG__RESTRICT;
-    }
-
-    if (stack_has(p, STACK__EXPR)) {
-      if (out->type != TOKEN_KEYWORD && is_keyword(out->p, out->len)) {
-        // no other keywords are valid here, but hey /shrug
-        out->type = TOKEN_KEYWORD;
-      }
-    } else {
-      // this may possibly be a label, look for colon
-      // look for backticks
-      // TODO
-
-      out->type = TOKEN_KEYWORD;
-
-      if (is_control_keyword(out->p, out->len)) {
-        // got an if/for/while etc, next ()'s are control
-        stack_next_set(p, STACK__CONTROL);
-      } else if (is_label_keyword(out->p, out->len)) {
-        // break or continue, expects a label to follow
-        p->flags |= FLAG__EXPECT_LABEL;
-      } else if (is_begin_expr_keyword(out->p, out->len)) {
-        // should be followed by an ID
-        stack_set(p, STACK__EXPR);
-      } else if (is_keyword(out->p, out->len)) {
-        // not an expression, but is a keyword
-      } else {
-        out->type = TOKEN_SYMBOL;
-      }
-    }
-
-  } while (0);
-
-  if (out->type == TOKEN_SYMBOL) {
-    stack_set(p, STACK__VALUE | STACK__EXPR);
+  // next token should also be part of expr
+  if (is_expr_keyword(s, len)) {
+    out->type = TOKEN_KEYWORD;
+    return 0;
   }
 
+  // TODO: look for 'async' and lookahead +1 for 'function'
+  // TODO: lookahead for :'s
+  // TODO: look for case, default
+
+  int restrict_keyword = 0;
+
+  // found a function or class
+  if (is_control_keyword(s, len)) {
+    int flag = 0;
+    if (s[0] == 'd') {
+      flag = FLAG__DO_WHILE;
+    }
+    return stack_inc(p, STATE__CONTROL, flag);
+  } else if (is_hoist_keyword(s, len)) {
+    // TODO: statement or expr based on STATE__ZERO/STATE__EXOR
+    return ERROR__TODO;
+  } else if (is_label_keyword(s, len)) {
+    p->flag |= PARSER__RESTRICT;
+    return stack_inc(p, STATE__EXPECT_LABEL, 0);
+  }
+
+  curr->flag |= FLAG__VALUE;
+  out->type = TOKEN_SYMBOL;
   return 0;
 }
 
@@ -289,39 +281,27 @@ int prsr_next(parserdef *p, token *out) {
     return 0;
   }
 
-  // actual chunk call
-  int ret = chunk_inner(p, out);
+  // get token
+  parserstack *curr = p->curr;
+  int ret = prsr_next_token(&p->td, curr->flag & FLAG__VALUE, out);
   if (ret) {
-    return ret;
+    return ret; 
   }
 
-  // ASI and semicolon resets
-  if ((p->flags & FLAG__INVALID_PROD) && !stack_has(p, STACK__TYPEMASK)) {
-    // only ASI in normal {} control
-  } else if ((p->flags & FLAG__INVALID_PROD) || out->type == TOKEN_SEMICOLON) {
-    // clear state if we see a semicolon
-    stack_clear(p, STACK__VALUE | STACK__EXPR);
-    if (stack_has(p, STACK__CONTROL)) {
-      stack_set(p, STACK__EXPR);  // after ; in control (e.g., for) can't have 'var'
+  // actual chunk call
+  ret = chunk_inner(p, out);
+  if (ret) {
+    if (ret != ERROR__SYNTAX_ASI) {
+      return ret;
     }
-
-    // requested that we emit an ASI before this token, so store and return an ASI
-    if ((p->flags & FLAG__INVALID_PROD)) {
-      p->flags &= ~FLAG__INVALID_PROD;
-      p->pending_asi = *out;
-      out->len = 0;
-      out->type = TOKEN_SEMICOLON;
-    }
+    p->pending_asi = *out;
+    out->len = 0;
+    out->type = TOKEN_SEMICOLON;
   }
   p->prev_type = out->type;
 
-  // error cases
-  if (p->flags & FLAG__INVALID_PROD) {
-    return ERROR__SYNTAX;
-  } else if (p->flags & FLAG__ERROR_STACK) {
-    return ERROR__STACK;  // stack too big or small, invalid value
-  } else if (stack_has(p, STACK__VALUE) && !stack_has(p, STACK__EXPR)) {
-    return ERROR__VALUE_NO_EXPR;
+  if (p->curr == p->stack) {
+    return ERROR__STACK;
   }
   return 0;
 }
@@ -330,7 +310,9 @@ int prsr_fp(char *buf, int (*fp)(token *)) {
   parserdef p;
   bzero(&p, sizeof(p));
   p.td = prsr_init(buf);
-  p.depth = 1;
+  p.stack[0].state = STATE__ZERO;
+  p.curr = p.stack + 1; 
+  p.curr->flag = FLAG__INITIAL;
 
   token out;
   int ret;
