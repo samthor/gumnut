@@ -50,9 +50,7 @@ const char *pretty_types[] = {
 
 int run_testdef(testdef *td) {
   parserdef d;
-  bzero(&d, sizeof(d));
-  d.td = prsr_init((char *) td->input);
-  d.depth = 1;
+  prsr_parser_init(&d, (char *) td->input);
 
   token out;
   int ret;

@@ -26,3 +26,4 @@ int is_op_keyword(char *s, int len);
 int is_decl_keyword(char *s, int len);
 int is_label_keyword(char *s, int len);
 int is_double_addsub(char *s, int len);
+int is_getset(char *s, int len);

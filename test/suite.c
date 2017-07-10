@@ -97,6 +97,21 @@ int main() {
     TOKEN_SEMICOLON,
   );
 
+  _test("switch cases", "switch (1) { case 1: var x }",
+    TOKEN_KEYWORD,   // switch
+    TOKEN_PAREN,     // (
+    TOKEN_NUMBER,    // 1
+    TOKEN_PAREN,     // )
+    TOKEN_BRACE,     // {
+    TOKEN_SYMBOL,    // case
+    TOKEN_NUMBER,    // 1
+    TOKEN_COLON,     // :
+    TOKEN_KEYWORD,   // var
+    TOKEN_SYMBOL,    // x
+    TOKEN_SEMICOLON,
+    TOKEN_BRACE,     // }
+  );
+
   _test("do-while ASI", "do {} while (true)foo()",
     TOKEN_KEYWORD,   // do
     TOKEN_BRACE,     // {

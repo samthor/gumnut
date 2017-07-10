@@ -38,5 +38,6 @@ typedef struct {
   token pending_asi;
 } parserdef;
 
+int prsr_parser_init(parserdef *p, char *buf);
 int prsr_next(parserdef *p, token *out);
 int prsr_fp(char *buf, int (*fp)(token *));

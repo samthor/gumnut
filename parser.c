@@ -34,6 +34,7 @@
 #define STATE__MUST_WHILE     10
 #define STATE__ARROW          11
 #define STATE__HOIST          12
+#define STATE__MUST_COLON     13
 
 // flags for default states
 #define FLAG__VALUE           1
@@ -45,6 +46,11 @@
 
 // flags for hoist
 #define FLAG__CLASS           16  // class, not function
+
+// flags for object
+#define FLAG__RIGHT           32  // right side of object
+#define FLAG__SEEN_MODIFIER   64  // seen 'get' or 'set'
+
 
 int stack_inc(parserdef *p, int state, int flag) {
   ++p->curr;
@@ -111,6 +117,19 @@ int chunk_normal_semicolon(parserdef *p, token *out) {
   return 0;
 }
 
+int chunk_lookahead_symbol(tokendef td) {
+  for (;;) {
+    token out;
+    int ret = prsr_next_token(&td, 0, &out);
+    if (ret) {
+      return -1;
+    } else if (out.type == TOKEN_COMMENT || out.type == TOKEN_NEWLINE) {
+      continue;
+    }
+    return out.type;
+  }
+}
+
 int chunk_inner(parserdef *p, token *out) {
   char *s = out->p;
   int len = out->len;
@@ -135,13 +154,45 @@ int chunk_inner(parserdef *p, token *out) {
     case STATE__ARRAY:
       break;  // secret tip about writing JS parsers: these are all just expression lists
 
-    // TODO: implement complex states here:
-    // * object literal
-  
+    case STATE__OBJECT:
+      printf("state_object doing stuff: %d (depth=%d)\n", out->type, p->curr - p->stack);
+      if (out->type == TOKEN_COMMA) {
+        printf("found reset\n");
+        p->curr->flag = 0;
+        return 0;
+      } else if (out->type == TOKEN_BRACE && s[0] == '}') {
+        return stack_dec(p);
+      } else if (p->curr->flag & FLAG__RIGHT) {
+        // do nothing, just don't look for lits/colon
+      } else if (out->type == TOKEN_LIT) {
+        if (!(p->curr->flag & FLAG__SEEN_MODIFIER) && is_getset(s, len)) {
+          // matched 'get' or 'set', return as keyword
+          printf("found getset\n");
+          out->type = TOKEN_KEYWORD;
+          p->curr->flag |= FLAG__SEEN_MODIFIER;
+        } else {
+          // otherwise it's always a symbol
+          printf("found symbol\n");
+          out->type = TOKEN_SYMBOL;
+        }
+        return 0;
+      } else if (out->type == TOKEN_COLON) {
+        printf("switch to right\n");
+        p->curr->flag = FLAG__RIGHT;
+        return 0;
+      }
+
+      // give up and just look for a statement
+      if (p->curr->flag & FLAG__RIGHT) {
+        printf("llooking for STATEMENT_ONE\n");
+        stack_inc(p, STATE__STATEMENT_ONE, 0);
+      }
+      break;
+
     case STATE__CONTROL:
       if (out->type == TOKEN_PAREN && s[0] == '(') {
-        stack_inc(p, STATE__PARENS, FLAG__INITIAL);  // different than below, allow FLAG__INITIAL
-        return 0;
+        // allow FLAG__INITIAL inside control block (e.g. "for (var ...)")
+        return stack_inc(p, STATE__PARENS, FLAG__INITIAL);
       }
 
       // otherwise, pretend we saw it
@@ -194,6 +245,13 @@ int chunk_inner(parserdef *p, token *out) {
         return 0;
       }
 
+      return ERROR__UNEXPECTED;
+
+    case STATE__MUST_COLON:
+      stack_dec(p);
+      if (out->type == TOKEN_COLON) {
+        return 0;
+      }
       return ERROR__UNEXPECTED;
 
     case STATE__EXPECT_ID:
@@ -341,8 +399,6 @@ int chunk_inner(parserdef *p, token *out) {
 
   // TODO: look for 'async' and lookahead +1 for 'function'
   // nb. the "async () => {}" case is probably not gonna happen? mucho lookaheado
-  // TODO: lookahead for :'s
-  // TODO: look for 'case', 'default'
 
   // found a control keyword
   if (is_control_keyword(s, len)) {
@@ -371,6 +427,28 @@ int chunk_inner(parserdef *p, token *out) {
     return 0;
   }
 
+  // look for initial label-like cases
+  if (flag & FLAG__INITIAL) {
+    if (len == 4 && !memcmp(s, "case", 4)) {
+      p->curr->flag |= FLAG__INITIAL;  // reset for after
+      out->type = TOKEN_KEYWORD;
+      printf("got TODO in case\n");
+      // TODO: look for STATEMENT but ending at :
+      return ERROR__TODO;
+    }
+    if (len == 7 && !memcmp(s, "default", 7)) {
+      p->curr->flag |= FLAG__INITIAL;  // reset for after
+      out->type = TOKEN_KEYWORD;
+      return stack_inc(p, STATE__MUST_COLON, 0);
+    }
+    int next_type = chunk_lookahead_symbol(p->td);
+    if (next_type == TOKEN_COLON) {
+      p->curr->flag |= FLAG__INITIAL;  // reset for after
+      out->type = TOKEN_LABEL;
+      return stack_inc(p, STATE__MUST_COLON, 0);
+    }
+  }
+
   p->curr->flag |= FLAG__VALUE;
   out->type = TOKEN_SYMBOL;
   return 0;
@@ -395,6 +473,17 @@ int prsr_next(parserdef *p, token *out) {
   ret = chunk_inner(p, out);
   if (ret) {
     if (ret != ERROR__SYNTAX_ASI) {
+
+      if (ret == ERROR__UNEXPECTED) {
+        printf("unexpected: [%d] %.*s\n", out->line_no, out->len, out->p);
+      }
+      parserstack *tmp = p->curr;
+      while (tmp != p->stack) {
+        printf("... state=%d flag=%d\n", tmp->state, tmp->flag);
+        --tmp;
+      }
+      printf("error: %d\n", ret);
+
       return ret;
     }
     p->pending_asi = *out;
@@ -409,13 +498,18 @@ int prsr_next(parserdef *p, token *out) {
   return 0;
 }
 
+int prsr_parser_init(parserdef *p, char *buf) {
+  bzero(p, sizeof(parserdef));
+  p->td = prsr_init(buf);
+  p->stack[0].state = STATE__ZERO;
+  p->curr = p->stack + 1; 
+  p->curr->flag = FLAG__INITIAL;
+  return 0;
+}
+
 int prsr_fp(char *buf, int (*fp)(token *)) {
   parserdef p;
-  bzero(&p, sizeof(p));
-  p.td = prsr_init(buf);
-  p.stack[0].state = STATE__ZERO;
-  p.curr = p.stack + 1; 
-  p.curr->flag = FLAG__INITIAL;
+  prsr_parser_init(&p, buf);
 
   token out;
   int ret;

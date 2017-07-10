@@ -122,3 +122,7 @@ int is_label_keyword(char *s, int len) {
 int is_double_addsub(char *s, int len) {
   return len == 2 && (s[0] == '+' || s[0] == '-') && s[0] == s[1];
 }
+
+int is_getset(char *s, int len) {
+  return len == 3 && (s[0] == 'g' || s[0] == 's') && !memcmp(s+1, "et", 2);
+}
