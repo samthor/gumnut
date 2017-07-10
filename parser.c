@@ -20,28 +20,31 @@
 #include "parser.h"
 #include "utils.h"
 
-#define STATE__ZERO          -1  // zero stack state
-#define STATE__BLOCK          0  // execution block
-#define STATE__STATEMENT      1  // single statement only (i.e., optional {}'s)
-#define STATE__STATEMENT_ONE  2  // single statement disallowing ,'s (i.e., => STATEMENT)
-#define STATE__PARENS         3  // (...) block: on its own, call or def
-#define STATE__ARRAY          4  // array or index into array
-#define STATE__CONTROL        5  // generic control statement: xx (foo) {}
-#define STATE__DO_WHILE       6  // we're a do-while
+#define STATE__ZERO          -1   // zero stack state
+#define STATE__BLOCK          0   // execution block
+#define STATE__STATEMENT      1   // single statement only (i.e., optional {}'s)
+#define STATE__STATEMENT_ONE  2   // single statement disallowing ,'s (i.e., => STATEMENT)
+#define STATE__PARENS         3   // (...) block: on its own, call or def
+#define STATE__ARRAY          4   // array or index into array
+#define STATE__CONTROL        5   // generic control statement: xx (foo) {}
+#define STATE__DO_WHILE       6   // we're a do-while
 #define STATE__OBJECT         7
 #define STATE__EXPECT_ID      8
 #define STATE__EXPECT_LABEL   9
 #define STATE__MUST_WHILE     10
 #define STATE__ARROW          11
-
-// flags for default states, DO NOT REUSE
-#define FLAG__VALUE           1
-#define FLAG__RESTRICT        2
+#define STATE__HOIST          12
 
 // flags for default states
-#define FLAG__INITIAL         4  // allows 'var' etc, as well as function/class statements
+#define FLAG__VALUE           1
+#define FLAG__RESTRICT        2
+#define FLAG__INITIAL         4    // allows 'var' etc, as well as function/class statements
 
-#define FLAG__SEEN_WHILE      8 // inside do-while, seen 'while'
+// flags for do-while
+#define FLAG__SEEN_WHILE      8   // inside do-while, seen 'while'
+
+// flags for hoist
+#define FLAG__CLASS           16  // class, not function
 
 int stack_inc(parserdef *p, int state, int flag) {
   ++p->curr;
@@ -81,9 +84,14 @@ int stack_dec(parserdef *p) {
         } else if (was == STATE__MUST_WHILE) {
           p->curr->flag |= FLAG__SEEN_WHILE;  // flag for chunk_inner to expect parens
         } else if (was == STATE__PARENS) {
+          // FIXME: should force ASI, basically pretend to be a newline
           continue;  // dec again, do-while is over
         } else {
           return ERROR__UNEXPECTED;
+        }
+      case STATE__HOIST:
+        if (was == STATE__STATEMENT || was == STATE__OBJECT) {
+          continue;  // done
         }
     }
     return 0;
@@ -128,9 +136,8 @@ int chunk_inner(parserdef *p, token *out) {
       break;  // secret tip about writing JS parsers: these are all just expression lists
 
     // TODO: implement complex states here:
-    // * function/class
     // * object literal
-
+  
     case STATE__CONTROL:
       if (out->type == TOKEN_PAREN && s[0] == '(') {
         stack_inc(p, STATE__PARENS, FLAG__INITIAL);  // different than below, allow FLAG__INITIAL
@@ -159,6 +166,35 @@ int chunk_inner(parserdef *p, token *out) {
       }
       out->type = TOKEN_SYMBOL;
       return 0;
+
+    case STATE__HOIST:
+      if (out->type == TOKEN_BRACE && s[0] == '{') {
+        if (p->curr->flag & FLAG__CLASS) {
+          return stack_inc(p, STATE__OBJECT, 0);
+        }
+        stack_inc(p, STATE__STATEMENT, FLAG__INITIAL);
+        break;  // let rest of fn take care of STATEMENT
+      }
+
+      if (!(p->curr->flag & FLAG__CLASS)) {
+        if (out->type == TOKEN_PAREN && s[0] == '(') {
+          return stack_inc(p, STATE__PARENS, 0);
+        }
+      }
+
+      if (out->type == TOKEN_OP) {
+        return 0;  // TODO: could check for 'function *' here
+      }
+      if (out->type == TOKEN_LIT) {
+        if (len == 7 && !memcmp(s, "extends", 7)) {
+          out->type = TOKEN_KEYWORD;
+          return stack_inc(p, STATE__STATEMENT_ONE, 0);
+        }
+        out->type = TOKEN_SYMBOL;  // got the function/class name
+        return 0;
+      }
+
+      return ERROR__UNEXPECTED;
 
     case STATE__EXPECT_ID:
       stack_dec(p);
@@ -317,8 +353,13 @@ int chunk_inner(parserdef *p, token *out) {
     }
     return stack_inc(p, STATE__CONTROL, 0);
   } else if (is_hoist_keyword(s, len)) {
-    // TODO: statement or expr based on STATE__ZERO/STATE__EXOR
-    return ERROR__TODO;
+    if (flag & FLAG__INITIAL) {
+      p->curr->flag |= FLAG__INITIAL;  // reset for after
+    } else {
+      p->curr->flag |= FLAG__VALUE;
+    }
+    out->type = TOKEN_KEYWORD;
+    return stack_inc(p, STATE__HOIST, s[0] == 'c' ? FLAG__CLASS : 0);
   } else if (is_label_keyword(s, len)) {
     p->curr->flag |= FLAG__RESTRICT;
     out->type = TOKEN_KEYWORD;
