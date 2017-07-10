@@ -22,24 +22,26 @@
 
 #define STATE__ZERO          -1  // zero stack state
 #define STATE__BLOCK          0  // execution block
-#define STATE__STATEMENT      1  // single statement only
-#define STATE__PARENS         2  // (...) block: on its own, call or def
-#define STATE__ARRAY          3  // array or index into array
-#define STATE__CONTROL        4  // generic control statement: xx (foo) {}
-#define STATE__OBJECT         5
-#define STATE__EXPECT_ID      6
-#define STATE__EXPECT_LABEL   7
-#define STATE__ARROW          8
+#define STATE__STATEMENT      1  // single statement only (i.e., optional {}'s)
+#define STATE__STATEMENT_ONE  2  // single statement disallowing ,'s (i.e., => STATEMENT)
+#define STATE__PARENS         3  // (...) block: on its own, call or def
+#define STATE__ARRAY          4  // array or index into array
+#define STATE__CONTROL        5  // generic control statement: xx (foo) {}
+#define STATE__DO_WHILE       6  // we're a do-while
+#define STATE__OBJECT         7
+#define STATE__EXPECT_ID      8
+#define STATE__EXPECT_LABEL   9
+#define STATE__MUST_WHILE     10
+#define STATE__ARROW          11
+
+// flags for default states, DO NOT REUSE
+#define FLAG__VALUE           1
+#define FLAG__RESTRICT        2
 
 // flags for default states
-#define FLAG__VALUE           1  // nb. don't re-use
-#define FLAG__RESTRICT        2
 #define FLAG__INITIAL         4  // allows 'var' etc, as well as function/class statements
 
-// flags for STATE__CONTROL
-#define FLAG__DO_WHILE        4
-#define FLAG__SEEN_PAREN      8
-
+#define FLAG__SEEN_WHILE      8 // inside do-while, seen 'while'
 
 int stack_inc(parserdef *p, int state, int flag) {
   ++p->curr;
@@ -52,16 +54,45 @@ int stack_inc(parserdef *p, int state, int flag) {
 }
 
 int stack_dec(parserdef *p) {
-  --p->curr;
-  if (p->curr == p->stack) {
-    return -1;
+  for (;;) {
+    int was = p->curr->state;
+    --p->curr;
+    if (p->curr == p->stack) {
+      return -1;
+    }
+
+    switch (p->curr->state) {
+      case STATE__STATEMENT:
+      case STATE__STATEMENT_ONE:
+        continue;  // dec again, statement is over
+      case STATE__ARROW:
+        continue;  // dec again, arrow is over
+      case STATE__CONTROL:
+        if (was == STATE__PARENS) {
+          stack_inc(p, STATE__STATEMENT, FLAG__INITIAL);  // seen parens, next is statement
+        } else if (was == STATE__STATEMENT) {
+          continue;  // dec again, control is over
+        } else {
+          return ERROR__UNEXPECTED;
+        }
+      case STATE__DO_WHILE:
+        if (was == STATE__STATEMENT) {
+          stack_inc(p, STATE__MUST_WHILE, 0);  // seen statement, next must be while
+        } else if (was == STATE__MUST_WHILE) {
+          p->curr->flag |= FLAG__SEEN_WHILE;  // flag for chunk_inner to expect parens
+        } else if (was == STATE__PARENS) {
+          continue;  // dec again, do-while is over
+        } else {
+          return ERROR__UNEXPECTED;
+        }
+    }
+    return 0;
   }
-  return 0;
 }
 
 int chunk_normal_semicolon(parserdef *p, token *out) {
-  if (p->curr->state == STATE__STATEMENT) {
-    stack_dec(p);  // err should never happen
+  if (p->curr->state == STATE__STATEMENT || p->curr->state == STATE__STATEMENT_ONE) {
+    stack_dec(p);  // close current single statement
   }
   if (p->curr->state == STATE__BLOCK) {
     p->curr->flag = FLAG__INITIAL;
@@ -73,12 +104,24 @@ int chunk_normal_semicolon(parserdef *p, token *out) {
 }
 
 int chunk_inner(parserdef *p, token *out) {
-  parserstack *curr = p->curr;
   char *s = out->p;
   int len = out->len;
 
-  switch (curr->state) {
+  // zero state
+  switch (out->type) {
+    case TOKEN_NEWLINE:
+      if (p->curr->flag & FLAG__RESTRICT) {
+        p->curr->flag &= ~FLAG__RESTRICT;
+        return chunk_normal_semicolon(p, NULL);
+      }
+      // fall-through
+    case TOKEN_COMMENT:
+      return 0;
+  }
+
+  switch (p->curr->state) {
     case STATE__STATEMENT:
+    case STATE__STATEMENT_ONE:
     case STATE__BLOCK:
     case STATE__PARENS:
     case STATE__ARRAY:
@@ -89,17 +132,33 @@ int chunk_inner(parserdef *p, token *out) {
     // * object literal
 
     case STATE__CONTROL:
-      if (!(curr->flag & FLAG__SEEN_PAREN) && out->type == TOKEN_PAREN && s[0] == '(') {
-        curr->flag |= FLAG__SEEN_PAREN;
-        stack_inc(p, STATE__PARENS, FLAG__INITIAL);
+      if (out->type == TOKEN_PAREN && s[0] == '(') {
+        stack_inc(p, STATE__PARENS, FLAG__INITIAL);  // different than below, allow FLAG__INITIAL
         return 0;
       }
 
-      // FIXME: This doesn't work for do/while, which allows "do console.info; while (0);"
-      // swap for single statement
-      curr->state = STATE__STATEMENT;
-      curr->flag = FLAG__INITIAL;
+      // otherwise, pretend we saw it
+      stack_inc(p, STATE__PARENS, 0);
+      stack_dec(p);
       break;
+
+    case STATE__DO_WHILE:
+      if (p->curr->flag & FLAG__SEEN_WHILE) {
+        if (out->type != TOKEN_PAREN || s[0] != '(') {
+          return ERROR__UNEXPECTED;
+        }
+      } else {
+        stack_inc(p, STATE__STATEMENT, FLAG__INITIAL);
+      }
+      break;
+
+    case STATE__MUST_WHILE:
+      stack_dec(p);
+      if (out->type != TOKEN_LIT || len != 5 || memcmp(s, "while", 5)) {
+        return ERROR__UNEXPECTED;
+      }
+      out->type = TOKEN_SYMBOL;
+      return 0;
 
     case STATE__EXPECT_ID:
       stack_dec(p);
@@ -118,39 +177,23 @@ int chunk_inner(parserdef *p, token *out) {
       break;
 
     case STATE__ARROW:
-      // swap for single statement
-      curr->state = STATE__STATEMENT;
-      curr->flag = FLAG__INITIAL;
+      stack_inc(p, STATE__STATEMENT_ONE, FLAG__INITIAL);
       break;
 
     default:
-      printf("got unhandled state: %d\n", curr->state);
+      printf("got unhandled state: %d\n", p->curr->state);
       return ERROR__TODO;
   }
 
-  // zero states
-  switch (out->type) {
-    case TOKEN_EOF:
-      // close any pending statements
-      while (curr->state == STATE__STATEMENT) {
-        printf("closing STATEMENT\n");
-        stack_dec(p);
-        curr = p->curr;
-      }
-      if (curr->state != STATE__BLOCK || curr != (p->stack + 1)) {
-        return ERROR__STACK;
-      } else if (!(curr->flag & FLAG__INITIAL)) {
-        return chunk_normal_semicolon(p, NULL);;
-      }
-      return 0;
-    case TOKEN_NEWLINE:
-      if (curr->flag & FLAG__RESTRICT) {
-        curr->flag = 0;
-        return chunk_normal_semicolon(p, NULL);
-      }
-      // fall-through
-    case TOKEN_COMMENT:
-      return 0;
+  // EOF case
+  if (out->type == TOKEN_EOF) {
+    // nb. we don't close STATE__STATEMENT_* here, they're not valid candidates for EOF ASI
+    if (p->curr->state != STATE__BLOCK || p->curr != (p->stack + 1)) {
+      return ERROR__STACK;
+    } else if (!(p->curr->flag & FLAG__INITIAL)) {
+      return chunk_normal_semicolon(p, NULL);
+    }
+    return 0;
   }
 
   // replace 'in' and 'instanceof' with op
@@ -158,20 +201,25 @@ int chunk_inner(parserdef *p, token *out) {
     out->type = TOKEN_OP;
   } else if (out->type == TOKEN_OP && is_double_addsub(s, len)) {
     // ++/--: if flag is a value; op in a block and after a newline; maybe yield an ASI
-    if ((curr->flag & FLAG__VALUE) && (p->prev_type == TOKEN_NEWLINE)) {
+    if ((p->curr->flag & FLAG__VALUE) && (p->prev_type == TOKEN_NEWLINE)) {
       return chunk_normal_semicolon(p, NULL);
     }
     return 0;  // the addsub doesn't change flags anyway
   }
 
-  int flag = curr->flag;
-  curr->flag = 0;
+  int flag = p->curr->flag;
+  p->curr->flag = 0;
 
   // non-literal tokens
   switch (out->type) {
+    case TOKEN_COMMA:
+      if (p->curr->state == STATE__STATEMENT_ONE) {
+        return stack_dec(p);
+      }
+      // fall-through
+
     case TOKEN_TERNARY:
     case TOKEN_COLON:
-    case TOKEN_COMMA:
     case TOKEN_OP:
       return 0;
 
@@ -181,17 +229,17 @@ int chunk_inner(parserdef *p, token *out) {
     case TOKEN_STRING:
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
-      curr->flag = FLAG__VALUE;
+      p->curr->flag = FLAG__VALUE;
       return 0;
 
     case TOKEN_ARROW:
-      curr->flag = FLAG__VALUE;
+      p->curr->flag = FLAG__VALUE;
       return stack_inc(p, STATE__ARROW, 0);
 
     case TOKEN_PAREN:
       if (s[0] == '(') {
         return stack_inc(p, STATE__PARENS, 0);
-      } else if (curr->state == STATE__PARENS) {
+      } else if (p->curr->state == STATE__PARENS) {
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
@@ -199,7 +247,7 @@ int chunk_inner(parserdef *p, token *out) {
     case TOKEN_ARRAY:
       if (s[0] == '[') {
         return stack_inc(p, STATE__ARRAY, 0);
-      } else if (curr->state == STATE__ARRAY) {
+      } else if (p->curr->state == STATE__ARRAY) {
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
@@ -208,22 +256,17 @@ int chunk_inner(parserdef *p, token *out) {
       if (s[0] == '{') {
         // this is a block if we're the first expr (orphaned block)
         if (flag & FLAG__INITIAL) {
-          curr->flag = FLAG__INITIAL;  // reset for after
+          p->curr->flag = FLAG__INITIAL;  // reset for after
           return stack_inc(p, STATE__BLOCK, FLAG__INITIAL);
         }
         return stack_inc(p, STATE__OBJECT, 0);
-      } else if (curr->state == STATE__BLOCK && curr > p->stack) {   // only look for BLOCK here
+      } else if (p->curr->state == STATE__BLOCK && p->curr > p->stack) {
+        // only look for BLOCK here
         int err = 0;
         if (!(flag & FLAG__INITIAL)) {
           err = chunk_normal_semicolon(p, NULL);  // ASI if something is pending
         }
         stack_dec(p);
-
-        // if this was also the end of a statement, close it
-        // FIXME: is this sustainable? should we let passes have their post-way?
-        if (p->curr->state == STATE__STATEMENT) {
-          stack_dec(p);
-        }
         return err;
       }
       return ERROR__UNEXPECTED;
@@ -242,7 +285,7 @@ int chunk_inner(parserdef *p, token *out) {
   // look for initial tokens
   if ((flag & FLAG__INITIAL) && is_begin_expr_keyword(s, len)) {
     if (s[0] == 'r' || s[0] == 't') {  // return, throw
-      curr->flag |= FLAG__RESTRICT;
+      p->curr->flag |= FLAG__RESTRICT;
     }
     out->type = TOKEN_KEYWORD;
     return 0;
@@ -267,28 +310,27 @@ int chunk_inner(parserdef *p, token *out) {
 
   // found a control keyword
   if (is_control_keyword(s, len)) {
-    curr->flag = FLAG__INITIAL;  // reset for after
-    int flag = 0;
+    out->type = TOKEN_KEYWORD;
+    p->curr->flag = FLAG__INITIAL;  // reset for after
     if (s[0] == 'd') {
-      flag = FLAG__DO_WHILE;
+      return stack_inc(p, STATE__DO_WHILE, 0);
     }
-    out->type = TOKEN_SYMBOL;
-    return stack_inc(p, STATE__CONTROL, flag);
+    return stack_inc(p, STATE__CONTROL, 0);
   } else if (is_hoist_keyword(s, len)) {
     // TODO: statement or expr based on STATE__ZERO/STATE__EXOR
     return ERROR__TODO;
   } else if (is_label_keyword(s, len)) {
-    curr->flag |= FLAG__RESTRICT;
-    out->type = TOKEN_SYMBOL;
+    p->curr->flag |= FLAG__RESTRICT;
+    out->type = TOKEN_KEYWORD;
     return stack_inc(p, STATE__EXPECT_LABEL, 0);
   } else if (is_asi_keyword(s, len)) {
     // this should just catch 'yield'
-    curr->flag |= FLAG__RESTRICT;
-    out->type = TOKEN_SYMBOL;
+    p->curr->flag |= FLAG__RESTRICT;
+    out->type = TOKEN_KEYWORD;
     return 0;
   }
 
-  curr->flag |= FLAG__VALUE;
+  p->curr->flag |= FLAG__VALUE;
   out->type = TOKEN_SYMBOL;
   return 0;
 }
@@ -303,7 +345,7 @@ int prsr_next(parserdef *p, token *out) {
 
   // get token
   parserstack *curr = p->curr;
-  int ret = prsr_next_token(&p->td, curr->flag & FLAG__VALUE, out);
+  int ret = prsr_next_token(&p->td, p->curr->flag & FLAG__VALUE, out);
   if (ret) {
     return ret; 
   }

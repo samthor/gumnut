@@ -33,7 +33,6 @@ typedef struct {
   tokendef td;
   int prev_type;  // except comments and newlines
   uint8_t flag;
-  int8_t move;
   parserstack stack[__STACK_SIZE];
   parserstack *curr;
   token pending_asi;
