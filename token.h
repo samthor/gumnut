@@ -41,29 +41,27 @@ tokendef prsr_init_token(char *p);
 
 // fixed: will always be the same, or in the same set
 #define TOKEN_SEMICOLON 1   // might be blank for ASI
-#define TOKEN_NEWLINE   2
-#define TOKEN_COMMA     3
-#define TOKEN_SPREAD    4
-#define TOKEN_DOT       5
-#define TOKEN_OP        6   // can include 'in', 'instanceof'
-#define TOKEN_ARROW     7
-// nb. used to have     8
-#define TOKEN_COLON     9
-#define TOKEN_TERNARY   10
-#define TOKEN_BRACE     11
-#define TOKEN_ARRAY     12
-#define TOKEN_PAREN     13
+#define TOKEN_COMMA     2
+#define TOKEN_SPREAD    3
+#define TOKEN_DOT       4
+#define TOKEN_OP        5   // can include 'in', 'instanceof'
+#define TOKEN_ARROW     6
+#define TOKEN_COLON     7
+#define TOKEN_TERNARY   8
+#define TOKEN_BRACE     9
+#define TOKEN_ARRAY     10
+#define TOKEN_PAREN     11
 
 // variable: could be anything
-#define TOKEN_COMMENT   14
-#define TOKEN_STRING    15
-#define TOKEN_REGEXP    16
-#define TOKEN_NUMBER    17
-#define TOKEN_SYMBOL    18
-#define TOKEN_KEYWORD   19
-#define TOKEN_LABEL     20
+#define TOKEN_COMMENT   12
+#define TOKEN_STRING    13
+#define TOKEN_REGEXP    14
+#define TOKEN_NUMBER    15
+#define TOKEN_SYMBOL    16
+#define TOKEN_KEYWORD   17
+#define TOKEN_LABEL     18
 
 // internal use only
-#define TOKEN_LIT       21
+#define TOKEN_LIT       19
 
 #endif//_TOKEN_H

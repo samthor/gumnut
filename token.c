@@ -20,20 +20,9 @@ static char peek_char(tokendef *d, int len) {
 }
 
 eat_out eat_token(tokendef *d, int slash_is_op) {
-  // consume whitespace (look for newline, zero char)
-  char c;
-  for (;; ++d->curr) {
-    c = peek_char(d, 0);
-    if (c == '\n') {
-      // newlines are magic in JS
-      ++d->line_no;
-      return (eat_out) {1, TOKEN_NEWLINE};
-    } else if (!c) {
-      // ending file, at top level, and non-empty statement
-      return (eat_out) {0, TOKEN_EOF};  // end of file
-    } else if (!isspace(c)) {
-      break;
-    }
+  char c = peek_char(d, 0);
+  if (!c) {
+    return (eat_out) {0, TOKEN_EOF};
   }
 
   // comments (C99 and long)
@@ -249,9 +238,17 @@ eat_out eat_token(tokendef *d, int slash_is_op) {
 }
 
 int prsr_next_token(tokendef *d, int slash_is_op, token *out) {
+  for (char c;; ++d->curr) {
+    c = d->buf[d->curr];
+    if (c == '\n') {
+      ++d->line_no;
+    } else if (!isspace(c)) {
+      break;
+    }
+  }
+
   out->p = NULL;
   out->line_no = d->line_no;
-
   eat_out eo = eat_token(d, slash_is_op);
   out->len = eo.len;
   out->type = eo.type;

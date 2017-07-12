@@ -20,258 +20,84 @@
 #include "parser.h"
 #include "utils.h"
 
-#define STATE__ZERO          -1   // zero stack state
-#define STATE__BLOCK          0   // execution block
-#define STATE__STATEMENT      1   // single statement only (i.e., optional {}'s)
-#define STATE__STATEMENT_ONE  2   // single statement disallowing ,'s (i.e., => STATEMENT)
-#define STATE__PARENS         3   // (...) block: on its own, call or def
-#define STATE__ARRAY          4   // array or index into array
-#define STATE__CONTROL        5   // generic control statement: xx (foo) {}
-#define STATE__DO_WHILE       6   // we're a do-while
-#define STATE__OBJECT         7
-#define STATE__EXPECT_ID      8
-#define STATE__EXPECT_LABEL   9
-#define STATE__MUST_WHILE     10
-#define STATE__ARROW          11
-#define STATE__HOIST          12
-#define STATE__MUST_COLON     13
 
-// flags for default states
-#define FLAG__VALUE           1
-#define FLAG__RESTRICT        2
-#define FLAG__INITIAL         4    // allows 'var' etc, as well as function/class statements
+#define STATE__ZERO             0
+#define STATE__OPTIONAL_LABEL   5
+#define STATE__EXPECT_ID        6
+#define STATE__EXPECT_COLON     7
+#define STATE__EXPECT_SEMICOLON 8
+#define STATE__CONTROL_FOR      9
+#define STATE__CONTROL_DO_WHILE 10
 
-// flags for do-while
-#define FLAG__SEEN_WHILE      8   // inside do-while, seen 'while'
-
-// flags for hoist
-#define FLAG__CLASS           16  // class, not function
-
-// flags for object
-#define FLAG__RIGHT           32  // right side of object
-#define FLAG__SEEN_MODIFIER   64  // seen 'get' or 'set'
+#define FLAG__INITIAL 1
+#define FLAG__VALUE   2
 
 
-int stack_inc(parserdef *p, int state, int flag) {
+int stack_inc(parserdef *p, uint8_t state, uint8_t flag) {
   ++p->curr;
   p->curr->state = state;
   p->curr->flag = flag;
-  if (p->curr - p->stack == __STACK_SIZE - 1) {
-    return -1;
+  if (p->curr == p->stack + __STACK_SIZE - 1) {
+    return ERROR__STACK;
   }
   return 0;
 }
 
 int stack_dec(parserdef *p) {
-  for (;;) {
-    int was = p->curr->state;
-    --p->curr;
-    if (p->curr == p->stack) {
-      return -1;
-    }
-
-    switch (p->curr->state) {
-      case STATE__STATEMENT:
-      case STATE__STATEMENT_ONE:
-        continue;  // dec again, statement is over
-      case STATE__ARROW:
-        continue;  // dec again, arrow is over
-      case STATE__CONTROL:
-        if (was == STATE__PARENS) {
-          stack_inc(p, STATE__STATEMENT, FLAG__INITIAL);  // seen parens, next is statement
-        } else if (was == STATE__STATEMENT) {
-          continue;  // dec again, control is over
-        } else {
-          return ERROR__UNEXPECTED;
-        }
-      case STATE__DO_WHILE:
-        if (was == STATE__STATEMENT) {
-          stack_inc(p, STATE__MUST_WHILE, 0);  // seen statement, next must be while
-        } else if (was == STATE__MUST_WHILE) {
-          p->curr->flag |= FLAG__SEEN_WHILE;  // flag for chunk_inner to expect parens
-        } else if (was == STATE__PARENS) {
-          // FIXME: should force ASI, basically pretend to be a newline
-          continue;  // dec again, do-while is over
-        } else {
-          return ERROR__UNEXPECTED;
-        }
-      case STATE__HOIST:
-        if (was == STATE__STATEMENT || was == STATE__OBJECT) {
-          continue;  // done
-        }
-    }
-    return 0;
-  }
-}
-
-int chunk_normal_semicolon(parserdef *p, token *out) {
-  if (p->curr->state == STATE__STATEMENT || p->curr->state == STATE__STATEMENT_ONE) {
-    stack_dec(p);  // close current single statement
-  }
-  if (p->curr->state == STATE__BLOCK) {
-    p->curr->flag = FLAG__INITIAL;
-    if (!out) {
-      return ERROR__SYNTAX_ASI;  // this is an ASI, be helpful to caller
-    }
+  --p->curr;
+  if (p->curr == p->stack) {
+    return ERROR__STACK;
   }
   return 0;
-}
-
-int chunk_lookahead_symbol(tokendef td) {
-  for (;;) {
-    token out;
-    int ret = prsr_next_token(&td, 0, &out);
-    if (ret) {
-      return -1;
-    } else if (out.type == TOKEN_COMMENT || out.type == TOKEN_NEWLINE) {
-      continue;
-    }
-    return out.type;
-  }
 }
 
 int chunk_inner(parserdef *p, token *out) {
   char *s = out->p;
   int len = out->len;
 
-  // zero state
-  switch (out->type) {
-    case TOKEN_NEWLINE:
-      if (p->curr->flag & FLAG__RESTRICT) {
-        p->curr->flag &= ~FLAG__RESTRICT;
-        return chunk_normal_semicolon(p, NULL);
-      }
-      // fall-through
-    case TOKEN_COMMENT:
-      return 0;
-  }
-
   switch (p->curr->state) {
-    case STATE__STATEMENT:
-    case STATE__STATEMENT_ONE:
-    case STATE__BLOCK:
-    case STATE__PARENS:
-    case STATE__ARRAY:
-      break;  // secret tip about writing JS parsers: these are all just expression lists
-
-    case STATE__OBJECT:
-      printf("state_object doing stuff: %d (depth=%d)\n", out->type, p->curr - p->stack);
-      if (out->type == TOKEN_COMMA) {
-        printf("found reset\n");
-        p->curr->flag = 0;
-        return 0;
-      } else if (out->type == TOKEN_BRACE && s[0] == '}') {
-        return stack_dec(p);
-      } else if (p->curr->flag & FLAG__RIGHT) {
-        // do nothing, just don't look for lits/colon
-      } else if (out->type == TOKEN_LIT) {
-        if (!(p->curr->flag & FLAG__SEEN_MODIFIER) && is_getset(s, len)) {
-          // matched 'get' or 'set', return as keyword
-          printf("found getset\n");
-          out->type = TOKEN_KEYWORD;
-          p->curr->flag |= FLAG__SEEN_MODIFIER;
-        } else {
-          // otherwise it's always a symbol
-          printf("found symbol\n");
-          out->type = TOKEN_SYMBOL;
-        }
-        return 0;
-      } else if (out->type == TOKEN_COLON) {
-        printf("switch to right\n");
-        p->curr->flag = FLAG__RIGHT;
-        return 0;
-      }
-
-      // give up and just look for a statement
-      if (p->curr->flag & FLAG__RIGHT) {
-        printf("llooking for STATEMENT_ONE\n");
-        stack_inc(p, STATE__STATEMENT_ONE, 0);
-      }
+    case STATE__ZERO:
       break;
 
-    case STATE__CONTROL:
-      if (out->type == TOKEN_PAREN && s[0] == '(') {
-        // allow FLAG__INITIAL inside control block (e.g. "for (var ...)")
-        return stack_inc(p, STATE__PARENS, FLAG__INITIAL);
-      }
-
-      // otherwise, pretend we saw it
-      stack_inc(p, STATE__PARENS, 0);
+    case STATE__OPTIONAL_LABEL:
       stack_dec(p);
-      break;
-
-    case STATE__DO_WHILE:
-      if (p->curr->flag & FLAG__SEEN_WHILE) {
-        if (out->type != TOKEN_PAREN || s[0] != '(') {
-          return ERROR__UNEXPECTED;
-        }
-      } else {
-        stack_inc(p, STATE__STATEMENT, FLAG__INITIAL);
+      if (out->type == TOKEN_SEMICOLON) {
+        break;
+      } else if (out->type != TOKEN_LIT) {
+        break;  // TODO: indicate error, needs reset to zero state
       }
-      break;
+      out->type = TOKEN_LABEL;
+      stack_inc(p, STATE__EXPECT_SEMICOLON, 0);
+      return 0;
 
-    case STATE__MUST_WHILE:
+    case STATE__EXPECT_ID:
       stack_dec(p);
-      if (out->type != TOKEN_LIT || len != 5 || memcmp(s, "while", 5)) {
-        return ERROR__UNEXPECTED;
+      if (out->type != TOKEN_LIT) {
+        break;  // TODO: indicate error, maybe should reset to zero state
       }
       out->type = TOKEN_SYMBOL;
       return 0;
 
-    case STATE__HOIST:
-      if (out->type == TOKEN_BRACE && s[0] == '{') {
-        if (p->curr->flag & FLAG__CLASS) {
-          return stack_inc(p, STATE__OBJECT, 0);
-        }
-        stack_inc(p, STATE__STATEMENT, FLAG__INITIAL);
-        break;  // let rest of fn take care of STATEMENT
-      }
-
-      if (!(p->curr->flag & FLAG__CLASS)) {
-        if (out->type == TOKEN_PAREN && s[0] == '(') {
-          return stack_inc(p, STATE__PARENS, 0);
-        }
-      }
-
-      if (out->type == TOKEN_OP) {
-        return 0;  // TODO: could check for 'function *' here
-      }
-      if (out->type == TOKEN_LIT) {
-        if (len == 7 && !memcmp(s, "extends", 7)) {
-          out->type = TOKEN_KEYWORD;
-          return stack_inc(p, STATE__STATEMENT_ONE, 0);
-        }
-        out->type = TOKEN_SYMBOL;  // got the function/class name
-        return 0;
-      }
-
-      return ERROR__UNEXPECTED;
-
-    case STATE__MUST_COLON:
+    case STATE__EXPECT_COLON:
       stack_dec(p);
-      if (out->type == TOKEN_COLON) {
-        return 0;
+      if (out->type != TOKEN_COLON) {
+        break;  // TODO: indicate error
       }
-      return ERROR__UNEXPECTED;
+      return 0;
 
-    case STATE__EXPECT_ID:
+    case STATE__EXPECT_SEMICOLON:
       stack_dec(p);
-      if (out->type == TOKEN_LIT) {
-        out->type = TOKEN_SYMBOL;
-        return 0;
+      if (out->type != TOKEN_SEMICOLON) {
+        printf("expected semi, got: %d\n", out->type);
+        break;  // TODO: indicate error, needs reset to zero state
       }
-      break;
+      return 0;
 
-    case STATE__EXPECT_LABEL:
-      stack_dec(p);
-      if (out->type == TOKEN_LIT) {
-        out->type = TOKEN_LABEL;
-        return 0;
+    case STATE__CONTROL_FOR:
+      if (out->type == TOKEN_PAREN && s[0] == '(') {
+        // special-case ( seen after for block, allow initial var/let/etc
+        return stack_inc(p, STATE__ZERO, FLAG__INITIAL);
       }
-      break;
-
-    case STATE__ARROW:
-      stack_inc(p, STATE__STATEMENT_ONE, FLAG__INITIAL);
       break;
 
     default:
@@ -279,37 +105,27 @@ int chunk_inner(parserdef *p, token *out) {
       return ERROR__TODO;
   }
 
-  // EOF case
-  if (out->type == TOKEN_EOF) {
-    // nb. we don't close STATE__STATEMENT_* here, they're not valid candidates for EOF ASI
-    if (p->curr->state != STATE__BLOCK || p->curr != (p->stack + 1)) {
-      return ERROR__STACK;
-    } else if (!(p->curr->flag & FLAG__INITIAL)) {
-      return chunk_normal_semicolon(p, NULL);
-    }
-    return 0;
-  }
-
-  // replace 'in' and 'instanceof' with op
-  if (out->type == TOKEN_LIT && is_op_keyword(s, len)) {
-    out->type = TOKEN_OP;
-  } else if (out->type == TOKEN_OP && is_double_addsub(s, len)) {
-    // ++/--: if flag is a value; op in a block and after a newline; maybe yield an ASI
-    if ((p->curr->flag & FLAG__VALUE) && (p->prev_type == TOKEN_NEWLINE)) {
-      return chunk_normal_semicolon(p, NULL);
-    }
-    return 0;  // the addsub doesn't change flags anyway
-  }
-
   int flag = p->curr->flag;
   p->curr->flag = 0;
 
-  // non-literal tokens
+  if (out->type == TOKEN_LIT && is_op_keyword(s, len)) {
+    // replace 'in' and 'instanceof' with op
+    out->type = TOKEN_OP;
+  } else if (out->type == TOKEN_OP && (flag & FLAG__VALUE) && p->prev.line_no != out->line_no &&
+        is_double_addsub(s, len)) {
+    // if value, had a newline, and is a ++/-- op: force an ASI
+    return ERROR__EXPECT_ZERO;
+  }
+
   switch (out->type) {
-    case TOKEN_COMMA:
-      if (p->curr->state == STATE__STATEMENT_ONE) {
-        return stack_dec(p);
+    case TOKEN_EOF:
+      if (p->curr > p->stack + 1) {
+        return ERROR__UNEXPECTED;
       }
+      return 0;
+
+    case TOKEN_COMMA:
+      // TODO: if _statement_, dec and return
       // fall-through
 
     case TOKEN_TERNARY:
@@ -318,52 +134,35 @@ int chunk_inner(parserdef *p, token *out) {
       return 0;
 
     case TOKEN_SEMICOLON:
-      return chunk_normal_semicolon(p, out);
+      // TODO: reset to zero state
+      p->curr->flag = FLAG__INITIAL;
+      return 0;
 
     case TOKEN_STRING:
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
-      p->curr->flag = FLAG__VALUE;
+      p->curr->flag |= FLAG__VALUE;
       return 0;
-
-    case TOKEN_ARROW:
-      p->curr->flag = FLAG__VALUE;
-      return stack_inc(p, STATE__ARROW, 0);
 
     case TOKEN_PAREN:
       if (s[0] == '(') {
-        return stack_inc(p, STATE__PARENS, 0);
-      } else if (p->curr->state == STATE__PARENS) {
+        // FIXME: record PAREN
+        return stack_inc(p, STATE__ZERO, 0);
+      } else if (p->curr->state == STATE__ZERO) {
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
 
     case TOKEN_ARRAY:
       if (s[0] == '[') {
-        return stack_inc(p, STATE__ARRAY, 0);
-      } else if (p->curr->state == STATE__ARRAY) {
+        // FIXME: record ARRAY
+        return stack_inc(p, STATE__ZERO, 0);
+      } else if (p->curr->state == STATE__ZERO) {
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
 
-    case TOKEN_BRACE:
-      if (s[0] == '{') {
-        // this is a block if we're the first expr (orphaned block)
-        if (flag & FLAG__INITIAL) {
-          p->curr->flag = FLAG__INITIAL;  // reset for after
-          return stack_inc(p, STATE__BLOCK, FLAG__INITIAL);
-        }
-        return stack_inc(p, STATE__OBJECT, 0);
-      } else if (p->curr->state == STATE__BLOCK && p->curr > p->stack) {
-        // only look for BLOCK here
-        int err = 0;
-        if (!(flag & FLAG__INITIAL)) {
-          err = chunk_normal_semicolon(p, NULL);  // ASI if something is pending
-        }
-        stack_dec(p);
-        return err;
-      }
-      return ERROR__UNEXPECTED;
+    // TODO: TOKEN_BRACE
 
     case TOKEN_DOT:
       return stack_inc(p, STATE__EXPECT_ID, 0);
@@ -376,104 +175,77 @@ int chunk_inner(parserdef *p, token *out) {
       return ERROR__TODO;
   }
 
-  // look for initial tokens
-  if ((flag & FLAG__INITIAL) && is_begin_expr_keyword(s, len)) {
-    if (s[0] == 'r' || s[0] == 't') {  // return, throw
-      p->curr->flag |= FLAG__RESTRICT;
-    }
-    out->type = TOKEN_KEYWORD;
-    return 0;
-  }
-  // FIXME: for some reason everything but "let" is still a keyword even in invalid places.
 
-  // if this was a value, and we had a newline, emit ASI
-  if (!(flag & FLAG__INITIAL) && (flag & FLAG__VALUE) && p->prev_type == TOKEN_NEWLINE) {
-    return chunk_normal_semicolon(p, NULL);
-  }
-
-  // next token should also be part of expr
-  if (is_expr_keyword(s, len)) {
-    out->type = TOKEN_KEYWORD;
+  if (out->type != TOKEN_LIT) {
     return 0;
   }
 
-  // TODO: look for 'async' and lookahead +1 for 'function'
-  // nb. the "async () => {}" case is probably not gonna happen? mucho lookaheado
+  if (is_begin_expr_keyword(s, len)) {
+    /*
+      if (.. is "let" ..) {
+        // allow at start and after
+        // don't allow if a [ immediately follows it at start (ambiguous keyword/symbol)
+      }
+    */
 
-  // found a control keyword
+    out->type = TOKEN_KEYWORD;
+    return ERROR__EXPECT_ZERO;
+  }
+
+
+  int expect_label = 0;
   if (is_control_keyword(s, len)) {
-    out->type = TOKEN_KEYWORD;
-    p->curr->flag = FLAG__INITIAL;  // reset for after
-    if (s[0] == 'd') {
-      return stack_inc(p, STATE__DO_WHILE, 0);
+    if (s[0] == 'f' && len == 3) {
+      stack_inc(p, STATE__CONTROL_FOR, 0);
+    } else if (s[0] == 'd' && len == 2) {
+      stack_inc(p, STATE__CONTROL_DO_WHILE, 0);
     }
-    return stack_inc(p, STATE__CONTROL, 0);
-  } else if (is_hoist_keyword(s, len)) {
-    if (flag & FLAG__INITIAL) {
-      p->curr->flag |= FLAG__INITIAL;  // reset for after
-    } else {
-      p->curr->flag |= FLAG__VALUE;
-    }
-    out->type = TOKEN_KEYWORD;
-    return stack_inc(p, STATE__HOIST, s[0] == 'c' ? FLAG__CLASS : 0);
+    return ERROR__EXPECT_ZERO;
   } else if (is_label_keyword(s, len)) {
-    p->curr->flag |= FLAG__RESTRICT;
-    out->type = TOKEN_KEYWORD;
-    return stack_inc(p, STATE__EXPECT_LABEL, 0);
-  } else if (is_asi_keyword(s, len)) {
-    // this should just catch 'yield'
-    p->curr->flag |= FLAG__RESTRICT;
-    out->type = TOKEN_KEYWORD;
-    return 0;
+    stack_inc(p, STATE__OPTIONAL_LABEL, 0);
+    return ERROR__EXPECT_ZERO;
+  } else if (is_isolated_keyword(s, len)) {
+    return ERROR__EXPECT_ZERO;
+  } else if (is_hoist_keyword(s, len)) {
+    // run hoist program
   }
 
-  // look for initial label-like cases
-  if (flag & FLAG__INITIAL) {
-    if (len == 4 && !memcmp(s, "case", 4)) {
-      p->curr->flag |= FLAG__INITIAL;  // reset for after
-      out->type = TOKEN_KEYWORD;
-      printf("got TODO in case\n");
-      // TODO: look for STATEMENT but ending at :
-      return ERROR__TODO;
+  if (is_labellike_keyword(s, len)) {
+    out->type = TOKEN_KEYWORD;
+    if (s[0] == 'd') {
+      stack_inc(p, STATE__EXPECT_COLON, 0);
     }
-    if (len == 7 && !memcmp(s, "default", 7)) {
-      p->curr->flag |= FLAG__INITIAL;  // reset for after
-      out->type = TOKEN_KEYWORD;
-      return stack_inc(p, STATE__MUST_COLON, 0);
-    }
-    int next_type = chunk_lookahead_symbol(p->td);
-    if (next_type == TOKEN_COLON) {
-      p->curr->flag |= FLAG__INITIAL;  // reset for after
-      out->type = TOKEN_LABEL;
-      return stack_inc(p, STATE__MUST_COLON, 0);
-    }
+    return ERROR__EXPECT_ZERO;
   }
 
-  p->curr->flag |= FLAG__VALUE;
+  if (is_asi_keyword(s, len)) {
+    // look for next non-comment token, if on next line, generate ASI
+  }
+
   out->type = TOKEN_SYMBOL;
   return 0;
 }
 
 int prsr_next(parserdef *p, token *out) {
-  // if an ASI was pending, return it and clear
-  if (p->pending_asi.p) {
-    *out = p->pending_asi;
-    p->pending_asi.p = NULL;
+  // if an ASI was sent, return the real next statement and clear
+  if (p->after_asi.p) {
+    *out = p->after_asi;
+    p->after_asi.p = NULL;
     return 0;
   }
 
   // get token
-  parserstack *curr = p->curr;
-  int ret = prsr_next_token(&p->td, p->curr->flag & FLAG__VALUE, out);
-  if (ret) {
+  int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->flag & FLAG__VALUE);
+  int ret = prsr_next_token(&p->td, slash_is_op, out);
+  if (ret || out->type == TOKEN_COMMENT) {
     return ret; 
   }
 
   // actual chunk call
   ret = chunk_inner(p, out);
   if (ret) {
-    if (ret != ERROR__SYNTAX_ASI) {
-
+    if (ret != ERROR__EXPECT_ZERO) {
+      // TODO: remove later
       if (ret == ERROR__UNEXPECTED) {
         printf("unexpected: [%d] %.*s\n", out->line_no, out->len, out->p);
       }
@@ -486,13 +258,20 @@ int prsr_next(parserdef *p, token *out) {
 
       return ret;
     }
-    p->pending_asi = *out;
-    out->len = 0;
-    out->type = TOKEN_SEMICOLON;
-  }
-  p->prev_type = out->type;
 
-  if (p->curr == p->stack) {
+    if (!p->prev.line_no) {
+      // not an ASI, first statement
+    } else if (p->prev.line_no == out->line_no) {
+      // this is a syntax error, but we don't report it
+    } else {
+      p->after_asi = *out;
+      out->len = 0;
+      out->type = TOKEN_SEMICOLON;
+    }
+  }
+  p->prev = *out;
+
+  if (p->curr == p->stack || p->curr >= p->stack + __STACK_SIZE) {
     return ERROR__STACK;
   }
   return 0;
@@ -503,7 +282,6 @@ int prsr_parser_init(parserdef *p, char *buf) {
   p->td = prsr_init_token(buf);
   p->stack[0].state = STATE__ZERO;
   p->curr = p->stack + 1; 
-  p->curr->flag = FLAG__INITIAL;
   return 0;
 }
 

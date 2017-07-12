@@ -16,11 +16,11 @@
 
 #include "token.h"
 
-#define ERROR__SYNTAX_ASI    -1
-#define ERROR__SYNTAX        -2
-#define ERROR__UNEXPECTED    -3
-#define ERROR__STACK         -4
-#define ERROR__TODO          -5
+#define ERROR__EXPECT_ZERO -1
+#define ERROR__SYNTAX      -2
+#define ERROR__UNEXPECTED  -3
+#define ERROR__STACK       -4
+#define ERROR__TODO        -5
 
 #define __STACK_SIZE 512
 
@@ -31,11 +31,10 @@ typedef struct {
 
 typedef struct {
   tokendef td;
-  int prev_type;  // except comments and newlines
+  token prev, after_asi;
   uint8_t flag;
   parserstack stack[__STACK_SIZE];
   parserstack *curr;
-  token pending_asi;
 } parserdef;
 
 int prsr_parser_init(parserdef *p, char *buf);

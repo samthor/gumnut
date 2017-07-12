@@ -75,7 +75,7 @@ int is_asi_keyword(char *s, int len) {
   if (len > 9 || len < 5) {
     return 0;  // no asi <5 ('yield' etc) or >9 ('continue')
   }
-  static const char v[] = " break continue return throw yield ";
+  static const char v[] = " break continue debugger return throw yield ";
   return in_space_string(v, s, len);
 }
 
@@ -120,6 +120,10 @@ int is_decl_keyword(char *s, int len) {
 // keywords that may optionally have a label (and only a label) following them
 int is_label_keyword(char *s, int len) {
   return (len == 5 && !memcmp(s, "break", 5)) || (len == 8 && !memcmp(s, "continue", 8));
+}
+
+int is_isolated_keyword(char *s, int len) {
+  return (len == 8 && !memcmp(s, "debugger", 8));
 }
 
 // is ++ or --

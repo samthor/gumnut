@@ -44,15 +44,11 @@ int read_stdin(char **buf) {
 }
 
 int render(token *out) {
-  if (out->type == TOKEN_NEWLINE) {
-    // don't display
-  } else {
-    char c = ' ';
-    if (out->type == TOKEN_SEMICOLON && !out->len) {
-      c = ';';
-    }
-    printf("%c%4d: %.*s #%d\n", c, out->line_no, out->len, out->p, out->type);
+  char c = ' ';
+  if (out->type == TOKEN_SEMICOLON && !out->len) {
+    c = ';';
   }
+  printf("%c%4d: %.*s #%d\n", c, out->line_no, out->len, out->p, out->type);
   return 0;
 }
 
