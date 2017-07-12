@@ -500,7 +500,7 @@ int prsr_next(parserdef *p, token *out) {
 
 int prsr_parser_init(parserdef *p, char *buf) {
   bzero(p, sizeof(parserdef));
-  p->td = prsr_init(buf);
+  p->td = prsr_init_token(buf);
   p->stack[0].state = STATE__ZERO;
   p->curr = p->stack + 1; 
   p->curr->flag = FLAG__INITIAL;

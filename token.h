@@ -34,7 +34,7 @@ typedef struct {
 } token;
 
 int prsr_next_token(tokendef *d, int slash_is_op, token *out);
-tokendef prsr_init(char *p);
+tokendef prsr_init_token(char *p);
 
 // empty: will not contain text
 #define TOKEN_EOF       0

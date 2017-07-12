@@ -264,7 +264,7 @@ int prsr_next_token(tokendef *d, int slash_is_op, token *out) {
   return 0;
 }
 
-tokendef prsr_init(char *p) {
+tokendef prsr_init_token(char *p) {
   tokendef d;
   bzero(&d, sizeof(d));
   d.buf = p;
