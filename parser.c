@@ -22,6 +22,7 @@
 
 // states of parser: zero and everything else
 #define STATE__ZERO             0
+#define STATE__OBJECT           1
 #define STATE__OPTIONAL_LABEL   5
 #define STATE__EXPECT_ID        6
 #define STATE__EXPECT_COLON     7
@@ -32,14 +33,16 @@
 #define STATE__CLASS            12
 
 // flags for zero state
-#define FLAG__INITIAL 1
-#define FLAG__VALUE   2
 
+#define FLAG__TYPE_STATEMENT 1
+#define FLAG__TYPE_ARRAY     2
+#define FLAG__TYPE_PAREN     4
+#define FLAG__TYPEMASK (1 | 2 | 4)
 
-#define FLAG__TYPE_STATEMENT 32
-#define FLAG__TYPE_ARRAY     64
-#define FLAG__TYPE_PAREN     128
-#define FLAG__TYPEMASK (32 | 64 | 128)
+// TODO: use bottom half as 'state' without flags
+
+#define FLAG__INITIAL 64
+#define FLAG__VALUE   128
 
 
 int stack_inc(parserdef *p, uint8_t state, uint8_t flag) {
@@ -193,16 +196,27 @@ int chunk_inner(parserdef *p, token *out) {
       }
       return 0;
 
+    case TOKEN_COLON:
+      if (type == FLAG__TYPE_STATEMENT) {
+        printf("got end of statement\n");
+        stack_dec(p);
+      }
+      return 0;
+
     case TOKEN_COMMA:
       // TODO: if _statement_, dec and return
       // fall-through
 
     case TOKEN_TERNARY:
-    case TOKEN_COLON:
     case TOKEN_OP:
       return 0;
 
     case TOKEN_SEMICOLON:
+      while (p->curr->flag & FLAG__TYPE_STATEMENT) {
+        printf("got semi end of statement\n");
+        stack_dec(p);
+      }
+
       // TODO: reset to zero state
       p->curr->flag = FLAG__INITIAL;
       return 0;
@@ -229,7 +243,19 @@ int chunk_inner(parserdef *p, token *out) {
       }
       return ERROR__UNEXPECTED;
 
-    // TODO: TOKEN_BRACE
+    case TOKEN_BRACE:
+      if (s[0] == '{') {
+        // this is a block if we're the first expr (orphaned block)
+        if (flag & FLAG__INITIAL) {
+          p->curr->flag = FLAG__INITIAL;  // reset for after
+          return stack_inc(p, STATE__ZERO, FLAG__INITIAL);
+        }
+        return stack_inc(p, STATE__OBJECT, 0);
+      } else if (p->curr->state == STATE__ZERO && !type && p->curr > p->stack) {
+        // only look for BLOCK here
+        return stack_dec(p);
+      }
+      return ERROR__UNEXPECTED;
 
     case TOKEN_DOT:
       if (!(flag & FLAG__VALUE)) {
@@ -283,6 +309,17 @@ int chunk_inner(parserdef *p, token *out) {
   // from here down, if we see a 
 
   do {
+    if (type || !(flag & FLAG__INITIAL)) {
+      if (is_control_keyword(s, len) ||
+          is_label_keyword(s, len) ||
+          is_isolated_keyword(s, len) ||
+          is_labellike_keyword(s, len)) {
+        out->type = TOKEN_KEYWORD;
+        return 0;
+      }
+      break;
+    }
+
     parserstack *was = p->curr;
     if (is_control_keyword(s, len)) {
       int state = (s[0] == 'd' && len == 2) ? STATE__CONTROL_DO_WHILE : STATE__CONTROL;
@@ -297,7 +334,7 @@ int chunk_inner(parserdef *p, token *out) {
       if (s[0] == 'd') {
         stack_inc(p, STATE__EXPECT_COLON, 0);
       } else {
-        // TODO: match statement inside case?
+        stack_inc(p, STATE__ZERO, FLAG__TYPE_STATEMENT);
       }
     } else {
       break;
@@ -307,6 +344,17 @@ int chunk_inner(parserdef *p, token *out) {
     out->type = TOKEN_KEYWORD;
     return 0;
   } while (0);
+
+  // look for potential labels
+  if (flag & FLAG__INITIAL) {
+    // TODO: check reserved words (not quite is_reserved_word)
+    int type = chunk_lookahead(p, NULL);
+    if (type == TOKEN_COLON) {
+      stack_inc(p, STATE__EXPECT_COLON, 0);
+      out->type = TOKEN_LABEL;
+      return 0;
+    }
+  }
 
   // otherwise, it's a symbol
   out->type = TOKEN_SYMBOL;
