@@ -61,7 +61,7 @@ tokendef prsr_init_token(char *p);
 #define TOKEN_KEYWORD   17
 #define TOKEN_LABEL     18
 
-// internal use only
+// literal: internal use except for reporting ambiguous tokens
 #define TOKEN_LIT       19
 
 #endif//_TOKEN_H

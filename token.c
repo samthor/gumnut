@@ -47,7 +47,8 @@ eat_out eat_token(tokendef *d, int slash_is_op) {
     int len = at - search + 2;  // add preamble
 
     if (next == '/') {
-      return (eat_out) {len, TOKEN_COMMENT};  // single line, done
+      ++d->line_no;
+      return (eat_out) {len + 1, TOKEN_COMMENT};  // single line including newline, done
     }
 
     // count \n's
