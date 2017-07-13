@@ -48,7 +48,11 @@ int render(token *out) {
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';
   }
-  printf("%c%4d: %.*s #%d\n", c, out->line_no, out->len, out->p, out->type);
+  int len = out->len;
+  if (out->type == TOKEN_COMMENT && out->p[len-1] == '\n') {
+    --len;
+  }
+  printf("%c%4d: %.*s #%d\n", c, out->line_no, len, out->p, out->type);
   return 0;
 }
 

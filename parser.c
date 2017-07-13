@@ -22,7 +22,6 @@
 
 // states of parser: zero and everything else
 #define STATE__ZERO             0
-#define STATE__RESTRICT         4  // if prev on different line, semicolon must appear
 #define STATE__OPTIONAL_LABEL   5
 #define STATE__EXPECT_ID        6
 #define STATE__EXPECT_COLON     7
@@ -80,35 +79,43 @@ int chunk_lookahead(parserdef *p, token *out) {
 }
 
 int prsr_generates_asi(parserdef *p, token *out) {
-  if (p->curr->state != STATE_ZERO || (p->curr->type & FLAG__TYPEMASK)) {
+  if (p->curr->state != STATE__ZERO || (p->curr->flag & FLAG__TYPEMASK)) {
     return 0;  // TODO: always?
-  } else if (!p->prev.line_no || p->prev.line_no == out->line_no) {
-    return 0;  // not eligible, same line
   }
 
-  if (p->prev.type == TOKEN_KEYWORD && is_asi_keyword(p->prev.s, p->prev.len)) {
-
-    // a single-line comment forces ASI, even though it technically doesn't contain newline
-    if (out->type == TOKEN_COMMENT && p[1] == '/') {
-      return 1;
-    }
-
+  if (out->type == TOKEN_BRACE && out->p[0] == '}') {
+    return !(p->curr->flag & FLAG__INITIAL);
   }
+
+  int effective_line = (out->type == TOKEN_COMMENT ? p->td.line_no : out->line_no);
+  if (effective_line == p->prev.line_no || !p->prev.line_no) {
+    return 0;  // no change
+  }
+
+  // TODO: add do-while(); ASI
 
   // nb. The rest of this method can be as slow as we like, as it only exists to punish the
   // terrible people who write JavaScript without semicolons.
 
+  if (p->prev.type == TOKEN_KEYWORD && is_asi_keyword(p->prev.p, p->prev.len)) {
+    // generate ASI where previous token was restrict keyword
+    return -1;
+  }
+
   switch (out->type) {
     case TOKEN_LIT:
-      return !is_op_keyword(out->s, out->len) && (p->curr->flag & FLAG_VALUE);
+      return (p->curr->flag & FLAG__VALUE) && !is_op_keyword(out->p, out->len);
 
     case TOKEN_OP:
-      return (p->curr->flag & FLAG_VALUE) && is_double_addsub(out->s, out->len);
+      if ((p->curr->flag & FLAG__VALUE) && is_double_addsub(out->p, out->len)) {
+        return -1;
+      }
+      return 0;
 
     case TOKEN_STRING:
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
-      return (flag & FLAG_VALUE);
+      return (p->curr->flag & FLAG__VALUE);
   }
 
   return 0;
@@ -121,9 +128,6 @@ int chunk_inner(parserdef *p, token *out) {
   switch (p->curr->state) {
     case STATE__ZERO:
       break;  // normal state, continue below
-
-    case STATE__RESTRICT:
-      return ERROR__INTERNAL;  // should be caught outside
 
     case STATE__OPTIONAL_LABEL:
       stack_dec(p);
@@ -181,10 +185,6 @@ int chunk_inner(parserdef *p, token *out) {
   if (out->type == TOKEN_LIT && is_op_keyword(s, len)) {
     // replace 'in' and 'instanceof' with op
     out->type = TOKEN_OP;
-  } else if (out->type == TOKEN_OP && (flag & FLAG__VALUE) && p->prev.line_no != out->line_no &&
-        is_double_addsub(s, len)) {
-    // if value, had a newline, and is a ++/-- op: force an ASI
-    return ERROR__EXPECT_ZERO;
   }
 
   switch (out->type) {
@@ -212,9 +212,6 @@ int chunk_inner(parserdef *p, token *out) {
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
       p->curr->flag |= FLAG__VALUE;
-      if (flag & FLAG__VALUE) {
-        return ERROR__EXPECT_ZERO;
-      }
       return 0;
 
     case TOKEN_PAREN:
@@ -261,43 +258,32 @@ int chunk_inner(parserdef *p, token *out) {
       token next;
       chunk_lookahead(p, &next);
       if (next.type == TOKEN_ARRAY && next.p[0] == '[') {
-        return ERROR__EXPECT_ZERO;  // let[ is ambiguous, leave as TOKEN_LIT
+        return 0;  // let[ is ambiguous, leave as TOKEN_LIT
       }
-    } else if (s[0] == 'r' || s[0] == 't') {
-      // 'return' and 'throw' are restricted
-      stack_inc(p, STATE__RESTRICT, 0);
     }
 
     out->type = TOKEN_KEYWORD;
-    return ERROR__EXPECT_ZERO;
+    return 0;
   } while(0);
 
   // found keyword which is an expr: e.g., 'await foo'
   if (is_expr_keyword(s, len)) {
     out->type = TOKEN_KEYWORD;
-    if (s[0] == 'y') {
-      // 'yield' is restricted
-      stack_inc(p, STATE__RESTRICT, 0);
-    }
     return 0;
   }
 
   if (is_hoist_keyword(s, len)) {
     int state = (s[0] == 'f' ? STATE__FUNCTION : STATE__CLASS);
     stack_inc(p, state, 0);
-
-    if ((flag & FLAG__VALUE) || (!type && (flag & FLAG__INITIAL))) {
-      // FIXME: this is sometimes a decl, sometimes a statement
-      return ERROR__EXPECT_ZERO;
+    if (flag & FLAG__INITIAL) {
+      return ERROR__TODO;  // decl
     }
-    // we're definitely a statement
-    return ERROR__TODO;
+    return ERROR__TODO;  // statement
   }
 
   // from here down, if we see a 
 
   do {
-    int asi = 0;
     parserstack *was = p->curr;
     if (is_control_keyword(s, len)) {
       int state = (s[0] == 'd' && len == 2) ? STATE__CONTROL_DO_WHILE : STATE__CONTROL;
@@ -305,11 +291,9 @@ int chunk_inner(parserdef *p, token *out) {
       stack_inc(p, state, flag);
     } else if (is_label_keyword(s, len)) {
       // look for next optional label ('break foo;')
-      asi = 1;
       stack_inc(p, STATE__OPTIONAL_LABEL, 0);
     } else if (is_isolated_keyword(s, len)) {
       // matches 'debugger'
-      asi = 1;
     } else if (is_labellike_keyword(s, len)) {
       if (s[0] == 'd') {
         stack_inc(p, STATE__EXPECT_COLON, 0);
@@ -320,22 +304,14 @@ int chunk_inner(parserdef *p, token *out) {
       break;
     }
 
-    if (asi) {
-      // 'break', 'continue' and 'debugger' are restricted
-      stack_inc(p, STATE__RESTRICT, 0);
-    }
-
     was->flag |= FLAG__INITIAL;  // reset whatever it was to be initial
     out->type = TOKEN_KEYWORD;
-    return ERROR__EXPECT_ZERO;
+    return 0;
   } while (0);
 
   // otherwise, it's a symbol
   out->type = TOKEN_SYMBOL;
   p->curr->flag |= FLAG__VALUE;
-  if (flag & FLAG__VALUE) {
-    return ERROR__EXPECT_ZERO;
-  }
   return 0;
 }
 
@@ -353,21 +329,29 @@ int prsr_log(parserdef *p, token *out, int ret) {
 }
 
 int prsr_next(parserdef *p, token *out) {
+  int ret;
+
   if (p->next.p) {
     *out = p->next;
     p->next.p = NULL;
+  } else {
+    int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->flag & FLAG__VALUE);
+    ret = prsr_next_token(&p->td, slash_is_op, out);
+    if (ret) {
+      return ret;
+    }
   }
 
-  int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->flag & FLAG__VALUE);
-  int ret = prsr_next_token(&p->td, slash_is_op, out);
-  if (ret) {
-    return ret;
-  }
-
-  if (prsr_generates_asi(p, out)) {
+  int asi = prsr_generates_asi(p, out);
+  if (asi) {
     p->next = *out;
     out->len = 0;
     out->type = TOKEN_SEMICOLON;
+    if (asi < 0) {
+      out->line_no = p->prev.line_no;
+    }
+  } else if (out->type == TOKEN_COMMENT) {
+    return 0;
   }
 
   ret = chunk_inner(p, out);
@@ -379,68 +363,6 @@ int prsr_next(parserdef *p, token *out) {
     return ERROR__STACK;
   }
   p->prev = *out;
-  return 0;
-}
-
-
-int prsr_next(parserdef *p, token *out) {
-  // if an ASI was sent, return the real next statement and clear
-  if (p->after_asi.p) {
-    *out = p->after_asi;
-    p->prev = p->after_asi;
-    p->after_asi.p = NULL;
-    return 0;
-  }
-
-  // get token, either post-restrict or anew
-  int ret;
-  if (p->after_restrict_semicolon.p) {
-    *out = p->after_restrict_semicolon;
-    p->after_restrict_semicolon.p = NULL;
-  } else {
-    // this check won't look under e.g. STATE__RESTRICT, but _only_ the zero state has 'value'
-    int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->flag & FLAG__VALUE);
-    ret = prsr_next_token(&p->td, slash_is_op, out);
-    if (ret || out->type == TOKEN_COMMENT) {
-      return ret; 
-    }
-  }
-
-  // insert fake semicolon for restricted keyword
-  if (p->curr->state == STATE__RESTRICT) {
-    int err = stack_dec(p);
-    if (err) {
-      return err;
-    }
-    if (p->prev.line_no != out->line_no || out->type != TOKEN_SEMICOLON) {
-      p->after_restrict_semicolon = *out;
-      out->len = 0;
-      out->type = TOKEN_SEMICOLON;
-    }
-  }
-
-  // actual chunk call
-  ret = chunk_inner(p, out);
-  if (ret) {
-    if (ret != ERROR__EXPECT_ZERO) {
-      return prsr_log(p, out, ret);
-    }
-
-    if (!p->prev.line_no) {
-      // not an ASI, first statement
-    } else if (p->prev.line_no != out->line_no) {
-      p->after_asi = *out;
-      out->len = 0;
-      out->type = TOKEN_SEMICOLON;
-    } else {
-      // this is a syntax error, but we don't report it
-    }
-  }
-  p->prev = *out;
-
-  if (p->curr == p->stack || p->curr >= p->stack + __STACK_SIZE) {
-    return ERROR__STACK;
-  }
   return 0;
 }
 

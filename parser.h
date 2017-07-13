@@ -16,7 +16,6 @@
 
 #include "token.h"
 
-#define ERROR__EXPECT_ZERO -1
 #define ERROR__SYNTAX      -3
 #define ERROR__UNEXPECTED  -4
 #define ERROR__STACK       -5
@@ -32,7 +31,7 @@ typedef struct {
 
 typedef struct {
   tokendef td;
-  token prev, after_asi, after_restrict_semicolon;
+  token prev, next;  // prev token is never COMMENT
   uint8_t flag;
   parserstack stack[__STACK_SIZE];
   parserstack *curr;
