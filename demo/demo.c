@@ -69,7 +69,6 @@ int main() {
   } else if (rem < 0) {
     printf("error: %d\n", rem);
   }
-  
 
   return 0;
 }

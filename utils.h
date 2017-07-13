@@ -18,7 +18,7 @@ int isnum(char c);
 int is_keyword(char *s, int len);
 int is_reserved_word(char *s, int len);
 int is_control_keyword(char *s, int len);
-int is_asi_keyword(char *s, int len);
+int is_restrict_keyword(char *s, int len);
 int is_hoist_keyword(char *s, int len);
 int is_expr_keyword(char *s, int len);
 int is_labellike_keyword(char *s, int len);

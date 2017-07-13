@@ -71,7 +71,7 @@ int is_control_keyword(char *s, int len) {
   return in_space_string(v, s, len);
 }
 
-int is_asi_keyword(char *s, int len) {
+int is_restrict_keyword(char *s, int len) {
   if (len > 9 || len < 5) {
     return 0;  // no asi <5 ('yield' etc) or >9 ('continue')
   }

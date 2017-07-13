@@ -83,13 +83,8 @@ int prsr_generates_asi(parserdef *p, token *out) {
     return 0;  // TODO: always?
   }
 
-  if (out->type == TOKEN_BRACE && out->p[0] == '}') {
+  if ((out->type == TOKEN_BRACE && out->p[0] == '}') || out->type == TOKEN_EOF) {
     return !(p->curr->flag & FLAG__INITIAL);
-  }
-
-  int effective_line = (out->type == TOKEN_COMMENT ? p->td.line_no : out->line_no);
-  if (effective_line == p->prev.line_no || !p->prev.line_no) {
-    return 0;  // no change
   }
 
   // TODO: add do-while(); ASI
@@ -97,8 +92,12 @@ int prsr_generates_asi(parserdef *p, token *out) {
   // nb. The rest of this method can be as slow as we like, as it only exists to punish the
   // terrible people who write JavaScript without semicolons.
 
-  if (p->prev.type == TOKEN_KEYWORD && is_asi_keyword(p->prev.p, p->prev.len)) {
-    // generate ASI where previous token was restrict keyword
+  int effective_line = (out->type == TOKEN_COMMENT ? p->td.line_no : out->line_no);
+  if (effective_line == p->prev.line_no || !p->prev.line_no) {
+    return 0;  // no change
+  }
+
+  if (p->prev.type == TOKEN_KEYWORD && is_restrict_keyword(p->prev.p, p->prev.len)) {
     return -1;
   }
 
@@ -356,7 +355,7 @@ int prsr_next(parserdef *p, token *out) {
 
   ret = chunk_inner(p, out);
   if (ret) {
-    return ret;
+    return prsr_log(p, out, ret);
   }
 
   if (p->curr == p->stack || p->curr >= p->stack + __STACK_SIZE) {
