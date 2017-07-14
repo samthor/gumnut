@@ -22,11 +22,11 @@
 #define ERROR__TODO        -6
 #define ERROR__INTERNAL    -9
 
-#define __STACK_SIZE 512
+#define __STACK_SIZE 638  // makes for ~2k parserdef
 
 typedef struct {
   uint8_t state;
-  uint8_t flag;
+  uint8_t value;
 } parserstack;
 
 typedef struct {

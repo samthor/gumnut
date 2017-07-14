@@ -32,23 +32,30 @@
 #define STATE__FUNCTION         11
 #define STATE__CLASS            12
 
-// flags for zero state
+// values within zero state
 
-#define FLAG__TYPE_STATEMENT 1
-#define FLAG__TYPE_ARRAY     2
-#define FLAG__TYPE_PAREN     4
-#define FLAG__TYPEMASK (1 | 2 | 4)
-
-// TODO: use bottom half as 'state' without flags
+#define MODE__BRACE           0
+#define MODE__ARRAY           1
+#define MODE__PAREN           2
+#define MODE__VIRTUAL         3  // virtual {}, for controls without braces
+#define MODE__CASE            4  // code inside "case ...:"
+#define MODE__EXTENDS         5  // code inside "class Foo extends ... {"
+#define MODE__MASK            (15)  // 2^4 - 1
 
 #define FLAG__INITIAL 64
 #define FLAG__VALUE   128
+#define FLAG__MASK    (64 | 128)
+
+
+
+#define token_tc(token, t, c) (token->type == t && token->p[0] == c)
+#define vtoken_tc(token, t, c) (token.type == t && token.p[0] == c)
 
 
 int stack_inc(parserdef *p, uint8_t state, uint8_t flag) {
   ++p->curr;
   p->curr->state = state;
-  p->curr->flag = flag;
+  p->curr->value = flag;
   if (p->curr == p->stack + __STACK_SIZE - 1) {
     return ERROR__STACK;
   }
@@ -64,7 +71,7 @@ int stack_dec(parserdef *p) {
 }
 
 int chunk_lookahead(parserdef *p, token *out) {
-  int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->flag & FLAG__VALUE);
+  int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->value & FLAG__VALUE);
   tokendef td = p->td;
   token placeholder;
   for (;;) {
@@ -82,12 +89,17 @@ int chunk_lookahead(parserdef *p, token *out) {
 }
 
 int prsr_generates_asi(parserdef *p, token *out) {
-  if (p->curr->state != STATE__ZERO || (p->curr->flag & FLAG__TYPEMASK)) {
-    return 0;  // TODO: always?
+  if (p->curr->state != STATE__ZERO) {
+    return 0;
   }
 
-  if ((out->type == TOKEN_BRACE && out->p[0] == '}') || out->type == TOKEN_EOF) {
-    return !(p->curr->flag & FLAG__INITIAL);
+  int mode = p->curr->value & MODE__MASK;
+  if (mode && mode != MODE__VIRTUAL) {
+    return 0;
+  }
+
+  if (token_tc(out, TOKEN_BRACE, '}') || out->type == TOKEN_EOF) {
+    return !(p->curr->value & FLAG__INITIAL);
   }
 
   // TODO: add do-while(); ASI
@@ -106,10 +118,10 @@ int prsr_generates_asi(parserdef *p, token *out) {
 
   switch (out->type) {
     case TOKEN_LIT:
-      return (p->curr->flag & FLAG__VALUE) && !is_op_keyword(out->p, out->len);
+      return (p->curr->value & FLAG__VALUE) && !is_op_keyword(out->p, out->len);
 
     case TOKEN_OP:
-      if ((p->curr->flag & FLAG__VALUE) && is_double_addsub(out->p, out->len)) {
+      if ((p->curr->value & FLAG__VALUE) && is_double_addsub(out->p, out->len)) {
         return -1;
       }
       return 0;
@@ -117,7 +129,7 @@ int prsr_generates_asi(parserdef *p, token *out) {
     case TOKEN_STRING:
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
-      return (p->curr->flag & FLAG__VALUE);
+      return (p->curr->value & FLAG__VALUE);
   }
 
   return 0;
@@ -165,24 +177,41 @@ int chunk_inner(parserdef *p, token *out) {
       }
       return 0;
 
-    case STATE__CONTROL:
-      if (out->type == TOKEN_PAREN && s[0] == '(') {
-        // swap for paren state, adopting previously set flags ('for' sets initial)
-        p->curr->flag |= FLAG__TYPE_PAREN;
-        p->curr->state = STATE__ZERO;
-        return 0;
+    case STATE__CONTROL: {
+      printf("got STATE__CONTROL\n");
+      int was_initial = (p->prev.type == TOKEN_KEYWORD);
+      if (was_initial && token_tc(out, TOKEN_PAREN, '(')) {
+        printf("got stack inc for paren\n");
+        // add paren state, adopting previously set flags ('for' sets initial)
+        return stack_inc(p, STATE__ZERO, MODE__PAREN | (p->curr->value & FLAG__MASK));
       }
+      if (was_initial || vtoken_tc(p->prev, TOKEN_PAREN, ')')) {
+        if (token_tc(out, TOKEN_BRACE, '{')) {
+          return stack_inc(p, STATE__ZERO, MODE__BRACE | FLAG__INITIAL);  // real brace
+        }
+        // FIXME: yield this to clients?
+        // TODO: yield virtual state
+        stack_inc(p, STATE__ZERO, MODE__VIRTUAL | FLAG__INITIAL);  // virtual state
+        printf("got non-brace CONTROL +1\n");
+        break;
+      } else if (vtoken_tc(p->prev, TOKEN_BRACE, '}') || p->prev.type == TOKEN_SEMICOLON) {
+        // great
+      } else {
+        return ERROR__UNEXPECTED;
+      }
+      printf("yielding\n");
       stack_dec(p);  // apparently weren't in control after all
       break;
+    }
 
     default:
       printf("got unhandled state: %d\n", p->curr->state);
       return ERROR__TODO;
   }
 
-  int flag = p->curr->flag;
-  int type = flag & FLAG__TYPEMASK;
-  p->curr->flag = type;
+  int flag = p->curr->value & FLAG__MASK;
+  int mode = p->curr->value & MODE__MASK;
+  p->curr->value = mode;
 
   if (out->type == TOKEN_LIT && is_op_keyword(s, len)) {
     // replace 'in' and 'instanceof' with op
@@ -197,8 +226,8 @@ int chunk_inner(parserdef *p, token *out) {
       return 0;
 
     case TOKEN_COLON:
-      if (type == FLAG__TYPE_STATEMENT) {
-        printf("got end of statement\n");
+      if (mode == MODE__CASE) {
+        printf("got end of MODE__CASE\n");
         stack_dec(p);
       }
       return 0;
@@ -207,38 +236,39 @@ int chunk_inner(parserdef *p, token *out) {
       // TODO: if _statement_, dec and return
       // fall-through
 
+    case TOKEN_SPREAD:
     case TOKEN_TERNARY:
     case TOKEN_OP:
       return 0;
 
     case TOKEN_SEMICOLON:
-      while (p->curr->flag & FLAG__TYPE_STATEMENT) {
-        printf("got semi end of statement\n");
+      while ((p->curr->value & MODE__MASK) == MODE__VIRTUAL) {
+        printf("got end of MODE__VIRTUAL\n");
         stack_dec(p);
       }
 
       // TODO: reset to zero state
-      p->curr->flag = FLAG__INITIAL;
+      p->curr->value = FLAG__INITIAL;
       return 0;
 
     case TOKEN_STRING:
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
-      p->curr->flag |= FLAG__VALUE;
+      p->curr->value |= FLAG__VALUE;
       return 0;
 
     case TOKEN_PAREN:
       if (s[0] == '(') {
-        return stack_inc(p, STATE__ZERO, FLAG__TYPE_PAREN);
-      } else if (p->curr->state == STATE__ZERO && type == FLAG__TYPE_PAREN) {
+        return stack_inc(p, STATE__ZERO, MODE__PAREN);
+      } else if (p->curr->state == STATE__ZERO && mode == MODE__PAREN) {
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
 
     case TOKEN_ARRAY:
       if (s[0] == '[') {
-        return stack_inc(p, STATE__ZERO, FLAG__TYPE_ARRAY);
-      } else if (p->curr->state == STATE__ZERO && type == FLAG__TYPE_ARRAY) {
+        return stack_inc(p, STATE__ZERO, MODE__ARRAY);
+      } else if (p->curr->state == STATE__ZERO && mode == MODE__ARRAY) {
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
@@ -247,11 +277,11 @@ int chunk_inner(parserdef *p, token *out) {
       if (s[0] == '{') {
         // this is a block if we're the first expr (orphaned block)
         if (flag & FLAG__INITIAL) {
-          p->curr->flag = FLAG__INITIAL;  // reset for after
+          p->curr->value = FLAG__INITIAL;  // reset for after
           return stack_inc(p, STATE__ZERO, FLAG__INITIAL);
         }
         return stack_inc(p, STATE__OBJECT, 0);
-      } else if (p->curr->state == STATE__ZERO && !type && p->curr > p->stack) {
+      } else if (p->curr->state == STATE__ZERO && mode == MODE__BRACE && p->curr > p->stack) {
         // only look for BLOCK here
         return stack_dec(p);
       }
@@ -309,7 +339,10 @@ int chunk_inner(parserdef *p, token *out) {
   // from here down, if we see a 
 
   do {
-    if (type || !(flag & FLAG__INITIAL)) {
+    if (mode || !(flag & FLAG__INITIAL)) {
+      // TODO: this looks for keywords that we match in "normal" mode, and marks them as keywords,
+      // even though they shouldn't do anything (they're unexpected).
+      // we need a better way to categorize these
       if (is_control_keyword(s, len) ||
           is_label_keyword(s, len) ||
           is_isolated_keyword(s, len) ||
@@ -334,22 +367,23 @@ int chunk_inner(parserdef *p, token *out) {
       if (s[0] == 'd') {
         stack_inc(p, STATE__EXPECT_COLON, 0);
       } else {
-        stack_inc(p, STATE__ZERO, FLAG__TYPE_STATEMENT);
+        stack_inc(p, STATE__ZERO, MODE__CASE);
       }
     } else {
       break;
     }
 
-    was->flag |= FLAG__INITIAL;  // reset whatever it was to be initial
+    was->value |= FLAG__INITIAL;  // reset whatever it was to be initial
     out->type = TOKEN_KEYWORD;
     return 0;
   } while (0);
 
   // look for potential labels
   if (flag & FLAG__INITIAL) {
-    // TODO: check reserved words (not quite is_reserved_word)
-    int type = chunk_lookahead(p, NULL);
-    if (type == TOKEN_COLON) {
+    // TODO: don't do this for reserved words (not quite is_reserved_word)
+    // although an initial followed by a : is still invalid
+    int token = chunk_lookahead(p, NULL);
+    if (token == TOKEN_COLON) {
       stack_inc(p, STATE__EXPECT_COLON, 0);
       out->type = TOKEN_LABEL;
       return 0;
@@ -358,7 +392,7 @@ int chunk_inner(parserdef *p, token *out) {
 
   // otherwise, it's a symbol
   out->type = TOKEN_SYMBOL;
-  p->curr->flag |= FLAG__VALUE;
+  p->curr->value |= FLAG__VALUE;
   return 0;
 }
 
@@ -368,7 +402,7 @@ int prsr_log(parserdef *p, token *out, int ret) {
   }
   parserstack *tmp = p->curr;
   while (tmp != p->stack) {
-    printf("... state=%d flag=%d\n", tmp->state, tmp->flag);
+    printf("... state=%d value=%d\n", tmp->state, tmp->value);
     --tmp;
   }
   printf("error: %d\n", ret);
@@ -382,7 +416,7 @@ int prsr_next(parserdef *p, token *out) {
     *out = p->next;
     p->next.p = NULL;
   } else {
-    int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->flag & FLAG__VALUE);
+    int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->value & FLAG__VALUE);
     ret = prsr_next_token(&p->td, slash_is_op, out);
     if (ret) {
       return ret;
@@ -417,7 +451,7 @@ int prsr_parser_init(parserdef *p, char *buf) {
   bzero(p, sizeof(parserdef));
   p->td = prsr_init_token(buf);
   p->curr = p->stack + 1;
-  p->curr->flag = FLAG__INITIAL;
+  p->curr->value = FLAG__INITIAL;
   return 0;
 }
 

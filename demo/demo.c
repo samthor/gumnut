@@ -57,6 +57,8 @@ int render(token *out) {
 }
 
 int main() {
+  printf("sizeof parserstack=%lu parserdef=%lu\n", sizeof(parserstack), sizeof(parserdef));
+
   char *buf;
   if (read_stdin(&buf) < 0) {
     return -1;
