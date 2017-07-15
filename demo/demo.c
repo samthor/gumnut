@@ -47,6 +47,8 @@ int render(token *out) {
   char c = ' ';
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';
+  } else if (out->invalid) {
+    c = '!';
   }
   int len = out->len;
   if (out->type == TOKEN_COMMENT && out->p[len-1] == '\n') {
@@ -69,7 +71,18 @@ int main() {
     printf("can't parse reminder:\n%s\n", buf + rem);
     return -2;
   } else if (rem < 0) {
-    printf("error: %d\n", rem);
+    static char *codes[] = {
+      "UNEXPECTED",
+      "STACK",
+      "TODO",
+      "DUP",
+      "INTERNAL",
+    };
+    char *msg = NULL;
+    if (-rem <= (sizeof(codes) / sizeof(codes[0])) && rem < 0) {
+      msg = codes[-rem - 1];
+    }
+    printf("error: %d %s\n", rem, msg);
   }
 
   return 0;

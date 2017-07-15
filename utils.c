@@ -64,16 +64,25 @@ int is_reserved_word(char *s, int len) {
 
 // whether this is a control keyword that is not an expr
 int is_control_keyword(char *s, int len) {
-  if (len > 7 || len < 2) {
-    return 0;  // no control <2 ('if' etc) or >5 ('finally' etc)
+  if (len > 6 || len < 2) {
+    return 0;  // no control <2 ('if' etc) or >7 ('switch')
   }
-  static const char v[] = " catch do if finally for switch try while with ";
+  static const char v[] = " do if for switch try while with ";
+  return in_space_string(v, s, len);
+}
+
+// is this a trailer to another control
+int is_trailing_control_keyword(char *s, int len) {
+  if (len > 7 || len < 4) {
+    return 0;  // no trailing control <4 ('else') or >7 ('finally')
+  }
+  static const char v[] = " catch else finally ";
   return in_space_string(v, s, len);
 }
 
 int is_restrict_keyword(char *s, int len) {
-  if (len > 9 || len < 5) {
-    return 0;  // no asi <5 ('yield' etc) or >9 ('continue')
+  if (len > 8 || len < 5) {
+    return 0;  // no restrict <5 ('yield' etc) or >8 ('continue' etc)
   }
   static const char v[] = " break continue debugger return throw yield ";
   return in_space_string(v, s, len);

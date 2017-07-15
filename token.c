@@ -250,6 +250,7 @@ int prsr_next_token(tokendef *d, int slash_is_op, token *out) {
 
   out->p = NULL;
   out->line_no = d->line_no;
+  out->invalid = 0;
   eat_out eo = eat_token(d, slash_is_op);
   out->len = eo.len;
   out->type = eo.type;

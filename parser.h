@@ -16,25 +16,26 @@
 
 #include "token.h"
 
-#define ERROR__SYNTAX      -3
-#define ERROR__UNEXPECTED  -4
-#define ERROR__STACK       -5
-#define ERROR__TODO        -6
-#define ERROR__INTERNAL    -9
+#define ERROR__UNEXPECTED  -1  // unavoidable syntax error
+#define ERROR__STACK       -2  // stack overflow or underflow
+#define ERROR__TODO        -3  // not yet implemented
+#define ERROR__DUP         -4  // parser generated dup token
+#define ERROR__INTERNAL    -5  // other internal error
+#define ERROR__RETRY       -9  // internal: retry chunk_inner
 
-#define __STACK_SIZE 638  // makes for ~2k parserdef
+#define __STACK_SIZE 472  // makes for ~1k parserdef
 
 typedef struct {
-  uint8_t state;
+  uint8_t state : 4;
+  uint8_t flag : 4;
   uint8_t value;
 } parserstack;
 
 typedef struct {
   tokendef td;
   token prev, next;  // prev token is never COMMENT
-  uint8_t flag;
-  parserstack stack[__STACK_SIZE];
   parserstack *curr;
+  parserstack stack[__STACK_SIZE];
 } parserdef;
 
 int prsr_parser_init(parserdef *p, char *buf);

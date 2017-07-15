@@ -29,8 +29,9 @@ typedef struct {
 typedef struct {
   char *p;
   int len;
-  int type;
   int line_no;
+  uint8_t type : 5;
+  uint8_t invalid : 1;  // used by parser to indicate likely invalid
 } token;
 
 int prsr_next_token(tokendef *d, int slash_is_op, token *out);
