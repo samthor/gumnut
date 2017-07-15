@@ -27,26 +27,26 @@ const TOKENS = {
   EOF: 0,
   SEMICOLON: 1,
 
-  NEWLINE: 2,
-  COMMA: 3,
-  SPREAD: 4,
-  DOT: 5,
-  OP: 6,
-  ARROW: 7,
-  ELISON: 8,
-  COLON: 9,
-  TERNARY: 10,
-  BRACE: 11,
-  ARRAY: 12,
-  PAREN: 13,
+  COMMA: 2,
+  SPREAD: 3,
+  DOT: 4,
+  OP: 5,
+  ARROW: 6,
+  COLON: 7,
+  TERNARY: 8,
+  BRACE: 9,
+  ARRAY: 10,
+  PAREN: 11,
 
-  COMMENT: 14,
-  STRING: 15,
-  REGEXP: 16,
-  NUMBER: 17,
-  SYMBOL: 18,
-  KEYWORD: 19,
-  LABEL: 20,
+  COMMENT: 12,
+  STRING: 13,
+  REGEXP: 14,
+  NUMBER: 15,
+  SYMBOL: 16,
+  KEYWORD: 17,
+  LABEL: 18,
+
+  LIT: 19,
 };
 
 const REVERSE = (function() {
@@ -60,7 +60,7 @@ const REVERSE = (function() {
 window.addEventListener('load', (ev) => {
   const append = (text, type='') => {
     const node = document.createElement('span');
-    node.textContent = text;
+    node.textContent = String(text).replace(/\n*$/, '');
     if (type[0] !== '_') {
       node.title = type.toLowerCase();
     }
@@ -69,6 +69,11 @@ window.addEventListener('load', (ev) => {
     output.appendChild(node);
     return node;
   };
+  const appendLine = () => {
+    if (output.childNodes.length && output.lastChild.textContent != '\n') {
+      output.appendChild(document.createTextNode('\n'));
+    }
+  };
 
   const render = (tokens, raw) => {
     let lineNo = undefined;
@@ -76,6 +81,7 @@ window.addEventListener('load', (ev) => {
     tokens.forEach(token => {
       if (token.lineNo !== lineNo) {
         lineNo = token.lineNo;
+        appendLine();
         append(token.lineNo, '_lineno');
       }
 
@@ -84,8 +90,6 @@ window.addEventListener('load', (ev) => {
       const node = append(s, REVERSE.get(token.type));
 
       switch (token.type) {
-      case TOKENS.NEWLINE:
-        return;
       case TOKENS.SEMICOLON:
         if (!s) {
           node.textContent = ';';
@@ -181,7 +185,8 @@ document.addEventListener('drop', (ev) => {
     cursor: pointer;
   }
   pre span._lineno {
-    background: red;
+    background: purple;
+    font-style: italic;
     color: white;
   }
   pre span._asi {
@@ -205,6 +210,10 @@ document.addEventListener('drop', (ev) => {
   }
   pre span.symbol {
     color: blue;
+  }
+  pre span.lit {
+    background: red;
+    color: white;
   }
 </style>
 </head>

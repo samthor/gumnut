@@ -2,24 +2,20 @@
 #include "../token.h"
 #include "../parser.h"
 
-static tokendef shared_token;
+static parserdef shared_parser;
 static token out;
 
 int prsr_setup(char *buf) {
-  bzero(&shared_token, sizeof(shared_token));
-  shared_token.buf = buf;
-  shared_token.len = strlen(buf);
-  shared_token.depth = 1;
-  shared_token.line_no = 1;
+  prsr_parser_init(&shared_parser, buf);
   return 0;
 }
 
 int prsr_run() {
-  return prsr_next_token(&shared_token, &out);
+  return prsr_next(&shared_parser, &out);
 }
 
 int prsr_get_at() {
-  return out.p - shared_token.buf;
+  return out.p - shared_parser.td.buf;
 }
 
 int prsr_get_len() {

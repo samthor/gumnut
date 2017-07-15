@@ -117,7 +117,7 @@ int prsr_generates_asi(parserdef *p, token *out) {
         vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
       parserstack *up = p->curr - 1;
       if (up->state == STATE__ZERO && up->value == MODE__VIRTUAL) {
-        return 1;
+        return -1;
       }
     }
     return 0;
@@ -199,7 +199,6 @@ int chunk_inner(parserdef *p, token *out) {
     case STATE__EXPECT_SEMICOLON:
       stack_dec(p);
       if (out->type != TOKEN_SEMICOLON) {
-        printf("expected semi, got: %d\n", out->type);
         break;  // TODO: indicate error, needs reset to zero state
       }
       return 0;
@@ -236,10 +235,6 @@ int chunk_inner(parserdef *p, token *out) {
     case STATE__CONTROL: {
       int flag = p->curr->flag;
       p->curr->flag = 0;
-
-      if (vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
-        printf("STATE__CONTROL got prev BRACE\n");
-      }
 
       // look for 'else if'
       if (flag & FLAG__WAS_ELSE) {
@@ -299,8 +294,6 @@ int chunk_inner(parserdef *p, token *out) {
           }
           // this is a trailer, but _we_ don't support it: retry below
         }
-
-        printf("finished control, RETRY\n");
 
         stack_dec(p);  // finished control
         if (p->curr->state == STATE__ZERO && p->curr->value == MODE__VIRTUAL) {
@@ -411,7 +404,6 @@ int chunk_inner(parserdef *p, token *out) {
       break;  // continues excitement below
 
     default:
-      printf("got unhandled token in chunk_inner: %d\n", out->type);
       return ERROR__TODO;
   }
 
@@ -550,6 +542,11 @@ int chunk_inner(parserdef *p, token *out) {
   return 0;
 }
 
+#ifdef __EMSCRIPTEN__
+int prsr_log(parserdef *p, token *out, int ret) {
+  return ret;
+}
+#else
 int prsr_log(parserdef *p, token *out, int ret) {
   if (ret == ERROR__UNEXPECTED) {
     printf("unexpected: [%d] tok=%d %.*s\n", out->line_no, out->len, out->type, out->p);
@@ -562,6 +559,7 @@ int prsr_log(parserdef *p, token *out, int ret) {
   printf("error: %d\n", ret);
   return ret;
 }
+#endif
 
 int prsr_slash_is_op(parserdef *p) {
   for (parserstack *s = p->curr; s != p->stack; --s) {
