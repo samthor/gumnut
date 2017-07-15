@@ -329,7 +329,7 @@ int chunk_inner(parserdef *p, token *out) {
     case TOKEN_PAREN:
       if (s[0] == '(') {
         return stack_inc_zero(p, MODE__PAREN, 0);
-      } else if (p->curr->state == STATE__ZERO && p->curr->value == MODE__PAREN) {
+      } else if (p->curr->value == MODE__PAREN) {
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
@@ -337,7 +337,7 @@ int chunk_inner(parserdef *p, token *out) {
     case TOKEN_ARRAY:
       if (s[0] == '[') {
         return stack_inc_zero(p, MODE__ARRAY, 0);
-      } else if (p->curr->state == STATE__ZERO && p->curr->value == MODE__ARRAY) {
+      } else if (p->curr->value == MODE__ARRAY) {
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
@@ -350,7 +350,7 @@ int chunk_inner(parserdef *p, token *out) {
           return stack_inc_zero(p, MODE__BRACE, FLAG__INITIAL);
         }
         return stack_inc(p, STATE__OBJECT);
-      } else if (p->curr->state == STATE__ZERO && p->curr->value == MODE__BRACE && p->curr > p->stack) {
+      } else if (p->curr->value == MODE__BRACE && p->curr > p->stack) {
         // only look for BLOCK here
         return stack_dec(p);
       }
