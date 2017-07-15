@@ -23,13 +23,13 @@
 // states of parser: zero and everything else
 #define STATE__ZERO             0
 #define STATE__OBJECT           1
-#define STATE__OPTIONAL_LABEL   5
-#define STATE__EXPECT_ID        6
-#define STATE__EXPECT_COLON     7
-#define STATE__EXPECT_SEMICOLON 8
-#define STATE__CONTROL          9
-#define STATE__FUNCTION         10
-#define STATE__CLASS            11
+#define STATE__FUNCTION         2
+#define STATE__CLASS            3
+#define STATE__OPTIONAL_LABEL   4
+#define STATE__EXPECT_ID        5
+#define STATE__EXPECT_COLON     6
+#define STATE__EXPECT_SEMICOLON 7
+#define STATE__CONTROL          8
 
 #define FLAG__INITIAL        1
 #define FLAG__VALUE          2
@@ -108,6 +108,18 @@ int prsr_generates_asi(parserdef *p, token *out) {
   }
 
   if (p->curr->state != STATE__ZERO) {
+    // if this is the end of a hoistable inside MODE__VIRTUAL, then emit an ASI
+    // e.g.  if (x) function foo() {} <-- generate ASI here
+    // this _might_ not be spec-correct, but as the function effectively gets hoisted, this helps
+    // us generate the right syntax
+    // TODO: if someone disagrees, then make the ASI 'silent'
+    if ((p->curr->state == STATE__FUNCTION || p->curr->state == STATE__CLASS) &&
+        vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
+      parserstack *up = p->curr - 1;
+      if (up->state == STATE__ZERO && up->value == MODE__VIRTUAL) {
+        return 1;
+      }
+    }
     return 0;
   }
 
@@ -192,9 +204,42 @@ int chunk_inner(parserdef *p, token *out) {
       }
       return 0;
 
+    case STATE__OBJECT:
+      return ERROR__TODO;
+
+    case STATE__FUNCTION:
+      if (vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
+        stack_dec(p);
+        return ERROR__RETRY;
+      }
+
+      if (out->type == TOKEN_LIT) {
+        out->type = TOKEN_SYMBOL;  // name of function
+        return 0;
+      } else if (out->type == TOKEN_OP) {
+        if (out->len == 1 && out->p[0] == '*' && p->prev.type == TOKEN_KEYWORD) {
+          return 0;  // the '*' from a generator, immediately following 'function'
+        }
+      } else if (token_tc(out, TOKEN_PAREN, '(')) {
+        return stack_inc_zero(p, MODE__PAREN, 0);
+      } else if (token_tc(out, TOKEN_BRACE, '{')) {
+        return stack_inc_zero(p, MODE__BRACE, FLAG__INITIAL);
+      } else {
+        // something went wrong
+      }
+      stack_dec(p);
+      break;
+
+    case STATE__CLASS:
+      return ERROR__TODO;
+
     case STATE__CONTROL: {
       int flag = p->curr->flag;
       p->curr->flag = 0;
+
+      if (vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
+        printf("STATE__CONTROL got prev BRACE\n");
+      }
 
       // look for 'else if'
       if (flag & FLAG__WAS_ELSE) {
@@ -255,6 +300,8 @@ int chunk_inner(parserdef *p, token *out) {
           // this is a trailer, but _we_ don't support it: retry below
         }
 
+        printf("finished control, RETRY\n");
+
         stack_dec(p);  // finished control
         if (p->curr->state == STATE__ZERO && p->curr->value == MODE__VIRTUAL) {
           stack_dec(p);  // we also finished the parent virtual
@@ -272,8 +319,7 @@ int chunk_inner(parserdef *p, token *out) {
     }
 
     default:
-      printf("got unhandled state: %d\n", p->curr->state);
-      return ERROR__TODO;
+      return ERROR__INTERNAL;
   }
 
   int flag = p->curr->flag;
@@ -351,7 +397,6 @@ int chunk_inner(parserdef *p, token *out) {
         }
         return stack_inc(p, STATE__OBJECT);
       } else if (p->curr->value == MODE__BRACE && p->curr > p->stack) {
-        // only look for BLOCK here
         return stack_dec(p);
       }
       return ERROR__UNEXPECTED;
@@ -398,11 +443,22 @@ int chunk_inner(parserdef *p, token *out) {
 
   if (is_hoist_keyword(s, len)) {
     int state = (s[0] == 'f' ? STATE__FUNCTION : STATE__CLASS);
-    stack_inc(p, state);
-    if (flag & FLAG__INITIAL) {
-      return ERROR__TODO;  // decl
+    out->type = TOKEN_KEYWORD;
+
+    if (p->curr->value == MODE__VIRTUAL) {
+      // if a function is the only thing in a virtual, it's effectively a statement
+      // ... even though interpreters actually have to hoist them (ugh)
+    } else {
+      if (p->curr->value == MODE__BRACE && (flag & FLAG__INITIAL)) {
+        // inside a brace, initial keyword: this is a hoist
+        p->curr->flag |= FLAG__INITIAL;
+      } else {
+        // otherwise, this is a statement and generates a value
+        p->curr->flag |= FLAG__VALUE;
+      }
     }
-    return ERROR__TODO;  // statement
+    stack_inc(p, state);
+    return 0;
   }
 
   // from here down, if we see a 
@@ -507,6 +563,15 @@ int prsr_log(parserdef *p, token *out, int ret) {
   return ret;
 }
 
+int prsr_slash_is_op(parserdef *p) {
+  for (parserstack *s = p->curr; s != p->stack; --s) {
+    if (s->state == STATE__ZERO) {
+      return s->flag & FLAG__VALUE;
+    }
+  }
+  return 0;
+}
+
 int prsr_next(parserdef *p, token *out) {
   int ret;
 
@@ -514,14 +579,16 @@ int prsr_next(parserdef *p, token *out) {
     *out = p->next;
     p->next.p = NULL;
   } else {
-    int slash_is_op = (p->curr->state == STATE__ZERO) && (p->curr->flag & FLAG__VALUE);
+    int slash_is_op = prsr_slash_is_op(p);
     ret = prsr_next_token(&p->td, slash_is_op, out);
     if (ret) {
       return ret;
     }
   }
 
-  int asi = prsr_generates_asi(p, out);
+  int asi;
+retry:
+  asi = prsr_generates_asi(p, out);
   if (asi && out->type != TOKEN_SEMICOLON) {
     p->next = *out;
     out->len = 0;
@@ -533,7 +600,6 @@ int prsr_next(parserdef *p, token *out) {
     return 0;
   }
 
-retry:
   ret = chunk_inner(p, out);
   if (ret) {
     if (ret == ERROR__RETRY) {
