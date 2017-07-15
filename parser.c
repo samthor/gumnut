@@ -108,7 +108,7 @@ int prsr_generates_asi(parserdef *p, token *out) {
   }
 
   if (p->curr->state != STATE__ZERO) {
-    // if this is the end of a hoistable inside MODE__VIRTUAL, then emit an ASI
+    // if this is the end of a decl hoist inside MODE__VIRTUAL, then emit an ASI
     // e.g.  if (x) function foo() {} <-- generate ASI here
     // this _might_ not be spec-correct, but as the function effectively gets hoisted, this helps
     // us generate the right syntax
@@ -116,7 +116,7 @@ int prsr_generates_asi(parserdef *p, token *out) {
     if ((p->curr->state == STATE__FUNCTION || p->curr->state == STATE__CLASS) &&
         vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
       parserstack *up = p->curr - 1;
-      if (up->state == STATE__ZERO && up->value == MODE__VIRTUAL) {
+      if (up->state == STATE__ZERO && up->value == MODE__VIRTUAL && (up->flag & FLAG__INITIAL)) {
         return -1;
       }
     }
