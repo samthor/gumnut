@@ -224,8 +224,7 @@ int chunk_inner(parserdef *p, token *out) {
       } else if (token_tc(out, TOKEN_BRACE, '{')) {
         return stack_inc_zero(p, MODE__BRACE, FLAG__INITIAL);
       } else {
-        out->invalid = 1;
-        return 0;  // something went wrong
+        return ERROR__UNEXPECTED;
       }
       stack_dec(p);
       break;
@@ -249,8 +248,7 @@ int chunk_inner(parserdef *p, token *out) {
       } else if (token_tc(out, TOKEN_BRACE, '{')) {
         return stack_inc(p, STATE__CLASSDEF);
       } else {
-        out->invalid = 1;
-        return 0;  // something went wrong
+        return ERROR__UNEXPECTED;
       }
       stack_dec(p);
       break;
@@ -270,8 +268,7 @@ int chunk_inner(parserdef *p, token *out) {
       } else if (out->type == TOKEN_OP) {
         // ok, could be *
       } else {
-        out->invalid = 1;
-        return 0;  // something went wrong
+        return ERROR__UNEXPECTED;
       }
 
       // push function: it looks for *, a starting literal, () and body
@@ -464,7 +461,7 @@ int chunk_inner(parserdef *p, token *out) {
       break;  // continues excitement below
 
     default:
-      return ERROR__TODO;
+      return ERROR__UNEXPECTED;
   }
 
   do {
@@ -525,12 +522,12 @@ int chunk_inner(parserdef *p, token *out) {
           is_isolated_keyword(s, len) ||
           is_labellike_keyword(s, len)) {
         out->type = TOKEN_KEYWORD;
-        out->invalid = 1;
-        return 0;
+        return ERROR__UNEXPECTED;
       }
       break;
     }
 
+    int status = 0;
     parserstack *was = p->curr;
     if (is_control_keyword(s, len)) {
       stack_inc(p, STATE__CONTROL);
@@ -563,7 +560,7 @@ int chunk_inner(parserdef *p, token *out) {
           p->curr->flag |= FLAG__WAS_ELSE;
           break;
       }
-      out->invalid = 1;
+      status = ERROR__UNEXPECTED;
     } else if (is_label_keyword(s, len)) {
       // look for next optional label ('break foo;')
       stack_inc(p, STATE__OPTIONAL_LABEL);
@@ -581,7 +578,7 @@ int chunk_inner(parserdef *p, token *out) {
 
     was->flag = FLAG__INITIAL;  // reset whatever it was to be initial
     out->type = TOKEN_KEYWORD;
-    return 0;
+    return status;
   } while (0);
 
   // lookahead cases
