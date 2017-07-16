@@ -32,18 +32,20 @@
 #define STATE__CONTROL          8
 #define STATE__ARROW            9
 
-#define FLAG__INITIAL        1
-#define FLAG__VALUE          2
-#define FLAG__WAS_ELSE       4
-#define FLAG__CONTROL_PARENS 8
-
+// flags and values for STATE__ZERO
+#define FLAG__INITIAL         1
+#define FLAG__VALUE           2
 #define MODE__BRACE           0
 #define MODE__VIRTUAL         1  // virtual {}, for control statements without braces
 #define MODE__ARRAY           2
 #define MODE__PAREN           3
-#define MODE__CASE            4  // code inside "case ...:"
-#define MODE__VALUE           5  // code inside "class Foo extends ... {" or "=> ..." (no brace)
+#define MODE__CASE            4  // inside "case ...:"
+#define MODE__ARROW           5  // inside "=> ..." (no brace)
+#define MODE__EXTENDS         6  // inside "class Foo extends ..."
 
+// flags and values for STATE__CONTROL
+#define FLAG__WAS_ELSE        1
+#define FLAG__CONTROL_PARENS  2
 #define CONTROL__DO           1
 #define CONTROL__DO_WHILE     2
 #define CONTROL__FOR          4
@@ -112,7 +114,7 @@ int prsr_generates_asi(parserdef *p, token *out) {
     return 0;
   }
 
-  if (p->curr->value && p->curr->value != MODE__VIRTUAL && p->curr->value != MODE__VALUE) {
+  if (p->curr->value && p->curr->value != MODE__VIRTUAL && p->curr->value != MODE__ARROW) {
     return 0;
   }
 
@@ -240,8 +242,8 @@ int chunk_inner(parserdef *p, token *out) {
       if (out->type == TOKEN_LIT) {
         if (out->len == 7 && !memcmp(out->p, "extends", 7)) {
           out->type = TOKEN_KEYWORD;
-          // TODO: push 'single var without ops' on stack
-          return ERROR__TODO;
+          stack_inc_zero(p, MODE__EXTENDS, 0);
+          return 0;
         }
         out->type = TOKEN_SYMBOL;  // name of class
         return 0;
@@ -260,8 +262,9 @@ int chunk_inner(parserdef *p, token *out) {
       if (out->type == TOKEN_LIT) {
         if (is_getset(out->p, out->len) ||
             (out->len == 6 && !memcmp(out->p, "static", 6))) {
-          // FIXME: these should always be in order: [get|set] static
+          // FIXME: these should always be in order: [static][get|set] name()
           // e.g. "static get get" is a static getter for "get"
+          // and "get static" is a getter for "static"
           out->type = TOKEN_KEYWORD;  // initial keyword, any order is fine
           return 0;
         }
@@ -281,7 +284,7 @@ int chunk_inner(parserdef *p, token *out) {
         stack_inc_zero(p, MODE__BRACE, FLAG__INITIAL);
         return 0;
       }
-      stack_inc_zero(p, MODE__VALUE, 0);
+      stack_inc_zero(p, MODE__ARROW, 0);
       break;
 
     case STATE__CONTROL: {
@@ -370,8 +373,14 @@ int chunk_inner(parserdef *p, token *out) {
   int flag = p->curr->flag;
   p->curr->flag = 0;
 
+  // in 'class extends Foo {', yield as soon as we have a value
+  if (p->curr->value == MODE__EXTENDS && (flag & FLAG__VALUE)) {
+    stack_dec(p);
+    return ERROR__RETRY;
+  }
+
+  // replace 'in' and 'instanceof' with op
   if (out->type == TOKEN_LIT && is_op_keyword(s, len)) {
-    // replace 'in' and 'instanceof' with op
     out->type = TOKEN_OP;
   }
 
@@ -389,7 +398,7 @@ int chunk_inner(parserdef *p, token *out) {
       return 0;
 
     case TOKEN_COMMA:
-      if (p->curr->value == MODE__VALUE) {
+      if (p->curr->value == MODE__ARROW) {
         stack_dec(p);
       }
       return 0;
@@ -403,11 +412,15 @@ int chunk_inner(parserdef *p, token *out) {
       p->curr->flag = FLAG__VALUE;
       return stack_inc(p, STATE__ARROW);
 
-    case TOKEN_SEMICOLON:
+    case TOKEN_SEMICOLON: {
+      int status = 0;
       switch (p->curr->value) {
-        // VALUE and CASE aren't supposed to end here, but release for sanity
-        case MODE__VALUE:
+        case MODE__ARROW:
         case MODE__CASE:
+        case MODE__EXTENDS:
+          status = ERROR__UNEXPECTED;
+          // fall-through
+
         case MODE__VIRTUAL:
           stack_dec(p);
       }
@@ -415,6 +428,7 @@ int chunk_inner(parserdef *p, token *out) {
         p->curr->flag = FLAG__INITIAL;
       }
       return 0;
+    }
 
     case TOKEN_STRING:
     case TOKEN_REGEXP:
