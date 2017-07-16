@@ -30,6 +30,7 @@
 #define STATE__EXPECT_COLON     6
 #define STATE__EXPECT_SEMICOLON 7
 #define STATE__CONTROL          8
+#define STATE__ARROW            9
 
 #define FLAG__INITIAL        1
 #define FLAG__VALUE          2
@@ -111,7 +112,7 @@ int prsr_generates_asi(parserdef *p, token *out) {
     return 0;
   }
 
-  if (p->curr->value && p->curr->value != MODE__VIRTUAL) {
+  if (p->curr->value && p->curr->value != MODE__VIRTUAL && p->curr->value != MODE__VALUE) {
     return 0;
   }
 
@@ -230,6 +231,15 @@ int chunk_inner(parserdef *p, token *out) {
     case STATE__CLASS:
       return ERROR__TODO;
 
+    case STATE__ARROW:
+      stack_dec(p);
+      if (token_tc(out, TOKEN_BRACE, '{')) {
+        stack_inc_zero(p, MODE__BRACE, FLAG__INITIAL);
+        return 0;
+      }
+      stack_inc_zero(p, MODE__VALUE, 0);
+      break;
+
     case STATE__CONTROL: {
       int flag = p->curr->flag;
       p->curr->flag = 0;
@@ -345,10 +355,15 @@ int chunk_inner(parserdef *p, token *out) {
     case TOKEN_OP:
       return 0;
 
+    case TOKEN_ARROW:
+      p->curr->flag = FLAG__VALUE;
+      return stack_inc(p, STATE__ARROW);
+
     case TOKEN_SEMICOLON:
       switch (p->curr->value) {
-        case MODE__CASE:  // invalid, but release for sanity
-          // fall-through
+        // VALUE and CASE aren't supposed to end here, but release for sanity
+        case MODE__VALUE:
+        case MODE__CASE:
         case MODE__VIRTUAL:
           stack_dec(p);
       }
