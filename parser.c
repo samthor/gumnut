@@ -108,18 +108,6 @@ int prsr_generates_asi(parserdef *p, token *out) {
   }
 
   if (p->curr->state != STATE__ZERO) {
-    // if this is the end of a decl hoist inside MODE__VIRTUAL, then emit an ASI
-    // e.g.  if (x) function foo() {} <-- generate ASI here
-    // this _might_ not be spec-correct, but as the function effectively gets hoisted, this helps
-    // us generate the right syntax
-    // TODO: if someone disagrees, then make the ASI 'silent'
-    if ((p->curr->state == STATE__FUNCTION || p->curr->state == STATE__CLASS) &&
-        vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
-      parserstack *up = p->curr - 1;
-      if (up->state == STATE__ZERO && up->value == MODE__VIRTUAL && (up->flag & FLAG__INITIAL)) {
-        return -1;
-      }
-    }
     return 0;
   }
 
@@ -159,6 +147,15 @@ int prsr_generates_asi(parserdef *p, token *out) {
       return (p->curr->flag & FLAG__VALUE);
   }
 
+  return 0;
+}
+
+// close the top-most 'empty' (i.e., still at initial) virtual block
+int maybe_close_empty_virtual(parserdef *p) {
+  parserstack *c = p->curr;
+  if (c->state == STATE__ZERO && c->value == MODE__VIRTUAL && (c->flag & FLAG__INITIAL)) {
+    return stack_dec(p);
+  }
   return 0;
 }
 
@@ -209,6 +206,7 @@ int chunk_inner(parserdef *p, token *out) {
     case STATE__FUNCTION:
       if (vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
         stack_dec(p);
+        maybe_close_empty_virtual(p);
         return ERROR__RETRY;
       }
 
@@ -437,17 +435,15 @@ int chunk_inner(parserdef *p, token *out) {
     int state = (s[0] == 'f' ? STATE__FUNCTION : STATE__CLASS);
     out->type = TOKEN_KEYWORD;
 
-    if (p->curr->value == MODE__VIRTUAL) {
+    if ((p->curr->value == MODE__VIRTUAL || p->curr->value == MODE__BRACE) &&
+        (flag & FLAG__INITIAL)) {
       // if a function is the only thing in a virtual, it's effectively a statement
       // ... even though interpreters actually have to hoist them (ugh)
+      // inside a brace, initial keyword: this is a hoist
+      p->curr->flag |= FLAG__INITIAL;
     } else {
-      if (p->curr->value == MODE__BRACE && (flag & FLAG__INITIAL)) {
-        // inside a brace, initial keyword: this is a hoist
-        p->curr->flag |= FLAG__INITIAL;
-      } else {
-        // otherwise, this is a statement and generates a value
-        p->curr->flag |= FLAG__VALUE;
-      }
+      // otherwise, this is a statement and generates a value
+      p->curr->flag |= FLAG__VALUE;
     }
     stack_inc(p, state);
     return 0;
@@ -504,6 +500,7 @@ int chunk_inner(parserdef *p, token *out) {
           p->curr->flag |= FLAG__WAS_ELSE;
           break;
       }
+      out->invalid = 1;
     } else if (is_label_keyword(s, len)) {
       // look for next optional label ('break foo;')
       stack_inc(p, STATE__OPTIONAL_LABEL);

@@ -89,6 +89,10 @@ window.addEventListener('load', (ev) => {
       const s = raw.substr(token.at, token.len);
       const node = append(s, REVERSE.get(token.type));
 
+      if (token.invalid) {
+        node.classList.add('_invalid');
+      }
+
       switch (token.type) {
       case TOKENS.SEMICOLON:
         if (!s) {
@@ -124,6 +128,7 @@ window.addEventListener('load', (ev) => {
           at: exports._prsr_get_at(),
           len: exports._prsr_get_len(),
           lineNo: exports._prsr_get_line_no(),
+          invalid: exports._prsr_get_invalid(),
         };
         if (token.type === 0) {
           break;  // don't include EOF
@@ -214,6 +219,9 @@ document.addEventListener('drop', (ev) => {
   pre span.lit {
     background: red;
     color: white;
+  }
+  pre span._invalid {
+    text-decoration: underline;
   }
 </style>
 </head>

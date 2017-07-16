@@ -22,6 +22,10 @@ int prsr_get_len() {
   return out.len;
 }
 
+int prsr_get_invalid() {
+  return out.invalid;
+}
+
 int prsr_get_line_no() {
   return out.line_no;
 }
