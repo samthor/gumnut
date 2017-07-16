@@ -29,9 +29,8 @@
 #define STATE__OPTIONAL_LABEL   5
 #define STATE__EXPECT_ID        6
 #define STATE__EXPECT_COLON     7
-#define STATE__EXPECT_SEMICOLON 8
-#define STATE__CONTROL          9
-#define STATE__ARROW            10
+#define STATE__CONTROL          8
+#define STATE__ARROW            9
 
 #define FLAG__INITIAL        1
 #define FLAG__VALUE          2
@@ -171,19 +170,20 @@ int chunk_inner(parserdef *p, token *out) {
 
     case STATE__OPTIONAL_LABEL:
       stack_dec(p);
-      if (out->type == TOKEN_SEMICOLON) {
-        break;  // optional, so we can skip to a semicolon
-      } else if (out->type != TOKEN_LIT) {
-        break;  // TODO: indicate error, needs reset to zero state
+      if (out->type != TOKEN_LIT) {
+        break;
       }
       out->type = TOKEN_LABEL;
-      stack_inc(p, STATE__EXPECT_SEMICOLON);
+      if (p->curr->state != STATE__ZERO) {
+        return ERROR__INTERNAL;
+      }
+      p->curr->flag = 0;  // not initial, no value
       return 0;
 
     case STATE__EXPECT_ID:
       stack_dec(p);
       if (out->type != TOKEN_LIT) {
-        break;  // TODO: indicate error, maybe should reset to zero state
+        break;  // our parent state is already not initial, not value
       }
       out->type = TOKEN_SYMBOL;
       return 0;
@@ -191,18 +191,12 @@ int chunk_inner(parserdef *p, token *out) {
     case STATE__EXPECT_COLON:
       stack_dec(p);
       if (out->type != TOKEN_COLON) {
-        break;  // TODO: indicate error
-      }
-      return 0;
-
-    case STATE__EXPECT_SEMICOLON:
-      stack_dec(p);
-      if (out->type != TOKEN_SEMICOLON) {
-        break;  // TODO: indicate error, needs reset to zero state
+        break;  // just fail silently
       }
       return 0;
 
     case STATE__OBJECT:
+      // { [(get|set)] blah() {}, blah: function() }
       return ERROR__TODO;
 
     case STATE__FUNCTION:
