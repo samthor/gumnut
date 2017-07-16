@@ -196,10 +196,15 @@ int chunk_inner(parserdef *p, token *out) {
       return 0;
 
     case STATE__OBJECT:
+      if (token_tc(out, TOKEN_BRACE, '}')) {
+        return stack_dec(p);
+      }
+
       // { [(get|set)] blah() {}, blah: function() }
       return ERROR__TODO;
 
     case STATE__FUNCTION:
+      // look for end brace of function
       if (vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
         stack_dec(p);
         maybe_close_empty_virtual(p);
@@ -210,6 +215,7 @@ int chunk_inner(parserdef *p, token *out) {
         out->type = TOKEN_SYMBOL;  // name of function
         return 0;
       } else if (out->type == TOKEN_OP) {
+        // FIXME: enforce? order: function [*][foo]
         if (out->len == 1 && out->p[0] == '*' && p->prev.type == TOKEN_KEYWORD) {
           return 0;  // the '*' from a generator, immediately following 'function'
         }
@@ -218,18 +224,59 @@ int chunk_inner(parserdef *p, token *out) {
       } else if (token_tc(out, TOKEN_BRACE, '{')) {
         return stack_inc_zero(p, MODE__BRACE, FLAG__INITIAL);
       } else {
-        // something went wrong
+        out->invalid = 1;
+        return 0;  // something went wrong
       }
       stack_dec(p);
       break;
 
     case STATE__CLASS:
-      // class [foo][extends ...] {
-      return ERROR__TODO;
+      // look for end brace of class
+      if (vtoken_tc(p->prev, TOKEN_BRACE, '}')) {
+        stack_dec(p);
+        maybe_close_empty_virtual(p);
+        return ERROR__RETRY;
+      }
+
+      if (out->type == TOKEN_LIT) {
+        if (out->len == 7 && !memcmp(out->p, "extends", 7)) {
+          out->type = TOKEN_KEYWORD;
+          // TODO: push 'single var without ops' on stack
+          return ERROR__TODO;
+        }
+        out->type = TOKEN_SYMBOL;  // name of class
+        return 0;
+      } else if (token_tc(out, TOKEN_BRACE, '{')) {
+        return stack_inc(p, STATE__CLASSDEF);
+      } else {
+        out->invalid = 1;
+        return 0;  // something went wrong
+      }
+      stack_dec(p);
+      break;
 
     case STATE__CLASSDEF:
-      // { [static] [(get|set)] blah() {} }
-      return ERROR__TODO;
+      if (token_tc(out, TOKEN_BRACE, '}')) {
+        return stack_dec(p);
+      }
+      if (out->type == TOKEN_LIT) {
+        if (is_getset(out->p, out->len) ||
+            (out->len == 6 && !memcmp(out->p, "static", 6))) {
+          // FIXME: these should always be in order: [get|set] static
+          // e.g. "static get get" is a static getter for "get"
+          out->type = TOKEN_KEYWORD;  // initial keyword, any order is fine
+          return 0;
+        }
+      } else if (out->type == TOKEN_OP) {
+        // ok, could be *
+      } else {
+        out->invalid = 1;
+        return 0;  // something went wrong
+      }
+
+      // push function: it looks for *, a starting literal, () and body
+      stack_inc(p, STATE__FUNCTION);
+      return ERROR__RETRY;
 
     case STATE__ARROW:
       stack_dec(p);
