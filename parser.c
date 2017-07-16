@@ -491,9 +491,12 @@ int chunk_inner(parserdef *p, token *out) {
       chunk_lookahead(p, &next);
       if (next.type == TOKEN_ARRAY && next.p[0] == '[') {
         return 0;  // let[ is ambiguous, leave as TOKEN_LIT
+      } else if (next.type != TOKEN_LIT) {
+        out->type = TOKEN_SYMBOL;
+        p->curr->flag |= FLAG__VALUE;
+        return 0;
       }
     }
-
     out->type = TOKEN_KEYWORD;
     return 0;
   } while(0);
