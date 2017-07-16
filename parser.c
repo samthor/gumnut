@@ -431,6 +431,7 @@ int chunk_inner(parserdef *p, token *out) {
     return 0;
   }
 
+  // look for hoistable keyword: function or class
   if (is_hoist_keyword(s, len)) {
     int state = (s[0] == 'f' ? STATE__FUNCTION : STATE__CLASS);
     out->type = TOKEN_KEYWORD;
@@ -521,14 +522,40 @@ int chunk_inner(parserdef *p, token *out) {
     return 0;
   } while (0);
 
+  // lookahead cases
+  token lookahead;
+  lookahead.p = NULL;
+
   // look for potential labels
   if (flag & FLAG__INITIAL) {
     // TODO: don't do this for reserved words (not quite is_reserved_word)
     // although an initial followed by a : is still invalid
-    int token = chunk_lookahead(p, NULL);
-    if (token == TOKEN_COLON) {
+    chunk_lookahead(p, &lookahead);
+    if (lookahead.type == TOKEN_COLON) {
       stack_inc(p, STATE__EXPECT_COLON);
       out->type = TOKEN_LABEL;
+      return 0;
+    }
+  }
+
+  // look for async function modifier
+  if (len == 5 && !memcmp(s, "async", 5)) {
+    if (!lookahead.p) {
+      // TODO: neaten up dup lookahead calls
+      chunk_lookahead(p, &lookahead);
+    }
+    if (lookahead.type == TOKEN_LIT &&
+        lookahead.len == 8
+        && !memcmp(lookahead.p, "function", 8)) {
+      // FIXME: mark function as 'async' so await is a keyword
+      p->curr->flag |= flag;
+      out->type = TOKEN_KEYWORD;
+      return 0;
+    } else if (vtoken_tc(lookahead, TOKEN_PAREN, '(')) {
+      // FIXME: without an aggregious lookahead, we don't know whether this is-
+      //   async (x, y, lots, of, stuff) => {}  // arrow function def
+      // or..
+      //   async (x, y, lots, of, stuff);  // function call
       return 0;
     }
   }
