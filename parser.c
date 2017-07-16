@@ -25,12 +25,13 @@
 #define STATE__OBJECT           1
 #define STATE__FUNCTION         2
 #define STATE__CLASS            3
-#define STATE__OPTIONAL_LABEL   4
-#define STATE__EXPECT_ID        5
-#define STATE__EXPECT_COLON     6
-#define STATE__EXPECT_SEMICOLON 7
-#define STATE__CONTROL          8
-#define STATE__ARROW            9
+#define STATE__CLASSDEF         4
+#define STATE__OPTIONAL_LABEL   5
+#define STATE__EXPECT_ID        6
+#define STATE__EXPECT_COLON     7
+#define STATE__EXPECT_SEMICOLON 8
+#define STATE__CONTROL          9
+#define STATE__ARROW            10
 
 #define FLAG__INITIAL        1
 #define FLAG__VALUE          2
@@ -229,6 +230,11 @@ int chunk_inner(parserdef *p, token *out) {
       break;
 
     case STATE__CLASS:
+      // class [foo][extends ...] {
+      return ERROR__TODO;
+
+    case STATE__CLASSDEF:
+      // { [static] [(get|set)] blah() {} }
       return ERROR__TODO;
 
     case STATE__ARROW:
