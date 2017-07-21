@@ -2,44 +2,43 @@
 #include "../token.h"
 #include "../parser.h"
 
-// this is just EMSCRIPTEN_KEEPALIVE from the actual source
-#define EXPORT __attribute__((used))
+#include <emscripten.h>
 
 static parserdef shared_parser;
 static token out;
 
-EXPORT
+EMSCRIPTEN_KEEPALIVE
 int prsr_setup(char *buf) {
   prsr_parser_init(&shared_parser, buf);
   return 0;
 }
 
-EXPORT
+EMSCRIPTEN_KEEPALIVE
 int prsr_run() {
   return prsr_next(&shared_parser, &out);
 }
 
-EXPORT
+EMSCRIPTEN_KEEPALIVE
 int prsr_get_at() {
   return out.p - shared_parser.td.buf;
 }
 
-EXPORT
+EMSCRIPTEN_KEEPALIVE
 int prsr_get_len() {
   return out.len;
 }
 
-EXPORT
+EMSCRIPTEN_KEEPALIVE
 int prsr_get_invalid() {
   return out.invalid;
 }
 
-EXPORT
+EMSCRIPTEN_KEEPALIVE
 int prsr_get_line_no() {
   return out.line_no;
 }
 
-EXPORT
+EMSCRIPTEN_KEEPALIVE
 int prsr_get_type() {
   return out.type;
 }
