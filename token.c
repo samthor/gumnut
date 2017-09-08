@@ -2,6 +2,12 @@
 #include <string.h>
 #include "token.h"
 
+#define ERROR__STACK         -1
+#define ERROR__STACK_INVALID -2
+
+#define FLAG__PENDING_T_BRACE 1
+#define FLAG__RESUME_LIT      2
+
 typedef struct {
   int len;
   int type;
@@ -19,10 +25,45 @@ static char peek_char(tokendef *d, int len) {
   return 0;
 }
 
-eat_out eat_token(tokendef *d, int slash_is_op) {
+static int stack_inc(tokendef *d, int type) {
+  ++d->depth;
+  d->stack[d->depth].type = type;
+  if (d->depth == __STACK_SIZE - 1) {
+    return ERROR__STACK;
+  }
+  return 0;
+}
+
+static int stack_dec(tokendef *d, int type) {
+  if (d->stack[d->depth].type != type) {
+    return ERROR__STACK_INVALID;
+  }
+  --d->depth;
+  if (!d->depth) {
+    return ERROR__STACK;
+  }
+  return 0;
+}
+
+eat_out eat_token(tokendef *d, token *out, int slash_is_op) {
+  int flag = d->flag;
+  d->flag = 0;
+
+  // look for EOF
   char c = peek_char(d, 0);
   if (!c) {
+    if (d->depth != 1) {
+      out->invalid = 1;
+    }
     return (eat_out) {0, TOKEN_EOF};
+  }
+
+  // flag states
+  if (flag & FLAG__PENDING_T_BRACE) {
+    stack_inc(d, TOKEN_T_BRACE);
+    return (eat_out) {2, TOKEN_T_BRACE};
+  } else if (flag & FLAG__RESUME_LIT) {
+    goto resume_lit;
   }
 
   // comments (C99 and long)
@@ -79,16 +120,45 @@ eat_out eat_token(tokendef *d, int slash_is_op) {
       return (eat_out) {1, TOKEN_COMMA};
 
     case '(':
-    case ')':
+      stack_inc(d, TOKEN_PAREN);
       return (eat_out) {1, TOKEN_PAREN};
 
+    // FIXME: merge the three closing stack branches
+    case ')': {
+      int err = stack_dec(d, TOKEN_PAREN);
+      if (err == ERROR__STACK_INVALID) {
+        out->invalid = 1;
+      }
+      return (eat_out) {1, TOKEN_PAREN};
+    }
+
     case '[':
-    case ']':
+      stack_inc(d, TOKEN_ARRAY);
       return (eat_out) {1, TOKEN_ARRAY};
 
+    case ']': {
+      int err = stack_dec(d, TOKEN_ARRAY);
+      if (err == ERROR__STACK_INVALID) {
+        out->invalid = 1;
+      }
+      return (eat_out) {1, TOKEN_ARRAY};
+    }
+
     case '{':
-    case '}':
       return (eat_out) {1, TOKEN_BRACE};
+
+    case '}':
+      if (d->stack[d->depth].type == TOKEN_T_BRACE) {
+        stack_dec(d, TOKEN_T_BRACE);
+        d->flag = FLAG__RESUME_LIT;
+      } else {
+        int err = stack_dec(d, TOKEN_BRACE);
+        if (err == ERROR__STACK_INVALID) {
+          out->invalid = 1;
+        }
+      }
+      return (eat_out) {1, TOKEN_BRACE};
+
   }
 
   // ops: i.e., anything made up of =<& etc ('in' and 'instanceof' are ops, but here they are lit)
@@ -133,18 +203,15 @@ eat_out eat_token(tokendef *d, int slash_is_op) {
     return (eat_out) {len, TOKEN_OP};
   } while (0);
 
-  // opening of template literal
-  // TODO: we _know_ when this happens, see the escape clause inside the next loop
-  // TODO: when this closes, resume string without `
-  if (c == '$' && next == '{') {
-    return (eat_out) {2, -1};  // FIXME: fail for now
-    return (eat_out) {2, TOKEN_T_BRACE};
-  }
-
   // strings
   if (c == '\'' || c == '"' || c == '`') {
     char start = c;
     int len = 0;
+    goto start_string;
+resume_lit:
+    start = '`';
+    len = -1;
+start_string:
     while ((c = peek_char(d, ++len))) {
       // TODO: strchr for final, and check
       if (c == start) {
@@ -153,7 +220,7 @@ eat_out eat_token(tokendef *d, int slash_is_op) {
       } else if (c == '\\') {
         c = peek_char(d, ++len);
       } else if (start == '`' && c == '$' && peek_char(d, len + 1) == '{') {
-        // TODO: immediately return TOKEN_T_BRACE after this
+        d->flag = FLAG__PENDING_T_BRACE;
         break;
       }
       if (c == '\n') {
@@ -264,11 +331,13 @@ int prsr_next_token(tokendef *d, token *out) {
   out->p = NULL;
   out->line_no = d->line_no;
   out->invalid = 0;
-  eat_out eo = eat_token(d, slash_is_op);
+  eat_out eo = eat_token(d, out, slash_is_op);
   out->len = eo.len;
   out->type = eo.type;
 
-  if (out->type < 0) {
+  if (d->depth == 0 || d->depth >= __STACK_SIZE - 1) {
+    return -1;  // bad stack depth
+  } else if (out->type < 0) {
     return d->curr;  // failed at this position
   }
   out->p = d->buf + d->curr;
@@ -282,6 +351,6 @@ tokendef prsr_init_token(char *p) {
   d.buf = p;
   d.len = strlen(p);
   d.line_no = 1;
-  d.depth = (d.stack + 1);
+  d.depth = 1;
   return d;
 }

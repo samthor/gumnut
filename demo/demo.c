@@ -74,5 +74,9 @@ int main() {
     }
     render(&out);
   }
+
+  if (!out.type && out.invalid && !ret) {
+    ret = 1;
+  }
   return ret;
 }

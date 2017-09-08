@@ -30,8 +30,9 @@ typedef struct {
   int curr;
   int len;
   int line_no;
-  tokenstack *depth;
+  unsigned int depth : 9;
   tokenstack stack[__STACK_SIZE];
+  int flag;
 } tokendef;
 
 typedef struct {
