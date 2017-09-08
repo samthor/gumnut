@@ -19,11 +19,19 @@
 #ifndef _TOKEN_H
 #define _TOKEN_H
 
+#define __STACK_SIZE 512
+
+typedef struct {
+  uint8_t type : 5;
+} tokenstack;
+
 typedef struct {
   char *buf;
   int curr;
   int len;
   int line_no;
+  tokenstack *depth;
+  tokenstack stack[__STACK_SIZE];
 } tokendef;
 
 typedef struct {
@@ -34,7 +42,7 @@ typedef struct {
   uint8_t invalid : 1;  // used by parser to indicate likely invalid
 } token;
 
-int prsr_next_token(tokendef *d, int slash_is_op, token *out);
+int prsr_next_token(tokendef *d, token *out);
 tokendef prsr_init_token(char *p);
 
 // empty: will not contain text
@@ -50,19 +58,20 @@ tokendef prsr_init_token(char *p);
 #define TOKEN_COLON     7
 #define TOKEN_TERNARY   8
 #define TOKEN_BRACE     9
-#define TOKEN_ARRAY     10
-#define TOKEN_PAREN     11
+#define TOKEN_T_BRACE   10  // left brace "${ inside template literal
+#define TOKEN_ARRAY     11
+#define TOKEN_PAREN     12
 
 // variable: could be anything
-#define TOKEN_COMMENT   12
-#define TOKEN_STRING    13
-#define TOKEN_REGEXP    14
-#define TOKEN_NUMBER    15
-#define TOKEN_SYMBOL    16
-#define TOKEN_KEYWORD   17
-#define TOKEN_LABEL     18
+#define TOKEN_COMMENT   13
+#define TOKEN_STRING    14
+#define TOKEN_REGEXP    15
+#define TOKEN_NUMBER    16
+#define TOKEN_SYMBOL    17
+#define TOKEN_KEYWORD   18
+#define TOKEN_LABEL     19
 
 // literal: internal use except for reporting ambiguous tokens
-#define TOKEN_LIT       19
+#define TOKEN_LIT       20
 
 #endif//_TOKEN_H

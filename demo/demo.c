@@ -18,7 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../token.h"
-#include "../parser.h"
 
 // reads stdin into buf, reallocating as necessary. returns strlen(buf) or < 0 for error.
 int read_stdin(char **buf) {
@@ -59,31 +58,21 @@ int render(token *out) {
 }
 
 int main() {
-  printf("sizeof parserstack=%lu parserdef=%lu\n", sizeof(parserstack), sizeof(parserdef));
-
   char *buf;
   if (read_stdin(&buf) < 0) {
     return -1;
   }
 
-  int rem = prsr_fp(buf, render);
-  if (rem > 0) {
-    printf("can't parse reminder:\n%s\n", buf + rem);
-    return -2;
-  } else if (rem < 0) {
-    static char *codes[] = {
-      "UNEXPECTED",
-      "STACK",
-      "TODO",
-      "DUP",
-      "INTERNAL",
-    };
-    char *msg = NULL;
-    if (-rem <= (sizeof(codes) / sizeof(codes[0])) && rem < 0) {
-      msg = codes[-rem - 1];
-    }
-    printf("error: %d %s\n", rem, msg);
-  }
+  tokendef def = prsr_init_token(buf);
 
-  return 0;
+  int ret = 0;
+  token out;
+  for (;;) {
+    ret = prsr_next_token(&def, &out);
+    if (ret || !out.type) {
+      break;
+    }
+    render(&out);
+  }
+  return ret;
 }

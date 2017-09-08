@@ -133,8 +133,15 @@ eat_out eat_token(tokendef *d, int slash_is_op) {
     return (eat_out) {len, TOKEN_OP};
   } while (0);
 
+  // opening of template literal
+  // TODO: we _know_ when this happens, see the escape clause inside the next loop
+  // TODO: when this closes, resume string without `
+  if (c == '$' && next == '{') {
+    return (eat_out) {2, -1};  // FIXME: fail for now
+    return (eat_out) {2, TOKEN_T_BRACE};
+  }
+
   // strings
-  // TODO: ` allows inner code inside ${ ... }
   if (c == '\'' || c == '"' || c == '`') {
     char start = c;
     int len = 0;
@@ -145,8 +152,12 @@ eat_out eat_token(tokendef *d, int slash_is_op) {
         break;
       } else if (c == '\\') {
         c = peek_char(d, ++len);
+      } else if (start == '`' && c == '$' && peek_char(d, len + 1) == '{') {
+        // TODO: immediately return TOKEN_T_BRACE after this
+        break;
       }
       if (c == '\n') {
+        // TODO: not allowed in quoted strings
         ++d->line_no;  // look for \n
       }
     }
@@ -238,7 +249,7 @@ eat_out eat_token(tokendef *d, int slash_is_op) {
   return (eat_out) {0, -1};
 }
 
-int prsr_next_token(tokendef *d, int slash_is_op, token *out) {
+int prsr_next_token(tokendef *d, token *out) {
   for (char c;; ++d->curr) {
     c = d->buf[d->curr];
     if (c == '\n') {
@@ -247,6 +258,8 @@ int prsr_next_token(tokendef *d, int slash_is_op, token *out) {
       break;
     }
   }
+
+  int slash_is_op = 0;  // TODO
 
   out->p = NULL;
   out->line_no = d->line_no;
@@ -269,5 +282,6 @@ tokendef prsr_init_token(char *p) {
   d.buf = p;
   d.len = strlen(p);
   d.line_no = 1;
+  d.depth = (d.stack + 1);
   return d;
 }
