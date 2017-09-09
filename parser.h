@@ -15,9 +15,8 @@
  */
 
 #include "token.h"
+#include "error.h"
 
-#define ERROR__UNEXPECTED  -1  // unavoidable syntax error
-#define ERROR__STACK       -2  // stack overflow or underflow
 #define ERROR__TODO        -3  // not yet implemented
 #define ERROR__DUP         -4  // parser generated dup token
 #define ERROR__INTERNAL    -5  // other internal error

@@ -1,9 +1,7 @@
 #include <ctype.h>
 #include <string.h>
 #include "token.h"
-
-#define ERROR__STACK         -1
-#define ERROR__STACK_INVALID -2
+#include "error.h"
 
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
@@ -29,19 +27,16 @@ static int stack_inc(tokendef *d, int type) {
   ++d->depth;
   d->stack[d->depth].type = type;
   if (d->depth == __STACK_SIZE - 1) {
-    return ERROR__STACK;
+    return ERROR__INTERNAL;
   }
   return 0;
 }
 
 static int stack_dec(tokendef *d, int type) {
-  if (d->stack[d->depth].type != type) {
-    return ERROR__STACK_INVALID;
+  if (d->stack[d->depth].type != type || !d->depth) {
+    return 1;
   }
   --d->depth;
-  if (!d->depth) {
-    return ERROR__STACK;
-  }
   return 0;
 }
 
@@ -52,9 +47,7 @@ eat_out eat_token(tokendef *d, token *out, int slash_is_op) {
   // look for EOF
   char c = peek_char(d, 0);
   if (!c) {
-    if (d->depth != 1) {
-      out->invalid = 1;
-    }
+    out->invalid = (d->depth > 0);
     return (eat_out) {0, TOKEN_EOF};
   }
 
@@ -124,38 +117,32 @@ eat_out eat_token(tokendef *d, token *out, int slash_is_op) {
       return (eat_out) {1, TOKEN_PAREN};
 
     // FIXME: merge the three closing stack branches
-    case ')': {
-      int err = stack_dec(d, TOKEN_PAREN);
-      if (err == ERROR__STACK_INVALID) {
+    case ')':
+      if (stack_dec(d, TOKEN_PAREN)) {
         out->invalid = 1;
       }
       return (eat_out) {1, TOKEN_PAREN};
-    }
 
     case '[':
       stack_inc(d, TOKEN_ARRAY);
       return (eat_out) {1, TOKEN_ARRAY};
 
-    case ']': {
-      int err = stack_dec(d, TOKEN_ARRAY);
-      if (err == ERROR__STACK_INVALID) {
+    case ']':
+      if (stack_dec(d, TOKEN_ARRAY)) {
         out->invalid = 1;
       }
       return (eat_out) {1, TOKEN_ARRAY};
-    }
 
     case '{':
+      stack_inc(d, TOKEN_BRACE);
       return (eat_out) {1, TOKEN_BRACE};
 
     case '}':
       if (d->stack[d->depth].type == TOKEN_T_BRACE) {
         stack_dec(d, TOKEN_T_BRACE);
         d->flag = FLAG__RESUME_LIT;
-      } else {
-        int err = stack_dec(d, TOKEN_BRACE);
-        if (err == ERROR__STACK_INVALID) {
-          out->invalid = 1;
-        }
+      } else if (stack_dec(d, TOKEN_BRACE)) {
+        out->invalid = 1;
       }
       return (eat_out) {1, TOKEN_BRACE};
 
@@ -335,8 +322,8 @@ int prsr_next_token(tokendef *d, token *out) {
   out->len = eo.len;
   out->type = eo.type;
 
-  if (d->depth == 0 || d->depth >= __STACK_SIZE - 1) {
-    return -1;  // bad stack depth
+  if (d->depth == __STACK_SIZE - 1) {
+    return ERROR__INTERNAL;  // bad stack depth
   } else if (out->type < 0) {
     return d->curr;  // failed at this position
   }
@@ -351,6 +338,5 @@ tokendef prsr_init_token(char *p) {
   d.buf = p;
   d.len = strlen(p);
   d.line_no = 1;
-  d.depth = 1;
   return d;
 }

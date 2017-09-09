@@ -19,7 +19,7 @@
 #ifndef _TOKEN_H
 #define _TOKEN_H
 
-#define __STACK_SIZE 512
+#define __STACK_SIZE 472
 
 typedef struct {
   uint8_t type : 5;
@@ -32,7 +32,7 @@ typedef struct {
   int line_no;
   unsigned int depth : 9;
   tokenstack stack[__STACK_SIZE];
-  int flag;
+  uint8_t flag : 2;
 } tokendef;
 
 typedef struct {
