@@ -348,9 +348,11 @@ int prsr_next_token(tokendef *d, token *out) {
     case TOKEN_SEMICOLON:
       curr->reok = 1;
       curr->initial = (d->depth == 0 || curr->type == TOKEN_BRACE);
-      if (curr->pending_colon) {
+      if (curr->pending_colon || curr->pending_function || curr->pending_hoist_brace) {
         out->invalid = 1;
         curr->pending_colon = 0;
+        curr->pending_function = 0;
+        curr->pending_hoist_brace = 0;
       }
       break;
 
@@ -408,10 +410,14 @@ int prsr_next_token(tokendef *d, token *out) {
 
     case TOKEN_BRACE: {
       if (out->p[0] == '}') {
+        curr->initial = initial;  // reset in case this is the end of a statement
         break;  // set below
       }
 
       tokenstack *up = curr - 1;
+      int is_block = up->pending_function || up->initial || p->type == TOKEN_ARROW ||
+          (p->type == TOKEN_LIT && is_block_creator(p->p, p->len));
+
       if (up->pending_hoist_brace) {
         if (p->type == TOKEN_LIT && !memcmp(p->p, "ex", 2)) {
           // corner case: allow `class Foo extends {} {}`, invalid but would break tokenizer
@@ -421,16 +427,14 @@ int prsr_next_token(tokendef *d, token *out) {
         // the final }, as we don't have implicit value
         up->reok = 1;
         up->pending_hoist_brace = 0;
-        break;
-      }
-
-      if (!up->reok) {
-        // good, continue
+        up->initial = initial;
       } else if (p->type == TOKEN_ARROW) {
         up->reok = 0;
       } else {
-        // ???
+        up->reok = !is_block;
       }
+
+      printf("got brace, is_block=%d reok=%d\n", is_block, up->reok);
       break;
     }
 
@@ -468,11 +472,19 @@ int prsr_next_token(tokendef *d, token *out) {
     case TOKEN_LIT:
       if (is_hoist_keyword(out->p, out->len)) {
         // look for prior async on function
-        if (out->p[0] == 'f' && p->type == TOKEN_LIT && is_async(p->p, p->len)) {
-          // TODO: following {} is definitely asyncable
+        if (out->p[0] == 'f') {
+          curr->pending_function = 1;
+          if (p->type == TOKEN_LIT && is_async(p->p, p->len)) {
+            // TODO: following {} is definitely asyncable
+          }
         }
         // if this is an initial function or class, then the end is not a value
-        curr->pending_hoist_brace = initial;
+        int phb = initial;
+        if (!phb && (curr == d->stack || curr->type == TOKEN_BRACE)) {
+          // not if it's preceded by an oplike or an op
+          phb = !((p->type == TOKEN_LIT && is_oplike(p->p, p->len)) || p->type == TOKEN_OP);
+        }
+        curr->pending_hoist_brace = phb;
       } else if (is_allows_re(out->p, out->len)) {
         if (out->p[0] == 'a') {
           // TODO: "await" is only the case if inside an asyncable

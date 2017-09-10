@@ -147,7 +147,13 @@ int is_getset(char *s, int len) {
 // control group that likely has an immediate () after it
 int is_control_paren(char *s, int len) {
   // nb. doesn't have "do", e.g., "do (100) / 100" is valid
-  static const char v[] = " catch else if finally for switch try while with ";
+  static const char v[] = " catch if for switch while with ";
+  return in_space_string(v, s, len);
+}
+
+// as is_control_paren, but for creators of blocks without ()
+int is_block_creator(char *s, int len) {
+  static const char v[] = " do else finally try ";
   return in_space_string(v, s, len);
 }
 
@@ -156,6 +162,11 @@ int is_allows_re(char *s, int len) {
   // nb. const/var (not let) can't, but V8 looks for a re
   static const char v[] =
     " await case const delete do else extends new return throw typeof var void yield ";
+  return in_space_string(v, s, len);
+}
+
+int is_oplike(char *s, int len) {
+  static const char v[] = " await case delete instanceof is new return throw typeof void yield ";
   return in_space_string(v, s, len);
 }
 
