@@ -30,3 +30,5 @@ int is_label_keyword(char *s, int len);
 int is_isolated_keyword(char *s, int len);
 int is_double_addsub(char *s, int len);
 int is_getset(char *s, int len);
+int is_control_paren(char *s, int len);
+int is_allows_re(char *s, int len);

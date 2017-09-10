@@ -1,7 +1,9 @@
 #include <ctype.h>
 #include <string.h>
+#include <stdio.h>
 #include "token.h"
 #include "error.h"
+#include "utils.h"
 
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
@@ -10,10 +12,6 @@ typedef struct {
   int len;
   int type;
 } eat_out;
-
-static int isnum(char c) {
-  return c >= '0' && c <= '9';
-}
 
 static char peek_char(tokendef *d, int len) {
   int out = d->curr + len;
@@ -24,11 +22,17 @@ static char peek_char(tokendef *d, int len) {
 }
 
 static int stack_inc(tokendef *d, int type) {
-  ++d->depth;
-  d->stack[d->depth].type = type;
   if (d->depth == __STACK_SIZE - 1) {
     return ERROR__INTERNAL;
   }
+  ++d->depth;
+  tokenstack *curr = d->stack + d->depth;
+
+  bzero(curr, sizeof(tokenstack));
+  curr->type = type;
+  curr->reok = 1;
+  curr->initial = (type == TOKEN_BRACE);
+
   return 0;
 }
 
@@ -145,7 +149,6 @@ eat_out eat_token(tokendef *d, token *out, int slash_is_op) {
         out->invalid = 1;
       }
       return (eat_out) {1, TOKEN_BRACE};
-
   }
 
   // ops: i.e., anything made up of =<& etc ('in' and 'instanceof' are ops, but here they are lit)
@@ -303,7 +306,7 @@ start_string:
   return (eat_out) {0, -1};
 }
 
-int prsr_next_token(tokendef *d, token *out) {
+static int raw_token(tokendef *d, int slash_is_op, token *out) {
   for (char c;; ++d->curr) {
     c = d->buf[d->curr];
     if (c == '\n') {
@@ -312,8 +315,6 @@ int prsr_next_token(tokendef *d, token *out) {
       break;
     }
   }
-
-  int slash_is_op = 0;  // TODO
 
   out->p = NULL;
   out->line_no = d->line_no;
@@ -332,11 +333,148 @@ int prsr_next_token(tokendef *d, token *out) {
   return 0;
 }
 
+int prsr_next_token(tokendef *d, token *out) {
+  int slash_is_op = !d->stack[d->depth].reok;
+  int ret = raw_token(d, slash_is_op, out);
+  if (ret || out->type == TOKEN_COMMENT) {
+    return ret;
+  }
+
+  token *p = &d->prev;
+  tokenstack *curr = d->stack + d->depth;
+  int initial = curr->initial;
+  curr->initial = 0;
+
+  switch (out->type) {
+    case TOKEN_SEMICOLON:
+      curr->reok = 1;
+      curr->initial = (d->depth == 0 || curr->type == TOKEN_BRACE);
+      if (curr->pending_colon) {
+        out->invalid = 1;
+        curr->pending_colon = 0;
+      }
+      break;
+
+    case TOKEN_COMMA:
+    case TOKEN_SPREAD:
+    case TOKEN_ARROW:
+    case TOKEN_T_BRACE:
+      curr->reok = 1;
+      break;
+
+    case TOKEN_TERNARY:
+      if (curr->pending_colon == __MAX_PENDING_COLON - 1) {
+        return ERROR__INTERNAL;
+      }
+      ++curr->pending_colon;
+      curr->reok = 1;
+      break;
+
+    case TOKEN_COLON:
+      curr->reok = 1;
+      if (curr->pending_colon) {
+        // nb. following is value (and non-initial)
+        --curr->pending_colon;
+      } else if (p->type == TOKEN_LIT) {
+        curr->initial = 1;  // label, now initial again
+      } else {
+        out->invalid = 1;  // colon unexpected
+      }
+      break;
+
+    case TOKEN_DOT:
+    case TOKEN_STRING:
+    case TOKEN_REGEXP:
+    case TOKEN_NUMBER:
+      curr->reok = 0;
+      break;
+
+    case TOKEN_OP:
+      if (is_double_addsub(out->p, out->len)) {
+        // does nothing to value state
+      } else {
+        curr->reok = 1;
+      }
+      break;
+
+    case TOKEN_ARRAY:
+      curr->reok = (out->p[0] == '[');
+      break;
+
+    case TOKEN_BRACE: {
+      if (out->p[0] == '}') {
+        break;  // set below
+      }
+
+      tokenstack *up = curr - 1;
+      if (up->pending_hoist_brace) {
+        if (p->type == TOKEN_LIT && !memcmp(p->p, "ex", 2)) {
+          // corner case: allow `class Foo extends {} {}`, invalid but would break tokenizer
+          break;
+        }
+        // if we were pending a hoist brace (i.e., top-level function/class), then allow a RE after
+        // the final }, as we don't have implicit value
+        up->reok = 1;
+        up->pending_hoist_brace = 0;
+        break;
+      }
+
+      if (!up->reok) {
+        // good, continue
+      } else if (p->type == TOKEN_ARROW) {
+        up->reok = 0;
+      } else {
+        // ???
+      }
+      break;
+    }
+
+    case TOKEN_PAREN: {
+      if (out->p[0] == ')') {
+        curr->initial = initial;  // reset in case this is the end of a control
+        break;  // set below
+      }
+
+      // if the previous statement was a literal and has control parens (e.g., if, for) then the
+      // result of ) doesn't have implicit value
+      tokenstack *up = curr - 1;
+      if (!(up == d->stack || up->type == TOKEN_BRACE)) {
+        break;  // not brace above us
+      }
+      // FIXME: we don't need to calcluate if we are in a dict, but it should be harmless if we
+      // do (op or regexp is invalid here anyway)
+
+      up->reok = (p->type == TOKEN_LIT && is_control_paren(p->p, p->len));
+      up->initial = up->reok;
+      break;
+    }
+
+    case TOKEN_LIT:
+      if (is_hoist_keyword(out->p, out->len)) {
+        // if this is an initial function or class, then the end is not a value
+        curr->pending_hoist_brace = initial;
+      } else if (is_allows_re(out->p, out->len)) {
+        if (out->p[0] == 'a') {
+          // TODO: "await" is only the case if inside an asyncable
+        }
+        curr->reok = 1;
+        break;
+      }
+      curr->reok = 0;
+      break;
+  }
+
+  d->prev = *out;
+  return 0;
+}
+
 tokendef prsr_init_token(char *p) {
   tokendef d;
   bzero(&d, sizeof(d));
   d.buf = p;
   d.len = strlen(p);
   d.line_no = 1;
+  d.stack[0].initial = 1;
+  d.stack[0].reok = 1;
   return d;
 }

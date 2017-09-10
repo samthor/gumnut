@@ -20,9 +20,22 @@
 #define _TOKEN_H
 
 #define __STACK_SIZE 472
+#define __MAX_PENDING_COLON 16
+
+typedef struct {
+  char *p;
+  int len;
+  int line_no;
+  uint8_t type : 5;
+  uint8_t invalid : 1;  // used by parser to indicate likely invalid
+} token;
 
 typedef struct {
   uint8_t type : 5;
+  uint8_t reok : 1;  // would a regexp be ok here
+  uint8_t initial : 1;  // only for TOKEN_BRACE
+  uint8_t pending_hoist_brace : 1;  // is there a pending top-level hoist brace (function, class)
+  uint8_t pending_colon : 4;  // number of pending :'s after ?
 } tokenstack;
 
 typedef struct {
@@ -33,15 +46,8 @@ typedef struct {
   unsigned int depth : 9;
   tokenstack stack[__STACK_SIZE];
   uint8_t flag : 2;
+  token prev;
 } tokendef;
-
-typedef struct {
-  char *p;
-  int len;
-  int line_no;
-  uint8_t type : 5;
-  uint8_t invalid : 1;  // used by parser to indicate likely invalid
-} token;
 
 int prsr_next_token(tokendef *d, token *out);
 tokendef prsr_init_token(char *p);
