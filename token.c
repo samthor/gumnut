@@ -1,6 +1,5 @@
 #include <ctype.h>
 #include <string.h>
-#include <stdio.h>
 #include "token.h"
 #include "error.h"
 #include "utils.h"
@@ -450,7 +449,7 @@ int prsr_next_token(tokendef *d, token *out) {
       int was_async = is_async(p->p, p->len);
       if (was_async) {
         // TODO: following => is definitely asyncable
-        // (we might not have a =>)
+        // (but we might not get a =>)
       }
 
       // if the previous statement was a literal and has control parens (e.g., if, for) then the

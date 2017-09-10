@@ -146,7 +146,7 @@ int is_getset(char *s, int len) {
 
 // control group that likely has an immediate () after it
 int is_control_paren(char *s, int len) {
-  // nb. doesn't have "do"
+  // nb. doesn't have "do", e.g., "do (100) / 100" is valid
   static const char v[] = " catch else if finally for switch try while with ";
   return in_space_string(v, s, len);
 }
