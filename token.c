@@ -391,10 +391,16 @@ int prsr_next_token(tokendef *d, token *out) {
 
     case TOKEN_OP:
       if (is_double_addsub(out->p, out->len)) {
-        // does nothing to value state
-      } else {
-        curr->reok = 1;
+        break;  // does nothing to value state
       }
+
+      if (out->len == 1 && out->p[0] == '*') {
+        if (p->type == TOKEN_LIT && p->len == 8 && !memcmp(p->p, "function", 8)) {
+          // TODO: following {} is a generator
+        }
+      }
+
+      curr->reok = 1;
       break;
 
     case TOKEN_ARRAY:
@@ -435,27 +441,44 @@ int prsr_next_token(tokendef *d, token *out) {
         break;  // set below
       }
 
+      tokenstack *up = curr - 1;
+      if (p->type != TOKEN_LIT) {
+        up->reok = 0;
+        break;
+      }
+
+      int was_async = is_async(p->p, p->len);
+      if (was_async) {
+        // TODO: following => is definitely asyncable
+        // (we might not have a =>)
+      }
+
       // if the previous statement was a literal and has control parens (e.g., if, for) then the
       // result of ) doesn't have implicit value
-      tokenstack *up = curr - 1;
       if (!(up == d->stack || up->type == TOKEN_BRACE)) {
         break;  // not brace above us
       }
       // FIXME: we don't need to calcluate if we are in a dict, but it should be harmless if we
       // do (op or regexp is invalid here anyway)
 
-      up->reok = (p->type == TOKEN_LIT && is_control_paren(p->p, p->len));
+      up->reok = !was_async && is_control_paren(p->p, p->len);
       up->initial = up->reok;
       break;
     }
 
     case TOKEN_LIT:
       if (is_hoist_keyword(out->p, out->len)) {
+        // look for prior async on function
+        if (out->p[0] == 'f' && p->type == TOKEN_LIT && is_async(p->p, p->len)) {
+          // TODO: following {} is definitely asyncable
+        }
         // if this is an initial function or class, then the end is not a value
         curr->pending_hoist_brace = initial;
       } else if (is_allows_re(out->p, out->len)) {
         if (out->p[0] == 'a') {
           // TODO: "await" is only the case if inside an asyncable
+        } else if (out->p[0] == 'y') {
+          // TODO: "yield" is only the case if inside a generator
         }
         curr->reok = 1;
         break;

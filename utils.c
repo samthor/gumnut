@@ -158,3 +158,7 @@ int is_allows_re(char *s, int len) {
     " await case const delete do else extends new return throw typeof var void yield ";
   return in_space_string(v, s, len);
 }
+
+int is_async(char *s, int len) {
+  return len == 5 && !memcmp(s, "async", 5);
+}
