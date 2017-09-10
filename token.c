@@ -421,17 +421,18 @@ int prsr_next_token(tokendef *d, token *out) {
       if (up->pending_hoist_brace) {
         if (p->type == TOKEN_LIT && !memcmp(p->p, "ex", 2)) {
           // corner case: allow `class Foo extends {} {}`, invalid but would break tokenizer
-          break;
+          is_block = 0;
+        } else {
+          // if we were pending a hoist brace (i.e., top-level function/class), then allow a RE
+          // after the final }, as we don't have implicit value
+          up->reok = 1;
+          up->pending_hoist_brace = 0;
+          up->initial = initial;
         }
-        // if we were pending a hoist brace (i.e., top-level function/class), then allow a RE after
-        // the final }, as we don't have implicit value
-        up->reok = 1;
-        up->pending_hoist_brace = 0;
-        up->initial = initial;
-      } else if (p->type == TOKEN_ARROW) {
-        up->reok = 0;
+      } else if (p->type == TOKEN_ARROW || up->pending_function) {
+        up->reok = 0;  // block types that return a value (hoist function is above branch)
       } else {
-        up->reok = !is_block;
+        up->reok = is_block;
       }
 
       printf("got brace, is_block=%d reok=%d\n", is_block, up->reok);
