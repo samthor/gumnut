@@ -58,6 +58,8 @@ int render(token *out) {
 }
 
 int main() {
+  printf("sizeof(tokendef)=%lu\n", sizeof(tokendef));
+
   char *buf;
   if (read_stdin(&buf) < 0) {
     return -1;
@@ -67,13 +69,11 @@ int main() {
 
   int ret = 0;
   token out;
-  for (;;) {
-    ret = prsr_next_token(&def, &out);
-    if (ret || !out.type) {
-      break;
-    }
+  do {
+    // TODO: switch to stream code again
+    ret = prsr_next_token(&def, &out, 1);
     render(&out);
-  }
+  } while (!ret && out.type);
 
   if (!out.type && out.invalid && !ret) {
     ret = 1;

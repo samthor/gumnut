@@ -14,13 +14,12 @@
  * the License.
  */
 
-#include <inttypes.h>
+#include <stdint.h>
 
 #ifndef _TOKEN_H
 #define _TOKEN_H
 
 #define __STACK_SIZE 472
-#define __MAX_PENDING_COLON 16
 
 typedef struct {
   char *p;
@@ -31,12 +30,7 @@ typedef struct {
 } token;
 
 typedef struct {
-  uint8_t type : 5;
-  uint8_t reok : 1;  // would a regexp be ok here
-  uint8_t initial : 1;  // only for TOKEN_BRACE
-  uint8_t pending_function : 1;  // is there a pending function
-  uint8_t pending_hoist_brace : 1;  // is there a pending top-level hoist brace (function, class)
-  uint8_t pending_colon : 4;  // number of pending :'s after ?
+  uint8_t mode : 2;
 } tokenstack;
 
 typedef struct {
@@ -44,14 +38,14 @@ typedef struct {
   int curr;
   int len;
   int line_no;
-  unsigned int depth : 9;
-  tokenstack stack[__STACK_SIZE];
+  uint16_t depth : 9;
   uint8_t flag : 2;
-  token prev;
+  tokenstack stack[__STACK_SIZE];
 } tokendef;
 
-int prsr_next_token(tokendef *d, token *out);
+int prsr_next_token(tokendef *d, token *out, int slash_is_op);
 tokendef prsr_init_token(char *p);
+#define prsr_normal_stack(d) (!(d)->stack[(d)->depth].mode)
 
 // empty: will not contain text
 #define TOKEN_EOF       0
@@ -66,7 +60,7 @@ tokendef prsr_init_token(char *p);
 #define TOKEN_COLON     7
 #define TOKEN_TERNARY   8
 #define TOKEN_BRACE     9
-#define TOKEN_T_BRACE   10  // left brace "${ inside template literal
+#define TOKEN_T_BRACE   10  // left brace '${' inside template literal
 #define TOKEN_ARRAY     11
 #define TOKEN_PAREN     12
 
