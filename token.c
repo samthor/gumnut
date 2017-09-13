@@ -1,7 +1,6 @@
 #include <ctype.h>
 #include <string.h>
 #include "token.h"
-#include "error.h"
 #include "utils.h"
 
 #define FLAG__PENDING_T_BRACE 1

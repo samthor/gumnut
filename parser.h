@@ -15,7 +15,7 @@
  */
 
 #include "token.h"
-#include "error.h"
+#include "types.h"
 
 #define ERROR__TODO        -3  // not yet implemented
 #define ERROR__DUP         -4  // parser generated dup token

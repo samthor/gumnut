@@ -14,7 +14,7 @@
  * the License.
  */
 
-#include <inttypes.h>
+#include <stdint.h>
 
 #ifndef _STREAM_H
 #define _STREAM_H
@@ -28,5 +28,13 @@ typedef struct {
   uint8_t pending_hoist_brace : 1;  // is there a pending top-level hoist brace (function, class)
   uint8_t pending_colon : 4;  // number of pending :'s after ?
 } streamstack;
+
+typedef struct {
+  tokendef d;
+  streamstack stack[__STACK_SIZE];
+} streamdef;
+
+streamdef prsr_init_stream(char *p);
+int prsr_next_token(tokendef *d);
 
 #endif//_STREAM_H

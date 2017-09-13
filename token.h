@@ -15,19 +15,12 @@
  */
 
 #include <stdint.h>
+#include "types.h"
 
 #ifndef _TOKEN_H
 #define _TOKEN_H
 
 #define __STACK_SIZE 472
-
-typedef struct {
-  char *p;
-  int len;
-  int line_no;
-  uint8_t type : 5;
-  uint8_t invalid : 1;  // used by parser to indicate likely invalid
-} token;
 
 typedef struct {
   uint8_t mode : 2;
@@ -46,34 +39,5 @@ typedef struct {
 int prsr_next_token(tokendef *d, token *out, int slash_is_op);
 tokendef prsr_init_token(char *p);
 #define prsr_normal_stack(d) (!(d)->stack[(d)->depth].mode)
-
-// empty: will not contain text
-#define TOKEN_EOF       0
-
-// fixed: will always be the same, or in the same set
-#define TOKEN_SEMICOLON 1   // might be blank for ASI
-#define TOKEN_COMMA     2
-#define TOKEN_SPREAD    3
-#define TOKEN_DOT       4
-#define TOKEN_OP        5   // can include 'in', 'instanceof'
-#define TOKEN_ARROW     6
-#define TOKEN_COLON     7
-#define TOKEN_TERNARY   8
-#define TOKEN_BRACE     9
-#define TOKEN_T_BRACE   10  // left brace '${' inside template literal
-#define TOKEN_ARRAY     11
-#define TOKEN_PAREN     12
-
-// variable: could be anything
-#define TOKEN_COMMENT   13
-#define TOKEN_STRING    14
-#define TOKEN_REGEXP    15
-#define TOKEN_NUMBER    16
-#define TOKEN_SYMBOL    17
-#define TOKEN_KEYWORD   18
-#define TOKEN_LABEL     19
-
-// literal: internal use except for reporting ambiguous tokens
-#define TOKEN_LIT       20
 
 #endif//_TOKEN_H
