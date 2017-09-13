@@ -1,4 +1,4 @@
 #!/bin/bash
 
 set -eu
-gcc -o demo demo.c ../token.c ../utils.c
+gcc -o demo demo.c ../{stream,token,utils}.c

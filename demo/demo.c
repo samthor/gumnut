@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../token.h"
+#include "../stream.h"
 
 // reads stdin into buf, reallocating as necessary. returns strlen(buf) or < 0 for error.
 int read_stdin(char **buf) {
@@ -65,15 +66,27 @@ int main() {
     return -1;
   }
 
-  tokendef def = prsr_init_token(buf);
+  tokendef td = prsr_init_token(buf);
+  streamdef sd = prsr_stream_init();
 
   int ret = 0;
   token out;
   do {
-    // TODO: switch to stream code again
-    ret = prsr_next_token(&def, &out, 1);
+    // get next token
+    ret = prsr_next_token(&td, &out, sd.slash_is_op);
+    if (ret) {
+      break;
+    }
+
+    // stream processor
+    ret = prsr_stream_next(&sd, &out);
+    if (ret) {
+      break;
+    }
+
+    // render
     render(&out);
-  } while (!ret && out.type);
+  } while (out.type);
 
   if (!out.type && out.invalid && !ret) {
     ret = 1;

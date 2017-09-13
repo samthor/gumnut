@@ -19,6 +19,11 @@
 #ifndef _TYPES_H
 #define _TYPES_H
 
+#define ERROR__INTERNAL -1  // internal error
+
+#define __STACK_SIZE      472  // stack size used by token
+#define __STACK_SIZE_BITS 9    // bits needed for __STACK_SIZE
+
 typedef struct {
   char *p;
   int len;
@@ -55,9 +60,6 @@ typedef struct {
 
 // literal: internal use except for reporting ambiguous tokens
 #define TOKEN_LIT       20
-
-// errors
-#define ERROR__INTERNAL -1  // internal error
 
 #endif//_TYPES_H
 
