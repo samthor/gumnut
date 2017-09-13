@@ -59,7 +59,7 @@ int render(token *out) {
 }
 
 int main() {
-  printf("sizeof(tokendef)=%lu\n", sizeof(tokendef));
+  printf("sizeof(tokendef)=%lu sizeof(streamdef)=%lu\n", sizeof(tokendef), sizeof(streamdef));
 
   char *buf;
   if (read_stdin(&buf) < 0) {
