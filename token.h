@@ -22,6 +22,7 @@
 
 typedef struct {
   uint8_t mode : 2;
+  uint8_t expect_op : 1;
 } tokenstack;
 
 typedef struct {
@@ -29,12 +30,13 @@ typedef struct {
   int curr;
   int len;
   int line_no;
+  int has_value;
   uint16_t depth : __STACK_SIZE_BITS;
-  uint8_t flag : 2;
+  uint8_t flag : 3;
   tokenstack stack[__STACK_SIZE];
 } tokendef;
 
-int prsr_next_token(tokendef *d, token *out, int slash_is_op);
+int prsr_next_token(tokendef *d, token *out, int has_value);
 tokendef prsr_init_token(char *p);
 #define prsr_normal_stack(d) (!(d)->stack[(d)->depth].mode)
 

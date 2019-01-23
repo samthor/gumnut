@@ -43,7 +43,7 @@ int read_stdin(char **buf) {
   return pos;
 }
 
-int render(token *out) {
+int render(token *out, int stack_expect_op) {
   char c = ' ';
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';
@@ -54,7 +54,13 @@ int render(token *out) {
   if (out->type == TOKEN_COMMENT && out->p[len-1] == '\n') {
     --len;
   }
-  printf("%c%4d: %.*s #%d\n", c, out->line_no, len, out->p, out->type);
+  char *render_stack_expect_op = "";
+  if (stack_expect_op > 0) {
+    render_stack_expect_op = "=>expr";
+  } else if (!stack_expect_op) {
+    render_stack_expect_op = "=>op";
+  }
+  printf("%c%4d: %.*s #%d %s\n", c, out->line_no, len, out->p, out->type, render_stack_expect_op);
   return 0;
 }
 
@@ -85,7 +91,7 @@ int main() {
     }
 
     // render
-    render(&out);
+    render(&out, td.stack_expect_op);
   } while (out.type);
 
   if (!out.type && out.invalid && !ret) {
