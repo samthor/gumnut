@@ -91,7 +91,7 @@ int main() {
     }
 
     // render
-    render(&out, td.stack_expect_op);
+    render(&out, sd.slash_is_op);
   } while (out.type);
 
   if (!out.type && out.invalid && !ret) {

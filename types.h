@@ -21,12 +21,12 @@
 
 #define ERROR__INTERNAL -1  // internal error
 
-#define __STACK_SIZE      472  // stack size used by token
+#define __STACK_SIZE      512  // stack size used by token
 #define __STACK_SIZE_BITS 9    // bits needed for __STACK_SIZE
 
 typedef struct {
   char *p;
-  int len;
+  int len;              // p is not null-terminated
   int line_no;
   uint8_t type : 5;
   uint8_t invalid : 1;  // used by parser to indicate likely invalid
@@ -56,7 +56,7 @@ typedef struct {
 #define TOKEN_NUMBER    16
 #define TOKEN_SYMBOL    17
 #define TOKEN_KEYWORD   18
-#define TOKEN_LABEL     19
+#define TOKEN_LABEL     19  // to the left of a ':', e.g. 'foo:'
 
 // literal: internal use except for reporting ambiguous tokens
 #define TOKEN_LIT       20

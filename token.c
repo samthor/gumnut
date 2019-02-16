@@ -5,7 +5,6 @@
 
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
-#define FLAG__HAS_VALUE       4
 
 #define STACK__MODE_BRACE   0
 #define STACK__MODE_T_BRACE 1
@@ -25,25 +24,32 @@ static char peek_char(tokendef *d, int len) {
   return 0;
 }
 
-static int stack_inc(tokendef *d, uint8_t mode, uint8_t has_value) {
-  if (d->depth == __STACK_SIZE - 1) {
-    return ERROR__INTERNAL;
+static int stack_inc(tokendef *d, int t_brace) {
+  if (d->depth == __STACK_SIZE) {
+    return -1;
+  }
+
+  if (t_brace) {
+    // set t_brace in bitset position
+    uint32_t *p = d->stack + (d->depth >> 5);
+    *p |= (uint32_t) 1 << (d->depth & 31);
   }
   ++d->depth;
-  tokenstack *curr = d->stack + d->depth;
-  bzero(curr, sizeof(tokenstack));
-  curr->mode = mode;
-  curr->has_value = has_value;
   return 0;
 }
 
-static int stack_dec(tokendef *d, uint8_t mode) {
-  tokenstack *curr = d->stack + d->depth;
-  if (!d->depth || curr->mode != mode) {
+static int stack_dec(tokendef *d) {
+  if (!d->depth) {
+    return -1;
+  }
+  --d->depth;
+
+  uint32_t *p = d->stack + (d->depth >> 5);
+  uint32_t check = (uint32_t) 1 << (d->depth & 31);
+
+  if (*p & check) {
     return 1;
   }
-  d->has_value = curr->has_value;
-  --d->depth;
   return 0;
 }
 
@@ -62,8 +68,8 @@ int eat_token(tokendef *d, eat_out *eat, int has_value) {
 
   // flag states
   if (flag & FLAG__PENDING_T_BRACE) {
-    stack_inc(d, STACK__MODE_T_BRACE, 0);
-    return _CONSUME(2, TOKEN_T_BRACE);
+    _CONSUME(2, TOKEN_T_BRACE);
+    return stack_inc(d, 1);
   } else if (flag & FLAG__RESUME_LIT) {
     goto resume_lit;
   }
@@ -110,51 +116,49 @@ int eat_token(tokendef *d, eat_out *eat, int has_value) {
   // unambiguous simple ascii characters
   switch (c) {
     case ';':
-      d->has_value = 0;
       return _CONSUME(1, TOKEN_SEMICOLON);
 
     case '?':
-      d->has_value = 0;
       return _CONSUME(1, TOKEN_TERNARY);
 
     case ':':
-      d->has_value = 0;
       return _CONSUME(1, TOKEN_COLON);
 
     case ',':
-      d->has_value = 0;
       return _CONSUME(1, TOKEN_COMMA);
 
     case '(':
-      d->has_value = 0;
       _CONSUME(1, TOKEN_PAREN);
-      return stack_inc(d, STACK__MODE_PAREN, has_value);
+      return stack_inc(d, 0);
+
+    case '[':
+      _CONSUME(1, TOKEN_ARRAY);
+      return stack_inc(d, 0);
+
+    case '{':
+      _CONSUME(1, TOKEN_BRACE);
+      return stack_inc(d, 0);
 
     case ')':
       _CONSUME(1, TOKEN_PAREN);
-      return stack_dec(d, STACK__MODE_PAREN);
-
-    case '[':
-      d->has_value = 0;
-      _CONSUME(1, TOKEN_ARRAY);
-      return stack_inc(d, STACK__MODE_ARRAY, 1);  // [] always has_value
+      goto dec;
 
     case ']':
       _CONSUME(1, TOKEN_ARRAY);
-      return stack_dec(d, STACK__MODE_ARRAY);
-
-    case '{':
-      d->has_value = 0;
-      _CONSUME(1, TOKEN_BRACE);
-      return stack_inc(d, STACK__MODE_BRACE, has_value);
+      goto dec;
 
     case '}':
       _CONSUME(1, TOKEN_BRACE);
-      if (!stack_dec(d, STACK__MODE_T_BRACE)) {
-        d->flag = FLAG__RESUME_LIT;
-        return 0;
+
+dec:
+      {
+        int ret = stack_dec(d);
+        if (ret > 0) {
+          d->flag = FLAG__RESUME_LIT;
+          return 0;
+        }
+        return ret;
       }
-      return stack_dec(d, STACK__MODE_BRACE);
   }
 
   // ops: i.e., anything made up of =<& etc ('in' and 'instanceof' are ops, but here they are lit)
@@ -323,20 +327,12 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
     }
   }
 
-  // set by eat_token when we pop stack
-  d->has_value = -1;
-
   eat_out eo;
   int ret = eat_token(d, &eo, has_value);
   if (ret < 0) {
     return ret;
   } else if (eo.type < 0) {
     return d->curr;  // failed at this position
-  }
-
-  if (d->has_value < 0) {
-    // TODO: remove me whatever blah
-    printf("ambig has_value\n");
   }
 
   out->p = d->buf + d->curr;
