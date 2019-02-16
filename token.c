@@ -6,11 +6,6 @@
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
-#define STACK__MODE_BRACE   0
-#define STACK__MODE_T_BRACE 1
-#define STACK__MODE_ARRAY   2
-#define STACK__MODE_PAREN   3
-
 typedef struct {
   int len;
   int type;
@@ -161,7 +156,8 @@ dec:
       }
   }
 
-  // ops: i.e., anything made up of =<& etc ('in' and 'instanceof' are ops, but here they are lit)
+  // ops: i.e., anything made up of =<& etc
+  // note: 'in' and 'instanceof' are ops in most cases, but here they are lit
   do {
     if (c == '/' && !has_value) {
       break;  // this is a regexp

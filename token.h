@@ -33,6 +33,5 @@ typedef struct {
 
 int prsr_next_token(tokendef *d, token *out, int has_value);
 tokendef prsr_init_token(char *p);
-#define prsr_normal_stack(d) (!(d)->stack[(d)->depth].mode)
 
 #endif//_TOKEN_H
