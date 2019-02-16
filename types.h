@@ -26,7 +26,7 @@
 
 typedef struct {
   char *p;
-  int len;              // p is not null-terminated
+  int len;              // p refers to original source
   int line_no;
   uint8_t type : 5;
   uint8_t invalid : 1;  // used by parser to indicate likely invalid
