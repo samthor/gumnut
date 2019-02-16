@@ -21,8 +21,8 @@
 
 #define ERROR__INTERNAL -1  // internal error
 
-#define __STACK_SIZE      512  // stack size used by token
-#define __STACK_SIZE_BITS 9    // bits needed for __STACK_SIZE
+#define __STACK_SIZE      256  // stack size used by token
+#define __STACK_SIZE_BITS 8    // bits needed for __STACK_SIZE
 
 typedef struct {
   char *p;
@@ -45,7 +45,7 @@ typedef struct {
 #define TOKEN_COLON     7
 #define TOKEN_TERNARY   8
 #define TOKEN_BRACE     9
-#define TOKEN_T_BRACE   10  // left brace '${' inside template literal
+#define TOKEN_T_BRACE   10  // '${' or '}' to end template literal
 #define TOKEN_ARRAY     11
 #define TOKEN_PAREN     12
 

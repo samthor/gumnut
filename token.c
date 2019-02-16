@@ -24,11 +24,14 @@ static int stack_inc(tokendef *d, int t_brace) {
     return -1;
   }
 
+  uint32_t *p = d->stack + (d->depth >> 5);
+  uint32_t set = (uint32_t) 1 << (d->depth & 31);
   if (t_brace) {
-    // set t_brace in bitset position
-    uint32_t *p = d->stack + (d->depth >> 5);
-    *p |= (uint32_t) 1 << (d->depth & 31);
+    *p |= set;  // set bit
+  } else {
+    *p &= ~set; // clear bit
   }
+
   ++d->depth;
   return 0;
 }
@@ -48,7 +51,7 @@ static int stack_dec(tokendef *d) {
   return 0;
 }
 
-int eat_token(tokendef *d, eat_out *eat, int has_value) {
+int eat_token(tokendef *d, eat_out *eat, tokenvalue tv) {
   int flag = d->flag;
   d->flag = 0;
 
@@ -136,31 +139,33 @@ int eat_token(tokendef *d, eat_out *eat, int has_value) {
 
     case ')':
       _CONSUME(1, TOKEN_PAREN);
-      goto dec;
+      return stack_dec(d);
 
     case ']':
       _CONSUME(1, TOKEN_ARRAY);
-      goto dec;
+      return stack_dec(d);
 
-    case '}':
-      _CONSUME(1, TOKEN_BRACE);
-
-dec:
-      {
-        int ret = stack_dec(d);
-        if (ret > 0) {
-          d->flag = FLAG__RESUME_LIT;
-          return 0;
-        }
+    case '}': {
+      int ret = stack_dec(d);
+      if (ret < 0) {
         return ret;
+      } else if (ret > 0) {
+        d->flag = FLAG__RESUME_LIT;
+        return _CONSUME(1, TOKEN_T_BRACE);
       }
+
+      return _CONSUME(1, TOKEN_BRACE);
+    }
   }
 
   // ops: i.e., anything made up of =<& etc
   // note: 'in' and 'instanceof' are ops in most cases, but here they are lit
   do {
-    if (c == '/' && !has_value) {
-      break;  // this is a regexp
+    if (c == '/') {
+      int has_value = tv.check(tv.context);
+      if (!has_value) {
+        break;  // this is a regexp
+      }
     }
     const char start = c;
     int len = 0;
@@ -313,7 +318,7 @@ start_string:
 #undef _CONSUME
 }
 
-int prsr_next_token(tokendef *d, token *out, int has_value) {
+int prsr_next_token(tokendef *d, token *out, tokenvalue tv) {
   for (char c;; ++d->curr) {
     c = d->buf[d->curr];
     if (c == '\n') {
@@ -324,7 +329,7 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
   }
 
   eat_out eo;
-  int ret = eat_token(d, &eo, has_value);
+  int ret = eat_token(d, &eo, tv);
   if (ret < 0) {
     return ret;
   } else if (eo.type < 0) {
