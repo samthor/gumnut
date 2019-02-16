@@ -45,21 +45,22 @@ typedef struct {
 #define TOKEN_COLON     7
 #define TOKEN_TERNARY   8
 #define TOKEN_BRACE     9
-#define TOKEN_T_BRACE   10  // '${' or '}' to end template literal
-#define TOKEN_ARRAY     11
-#define TOKEN_PAREN     12
+#define TOKEN_ARRAY     10
+#define TOKEN_PAREN     11
+#define TOKEN_T_BRACE   12  // '${' within template literal
+#define TOKEN_CLOSE     13  // '}', ']' or ')'
 
 // variable: could be anything
-#define TOKEN_COMMENT   13
-#define TOKEN_STRING    14
-#define TOKEN_REGEXP    15
-#define TOKEN_NUMBER    16
-#define TOKEN_SYMBOL    17
-#define TOKEN_KEYWORD   18
-#define TOKEN_LABEL     19  // to the left of a ':', e.g. 'foo:'
+#define TOKEN_COMMENT   14
+#define TOKEN_STRING    15
+#define TOKEN_REGEXP    16
+#define TOKEN_NUMBER    17
+#define TOKEN_SYMBOL    18
+#define TOKEN_KEYWORD   19
+#define TOKEN_LABEL     20  // to the left of a ':', e.g. 'foo:'
 
 // literal: internal use except for reporting ambiguous tokens
-#define TOKEN_LIT       20
+#define TOKEN_LIT       21
 
 #endif//_TYPES_H
 

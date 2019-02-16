@@ -138,11 +138,11 @@ int eat_token(tokendef *d, eat_out *eat, tokenvalue tv) {
       return stack_inc(d, 0);
 
     case ')':
-      _CONSUME(1, TOKEN_PAREN);
+      _CONSUME(1, TOKEN_CLOSE);
       return stack_dec(d);
 
     case ']':
-      _CONSUME(1, TOKEN_ARRAY);
+      _CONSUME(1, TOKEN_CLOSE);
       return stack_dec(d);
 
     case '}': {
@@ -151,10 +151,8 @@ int eat_token(tokendef *d, eat_out *eat, tokenvalue tv) {
         return ret;
       } else if (ret > 0) {
         d->flag = FLAG__RESUME_LIT;
-        return _CONSUME(1, TOKEN_T_BRACE);
       }
-
-      return _CONSUME(1, TOKEN_BRACE);
+      return _CONSUME(1, TOKEN_CLOSE);
     }
   }
 
