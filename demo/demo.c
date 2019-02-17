@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../token.h"
-#include "../stream.h"
+#include "stream.h"
 
 // reads stdin into buf, reallocating as necessary. returns strlen(buf) or < 0 for error.
 int read_stdin(char **buf) {
@@ -43,24 +43,12 @@ int read_stdin(char **buf) {
   return pos;
 }
 
-int render(token *out, int stack_expect_op) {
+int render(token *out) {
   char c = ' ';
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';
-  } else if (out->invalid) {
-    c = '!';
   }
-  int len = out->len;
-  if (out->type == TOKEN_COMMENT && out->p[len-1] == '\n') {
-    --len;
-  }
-  char *render_stack_expect_op = "";
-  if (stack_expect_op > 0) {
-    render_stack_expect_op = "=>expr";
-  } else if (!stack_expect_op) {
-    render_stack_expect_op = "=>op";
-  }
-  printf("%c%4d: %.*s #%d %s\n", c, out->line_no, len, out->p, out->type, render_stack_expect_op);
+  printf("%c%4d: %.*s #%d\n", c, out->line_no, out->len, out->p, out->type);
   return 0;
 }
 
@@ -72,30 +60,42 @@ int main() {
     return -1;
   }
 
+  token asi;
+  asi.type = TOKEN_SEMICOLON;
+
   tokendef td = prsr_init_token(buf);
   streamdef sd = prsr_stream_init();
 
+  tokenvalue tv = {
+    (int (*)(void *)) &prsr_has_value,
+    &sd,
+  };
+
+  int prev_line_no = 0;
   int ret = 0;
   token out;
   do {
     // get next token
-    ret = prsr_next_token(&td, &out, sd.slash_is_op);
+    ret = prsr_next_token(&td, &out, tv);
     if (ret) {
       break;
     }
 
     // stream processor
     ret = prsr_stream_next(&sd, &out);
-    if (ret) {
+    if (ret > 0) {
+      asi.line_no = prev_line_no;
+      render(&asi);
+    } else if (ret) {
       break;
     }
 
     // render
-    render(&out, sd.slash_is_op);
+    render(&out);
   } while (out.type);
 
-  if (!out.type && out.invalid && !ret) {
-    ret = 1;
+  if (!out.type && !ret) {
+    return -1;
   }
   return ret;
 }
