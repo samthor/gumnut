@@ -94,8 +94,7 @@ int eat_token(tokendef *d, eat_out *eat, tokenvalue tv) {
     int len = at - search + 2;  // add preamble
 
     if (next == '/') {
-      ++d->line_no;
-      return _CONSUME(len + 1, TOKEN_COMMENT);  // single line including newline, done
+      return _CONSUME(len, TOKEN_COMMENT);  // don't include newline
     }
 
     // count \n's
@@ -371,6 +370,8 @@ int prsr_next_token(tokendef *d, token *out, tokenvalue tv) {
     }
   }
 
+  out->line_no = d->line_no;  // set first, in case it changes
+
   eat_out eo;
   int ret = eat_token(d, &eo, tv);
   if (ret < 0) {
@@ -381,9 +382,8 @@ int prsr_next_token(tokendef *d, token *out, tokenvalue tv) {
 
   out->p = d->buf + d->curr;
   out->len = eo.len;
-  out->line_no = d->line_no;
   out->type = eo.type;
-  out->invalid = (ret != 0);
+  // nb. we used to set `out->invalid` if ret
 
   d->curr += eo.len;
 
