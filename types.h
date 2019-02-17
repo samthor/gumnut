@@ -30,6 +30,7 @@ typedef struct {
   int line_no;
   uint8_t type : 5;
   uint8_t invalid : 1;  // used by parser to indicate likely invalid
+  uint8_t lit_next_colon : 1;
 } token;
 
 // empty: will not contain text

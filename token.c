@@ -161,7 +161,9 @@ int eat_token(tokendef *d, eat_out *eat, tokenvalue tv) {
   do {
     if (c == '/') {
       int has_value = tv.check(tv.context);
-      if (!has_value) {
+      if (has_value < 0) {
+        return has_value;  // error
+      } else if (!has_value) {
         break;  // this is a regexp
       }
     }
@@ -316,6 +318,48 @@ start_string:
 #undef _CONSUME
 }
 
+static char lookahead_char(tokendef *d) {
+  if (d->flag & FLAG__RESUME_LIT) {
+    return '`';  // we're inside a literal, pretend to end
+  }
+
+  char *p = d->buf + d->curr;
+  for (;;) {
+    // move over whitespace
+    for (;; ++p) {
+      if (!isspace(*p)) {
+        break;
+      }
+    }
+
+    char c = *p;
+    if (c != '/') {
+      return c;  // not a comment or regex
+    }
+
+    char *find = NULL;
+    char next = p[1];
+    if (next == '/') {
+      find = "\n";
+    } else if (next == '*') {
+      find = "*/";
+    } else {
+      return c;  // start of regex
+    }
+
+    const char *search = (const char *) p + 2;
+    char *at = strstr(search, find);
+    if (at == NULL) {
+      return 0;  // EOF
+    }
+
+    p = at + 1;
+    if (next != '/') {
+      ++p;  // add both chars in "*/"
+    }
+  }
+}
+
 int prsr_next_token(tokendef *d, token *out, tokenvalue tv) {
   for (char c;; ++d->curr) {
     c = d->buf[d->curr];
@@ -339,7 +383,16 @@ int prsr_next_token(tokendef *d, token *out, tokenvalue tv) {
   out->line_no = d->line_no;
   out->type = eo.type;
   out->invalid = (ret != 0);
+
   d->curr += eo.len;
+
+  // check for following ':' as this might be a label
+  if (eo.type == TOKEN_LIT) {
+    char next = lookahead_char(d);
+    out->lit_next_colon = (next == ':');
+  } else {
+    out->lit_next_colon = 0;
+  }
   return 0;
 }
 
