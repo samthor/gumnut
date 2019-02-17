@@ -323,6 +323,7 @@ static char lookahead_char(tokendef *d) {
     return '`';  // we're inside a literal, pretend to end
   }
 
+  // move past all found comments and whitespace to find next char
   char *p = d->buf + d->curr;
   for (;;) {
     // move over whitespace
