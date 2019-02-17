@@ -35,3 +35,5 @@ int is_block_creator(char *s, int len);
 int is_allows_re(char *s, int len);
 int is_oplike(char *s, int len);
 int is_async(char *s, int len);
+int is_case(char *s, int len);
+int is_asi_change(char *s, int len);

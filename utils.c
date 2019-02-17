@@ -43,7 +43,7 @@ int is_keyword(char *s, int len) {
     }
   }
   // nb. does not contain 'in' or 'instanceof', as they are ops
-  // does not contain 'super', treated as symbol
+  // does not contain 'super' or 'this', treated as symbol
   static const char v[] =
     " await break case catch class const continue debugger default delete do else enum export"
     " extends finally for function if implements import interface let new package private"
@@ -172,4 +172,13 @@ int is_oplike(char *s, int len) {
 
 int is_async(char *s, int len) {
   return len == 5 && !memcmp(s, "async", 5);
+}
+
+int is_case(char *s, int len) {
+  return len == 4 && !memcmp(s, "case", 4);
+}
+
+int is_asi_change(char *s, int len) {
+  return (len == 6 && !memcmp(s, "return", 6)) ||
+      (len == 5 && !memcmp(s, "yield", 5));
 }
