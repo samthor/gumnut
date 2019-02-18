@@ -43,6 +43,7 @@ static int token_is_block(streamlev *up, token *t) {
       // e.g. `case {`
       return 0;
     } else if (is_asi_change(up->prev1.p, up->prev1.len)) {
+      // FIXME(samthor): We can probably insert the ASI before this happens.
       // e.g. `return {}` or `return \n {}`
       return up->prev1.line_no != t->line_no;
     }

@@ -30,12 +30,7 @@ typedef struct {
   uint32_t stack[((__STACK_SIZE - 1) >> 5) + 1];
 } tokendef;
 
-typedef struct {
-  int (*check)(void *);
-  void *context;
-} tokenvalue;
-
-int prsr_next_token(tokendef *d, token *out, tokenvalue tv);
+int prsr_next_token(tokendef *d, token *out, int has_value);
 tokendef prsr_init_token(char *p);
 
 #endif//_TOKEN_H

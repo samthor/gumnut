@@ -48,7 +48,7 @@ int render(token *out) {
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';
   }
-  printf("%c%4d: %.*s #%d\n", c, out->line_no, out->len, out->p, out->type);
+  printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
   return 0;
 }
 
@@ -66,17 +66,13 @@ int main() {
   tokendef td = prsr_init_token(buf);
   streamdef sd = prsr_stream_init();
 
-  tokenvalue tv = {
-    (int (*)(void *)) &prsr_has_value,
-    &sd,
-  };
-
   int prev_line_no = 0;
   int ret = 0;
   token out;
   do {
     // get next token
-    ret = prsr_next_token(&td, &out, tv);
+    int has_value = prsr_has_value(&sd);
+    ret = prsr_next_token(&td, &out, has_value);
     if (ret) {
       break;
     }

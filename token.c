@@ -51,7 +51,7 @@ static int stack_dec(tokendef *d) {
   return 0;
 }
 
-int eat_token(tokendef *d, eat_out *eat, tokenvalue tv) {
+int eat_token(tokendef *d, eat_out *eat, int has_value) {
   int flag = d->flag;
   d->flag = 0;
 
@@ -158,13 +158,8 @@ int eat_token(tokendef *d, eat_out *eat, tokenvalue tv) {
   // ops: i.e., anything made up of =<& etc
   // note: 'in' and 'instanceof' are ops in most cases, but here they are lit
   do {
-    if (c == '/') {
-      int has_value = tv.check(tv.context);
-      if (has_value < 0) {
-        return has_value;  // error
-      } else if (!has_value) {
-        break;  // this is a regexp
-      }
+    if (c == '/' && !has_value) {
+      break;  // this is a regexp
     }
     const char start = c;
     int len = 0;
@@ -360,7 +355,7 @@ static char lookahead_char(tokendef *d) {
   }
 }
 
-int prsr_next_token(tokendef *d, token *out, tokenvalue tv) {
+int prsr_next_token(tokendef *d, token *out, int has_value) {
   for (char c;; ++d->curr) {
     c = d->buf[d->curr];
     if (c == '\n') {
@@ -373,7 +368,7 @@ int prsr_next_token(tokendef *d, token *out, tokenvalue tv) {
   out->line_no = d->line_no;  // set first, in case it changes
 
   eat_out eo;
-  int ret = eat_token(d, &eo, tv);
+  int ret = eat_token(d, &eo, has_value);
   if (ret < 0) {
     return ret;
   } else if (eo.type < 0) {
