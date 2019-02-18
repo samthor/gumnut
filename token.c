@@ -6,26 +6,20 @@
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
-#define _CONSUME(_len, _type) (eat->len = _len, eat->type = _type, 0);
-
 typedef struct {
-  int len;
-  int type;
-} eat_out;
+  char *p;
+  char *end;
+} eat_context;
 
-static char peek_char(tokendef *d, int len) {
-  int out = d->curr + len;
-  if (out < d->len) {
-    return d->buf[out];
+static char peek_char(eat_context *c, int at) {
+  char *p = c->p + at;
+  if (p < c->end) {
+    return *p;
   }
   return 0;
 }
 
-static int stack_inc(tokendef *d, int t_brace) {
-  if (d->depth == __STACK_SIZE) {
-    return ERROR__STACK;
-  }
-
+static void stack_inc(tokendef *d, int t_brace) {
   uint32_t *p = d->stack + (d->depth >> 5);
   uint32_t set = (uint32_t) 1 << (d->depth & 31);
   if (t_brace) {
@@ -33,24 +27,16 @@ static int stack_inc(tokendef *d, int t_brace) {
   } else {
     *p &= ~set; // clear bit
   }
-
   ++d->depth;
-  return 0;
 }
 
 static int stack_dec(tokendef *d) {
-  if (!d->depth) {
-    return ERROR__STACK;
-  }
   --d->depth;
 
   uint32_t *p = d->stack + (d->depth >> 5);
   uint32_t check = (uint32_t) 1 << (d->depth & 31);
 
-  if (*p & check) {
-    return 1;
-  }
-  return 0;
+  return *p & check;
 }
 
 static int consume_slash_op(char *p) {
@@ -99,31 +85,27 @@ static int consume_slash_regexp(char *p) {
   }
 }
 
-// nb. changes ->flag, ->depth and ->line_no
-static int eat_token(tokendef *d, eat_out *eat) {
-  int flag = d->flag;
-  d->flag = 0;
+// nb. changes ->flag, and ->line_no
+static int eat_token(eat_context *eat, int *line_no, int *litflag) {
+#define _CONSUME(_len, _type) ((eat->p += _len, _type));
 
   // look for EOF
-  char c = peek_char(d, 0);
+  char c = peek_char(eat, 0);
   if (!c) {
-    _CONSUME(0, TOKEN_EOF);
-    if (d->depth) {
-      return ERROR__STACK;
-    }
-    return 0;
+    return _CONSUME(0, TOKEN_EOF);
   }
 
   // flag states
-  if (flag & FLAG__PENDING_T_BRACE) {
-    _CONSUME(2, TOKEN_T_BRACE);
-    return stack_inc(d, 1);
-  } else if (flag & FLAG__RESUME_LIT) {
+  if (*litflag) {
+    *litflag = 0;
     goto resume_lit;
   }
 
   // unambiguous simple ascii characters
   switch (c) {
+    case '/':
+      return _CONSUME(0, TOKEN_SLASH);  // return ambig, handled elsewhere
+
     case ';':
       return _CONSUME(1, TOKEN_SEMICOLON);
 
@@ -137,37 +119,21 @@ static int eat_token(tokendef *d, eat_out *eat) {
       return _CONSUME(1, TOKEN_COMMA);
 
     case '(':
-      _CONSUME(1, TOKEN_PAREN);
-      return stack_inc(d, 0);
+      return _CONSUME(1, TOKEN_PAREN);
 
     case '[':
-      _CONSUME(1, TOKEN_ARRAY);
-      return stack_inc(d, 0);
+      return _CONSUME(1, TOKEN_ARRAY);
 
     case '{':
-      _CONSUME(1, TOKEN_BRACE);
-      return stack_inc(d, 0);
+      return _CONSUME(1, TOKEN_BRACE);
 
     case ')':
-      _CONSUME(1, TOKEN_CLOSE);
-      return stack_dec(d);
-
     case ']':
-      _CONSUME(1, TOKEN_CLOSE);
-      return stack_dec(d);
-
-    case '}': {
-      int ret = stack_dec(d);
-      if (ret < 0) {
-        return ret;
-      } else if (ret > 0) {
-        d->flag = FLAG__RESUME_LIT;
-      }
+    case '}':
       return _CONSUME(1, TOKEN_CLOSE);
-    }
   }
 
-  // ops: i.e., anything made up of =<& etc
+  // ops: i.e., anything made up of =<& etc (except '/', handled above)
   // note: 'in' and 'instanceof' are ops in most cases, but here they are lit
   do {
     const char start = c;
@@ -185,7 +151,7 @@ static int eat_token(tokendef *d, eat_out *eat) {
     }
 
     while (len < allowed) {
-      c = peek_char(d, ++len);
+      c = peek_char(eat, ++len);
       if (c != start) {
         break;
       }
@@ -198,7 +164,7 @@ static int eat_token(tokendef *d, eat_out *eat) {
       ++len;  // eat --, ++, || or &&: but no more
     } else if (c == '=') {
       // consume a suffix '=' (or whole ===, !==)
-      c = peek_char(d, ++len);
+      c = peek_char(eat, ++len);
       if (c == '=' && (start == '=' || start == '!')) {
         ++len;
       }
@@ -216,27 +182,27 @@ resume_lit:
     start = '`';
     len = -1;
 start_string:
-    while ((c = peek_char(d, ++len))) {
+    while ((c = peek_char(eat, ++len))) {
       // TODO: strchr for final, and check
       if (c == start) {
         ++len;
         break;
       } else if (c == '\\') {
-        c = peek_char(d, ++len);
-      } else if (start == '`' && c == '$' && peek_char(d, len + 1) == '{') {
-        d->flag = FLAG__PENDING_T_BRACE;  // next is "${"
+        c = peek_char(eat, ++len);
+      } else if (start == '`' && c == '$' && peek_char(eat, len + 1) == '{') {
+        *litflag = 1;  // next is "${"
         break;
       }
       if (c == '\n') {
-        // TODO: not allowed in quoted strings
-        ++d->line_no;  // look for \n
+        // FIXME: only allowed in template literals
+        ++(*line_no);
       }
     }
     return _CONSUME(len, TOKEN_STRING);
   }
 
   // number: "0", ".01", "0x100"
-  char next = peek_char(d, 1);
+  char next = peek_char(eat, 1);
   if (isnum(c) || (c == '.' && isnum(next))) {
     int len = 1;
     c = next;
@@ -244,14 +210,14 @@ start_string:
       if (!(isalnum(c) || c == '.')) {  // letters, dots, etc- misuse is invalid, so eat anyway
         break;
       }
-      c = peek_char(d, ++len);
+      c = peek_char(eat, ++len);
     }
     return _CONSUME(len, TOKEN_NUMBER);
   }
 
   // dot notation
   if (c == '.') {
-    if (next == '.' && peek_char(d, 2) == '.') {
+    if (next == '.' && peek_char(eat, 2) == '.') {
       return _CONSUME(3, TOKEN_SPREAD);  // '...' operator
     }
     return _CONSUME(1, TOKEN_DOT);  // it's valid to say e.g., "foo . bar", so separate token
@@ -262,12 +228,12 @@ start_string:
   do {
     if (c == '\\') {
       ++len;  // don't care, eat whatever aferwards
-      c = peek_char(d, ++len);
+      c = peek_char(eat, ++len);
       if (c != '{') {
         continue;
       }
       while (c && c != '}') {
-        c = peek_char(d, ++len);
+        c = peek_char(eat, ++len);
       }
       ++len;
       continue;
@@ -278,7 +244,7 @@ start_string:
     if (!valid) {
       break;
     }
-    c = peek_char(d, ++len);
+    c = peek_char(eat, ++len);
   } while (c);
 
   if (len) {
@@ -288,6 +254,7 @@ start_string:
 
   // found nothing :(
   return _CONSUME(0, -1);
+#undef _CONSUME
 }
 
 static int consume_comment(char *p, int *line_no) {
@@ -370,16 +337,21 @@ static void eat_next(tokendef *d) {
   d->next.p = p;
 
   if (d->flag & FLAG__PENDING_T_BRACE) {
+    d->next.type = TOKEN_T_BRACE;
+    d->next.len = 2;  // "${"
+    d->flag = 0;
+  } else {
+    eat_context eat = {p, d->buf + d->len};
+    int litflag = (d->flag & FLAG__RESUME_LIT);
 
-  } else if (d->flag & FLAG__RESUME_LIT) {
+    d->next.type = eat_token(&eat, &d->line_no, &litflag);
+    d->next.len = eat.p - p;
 
-  }
-
-  // match real token
-  if (*p == '/') {
-    d->next.type = TOKEN_SLASH;
-    d->next.len = 0;
-    return;
+    if (litflag) {
+      d->flag = FLAG__PENDING_T_BRACE;
+    } else {
+      d->flag = 0;
+    }
   }
 }
 
@@ -409,36 +381,40 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
   if (out->type == TOKEN_SLASH) {
     // consume this token as lookup can't know what it was
     if (has_value) {
-      out->len = consume_slash_op(out->p);
       out->type = TOKEN_OP;
+      out->len = consume_slash_op(out->p);
     } else {
-      out->len = consume_slash_regexp(out->p);
       out->type = TOKEN_REGEXP;
+      out->len = consume_slash_regexp(out->p);
     }
     d->next.len = out->len;
   }
 
+  // actually enact token
+  if (d->depth == __STACK_SIZE) {
+    return ERROR__STACK;
+  }
+  switch (out->type) {
+    case TOKEN_PAREN:
+    case TOKEN_ARRAY:
+    case TOKEN_BRACE:
+      stack_inc(d, 0);
+      break;
+
+    case TOKEN_T_BRACE:
+      stack_inc(d, 1);
+      break;
+
+    case TOKEN_CLOSE:
+      if (!d->depth) {
+        return ERROR__STACK;
+      } else if (stack_dec(d)) {
+        d->flag |= FLAG__RESUME_LIT;
+      }
+  }
+
   eat_next(d);
   return 0;
-
-  // out->line_no = d->line_no;  // set first, in case it changes
-
-  // eat_out eo;
-  // int ret = eat_token(d, &eo, has_value);
-  // if (ret) {
-  //   return ret;
-  // } else if (eo.type < 0) {
-  //   return ERROR__TOKEN;
-  // }
-
-  // out->p = d->buf + d->curr;
-  // out->len = eo.len;
-  // out->type = eo.type;
-  // d->curr += eo.len;
-
-  // // point to next token
-  // consume_space_lookahead(d);
-  // return 0;
 }
 
 tokendef prsr_init_token(char *p) {

@@ -43,12 +43,12 @@ int read_stdin(char **buf) {
   return pos;
 }
 
-int render(token *out) {
+int render(token *out, int depth) {
   char c = ' ';
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';
   }
-  printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
+  printf("%2d\t%c%4d.%02d: %.*s\n", depth, c, out->line_no, out->type, out->len, out->p);
   return 0;
 }
 
@@ -70,6 +70,8 @@ int main() {
   int ret = 0;
   token out;
   do {
+    render(&td.next, -1);
+
     // get next token
     int has_value = prsr_has_value(&sd);
     ret = prsr_next_token(&td, &out, has_value);
@@ -81,13 +83,13 @@ int main() {
     ret = prsr_stream_next(&sd, &out);
     if (ret > 0) {
       asi.line_no = prev_line_no;
-      render(&asi);
+      render(&asi, td.depth);
     } else if (ret) {
       break;
     }
 
     // render
-    render(&out);
+    render(&out, td.depth);
   } while (out.type);
 
   printf("failed ret=%d type=%d rest=`%s`\n", ret, out.type, out.p);
