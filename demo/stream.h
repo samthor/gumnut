@@ -50,6 +50,8 @@ typedef struct {
 // } streamexc;
 
 typedef struct {
+  uint8_t asi_next : 1;
+
   uint8_t dlev;
   streamlev lev[256];
   // uint8_t dexc;

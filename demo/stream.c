@@ -39,15 +39,10 @@ static int token_is_block(streamlev *up, token *t) {
   }
 
   if (up->prev1.type == TOKEN_KEYWORD) {
-    if (is_case(up->prev1.p, up->prev1.len)) {
-      // e.g. `case {`
-      return 0;
-    } else if (is_asi_change(up->prev1.p, up->prev1.len)) {
-      // FIXME(samthor): We can probably insert the ASI before this happens.
-      // e.g. `return {}` or `return \n {}`
-      return up->prev1.line_no != t->line_no;
-    }
-    return 1;
+    // e.g. `case {`
+    return !is_case(up->prev1.p, up->prev1.len);
+
+    // nb. we don't check for `return` or `yield`, as we have ASI'ed them below
   }
 
   switch (up->prev1.type) {
@@ -98,35 +93,40 @@ static int stack_mod(streamdef *sd, token *t) {
   return 1;
 }
 
-static int stream_next(streamdef *sd, token *out) {
+static int stream_next(streamdef *sd, token *curr, token *next) {
   streamlev *lev = sd->lev + sd->dlev;  // always starting lev
+  int type = 0;
 
   do {
-    int mod = stack_mod(sd, out);
+    int mod = stack_mod(sd, curr);
     if (mod < 0) {
       return mod;  // err
     } else if (mod) {
       break;  // modified up, do nothing
-    } else if (out->type == TOKEN_CLOSE) {
+    } else if (curr->type == TOKEN_CLOSE) {
       // modified down
       // TODO(samthor): check open/close matching here
       return 0;  // bail early, we don't record end token
     }
 
-    if (out->type != TOKEN_LIT) {
-      break;  // nothing to do for non-lit
-      // TODO(samthor): generate ASI?
+    if (curr->type == TOKEN_LIT) {
+      if (next->line_no != curr->line_no) {
+        if (is_asi_change(curr->p, curr->len) || is_label_keyword(curr->p, curr->len)) {
+          type = TOKEN_KEYWORD;
+          sd->asi_next = 1;
+        }
+      }
     }
 
     // TODO(samthor): Lots of cases where this isn't true.
-    // if (out->lit_next_colon) {
-    //   out->type = TOKEN_LABEL;
+    // if (curr->lit_next_colon) {
+    //   curr->type = TOKEN_LABEL;
     // }
 
   } while (0);
 
   lev->prev2 = lev->prev1;
-  lev->prev1 = *out;
+  lev->prev1 = *curr;
 
   return 0;
 }
@@ -195,14 +195,18 @@ int prsr_has_value(streamdef *sd) {
   return 0;
 }
 
-int prsr_stream_next(streamdef *sd, token *out, token *next) {
-  if (out->type == TOKEN_COMMENT) {
-    return 0;  // don't process comment
+int prsr_stream_next(streamdef *sd, token *curr, token *next) {
+  if (sd->asi_next) {
+    streamlev *lev = sd->lev + sd->dlev;
+    lev->prev2 = lev->prev1;
+    lev->prev1 = (token) {.type = TOKEN_SEMICOLON};
+
+    sd->asi_next = 0;
+    return TOKEN_SEMICOLON;
   }
 
-  int ret = stream_next(sd, out);
-  if (ret) {
-    return ret;
+  if (curr->type == TOKEN_COMMENT) {
+    return 0;  // don't process comment
   }
-  return 0;
+  return stream_next(sd, curr, next);
 }

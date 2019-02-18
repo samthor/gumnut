@@ -66,7 +66,7 @@ int main() {
   tokendef td = prsr_init_token(buf);
   streamdef sd = prsr_stream_init();
 
-  int prev_line_no = 0;
+  int last_line_no = 0;
   int ret = 0;
   token out;
   do {
@@ -78,16 +78,23 @@ int main() {
     }
 
     // stream processor
+retry_asi:
     ret = prsr_stream_next(&sd, &out, &td.next);
-    if (ret > 0) {
-      asi.line_no = prev_line_no;
-      render(&asi);
-    } else if (ret) {
+    if (ret < 0) {
       break;
     }
 
-    // render
+    if (ret == TOKEN_SEMICOLON) {
+      asi.line_no = last_line_no;
+      render(&asi);
+      goto retry_asi;
+    }
+
+    if (ret != 0) {
+      out.type = ret;
+    }
     render(&out);
+    last_line_no = out.line_no;
   } while (out.type);
 
   if (ret) {
