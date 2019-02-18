@@ -7,17 +7,9 @@
 #define FLAG__RESUME_LIT      2
 
 typedef struct {
-  char *p;
-  char *end;
-} eat_context;
-
-static char peek_char(eat_context *c, int at) {
-  char *p = c->p + at;
-  if (p < c->end) {
-    return *p;
-  }
-  return 0;
-}
+  int len;
+  int type;
+} eat_out;
 
 static void stack_inc(tokendef *d, int t_brace) {
   uint32_t *p = d->stack + (d->depth >> 5);
@@ -114,126 +106,126 @@ static int consume_string(char *p, int *line_no, int *litflag) {
   return len;
 }
 
-// nb. changes ->flag, and ->line_no
-static int eat_token(eat_context *eat) {
-#define _CONSUME(_len, _type) ((eat->p += _len, _type));
+static eat_out eat_token(char *p) {
+#define _ret(_len, _type) ((eat_out) {_len, _type});
 
   // look for EOF
-  char c = peek_char(eat, 0);
-  if (!c) {
-    return _CONSUME(0, TOKEN_EOF);
+  const char start = p[0];
+  if (!start) {
+    return _ret(0, TOKEN_EOF);
   }
 
-  // unambiguous simple ascii characters
-  switch (c) {
+  // simple ascii characters
+  switch (start) {
     case '/':
-      return _CONSUME(0, TOKEN_SLASH);  // return ambig, handled elsewhere
+      return _ret(1, TOKEN_SLASH);  // return ambig, handled elsewhere
 
     case ';':
-      return _CONSUME(1, TOKEN_SEMICOLON);
+      return _ret(1, TOKEN_SEMICOLON);
 
     case '?':
-      return _CONSUME(1, TOKEN_TERNARY);
+      return _ret(1, TOKEN_TERNARY);
 
     case ':':
-      return _CONSUME(1, TOKEN_COLON);
+      return _ret(1, TOKEN_COLON);
 
     case ',':
-      return _CONSUME(1, TOKEN_COMMA);
+      return _ret(1, TOKEN_COMMA);
 
     case '(':
-      return _CONSUME(1, TOKEN_PAREN);
+      return _ret(1, TOKEN_PAREN);
 
     case '[':
-      return _CONSUME(1, TOKEN_ARRAY);
+      return _ret(1, TOKEN_ARRAY);
 
     case '{':
-      return _CONSUME(1, TOKEN_BRACE);
+      return _ret(1, TOKEN_BRACE);
 
     case ')':
     case ']':
     case '}':
-      return _CONSUME(1, TOKEN_CLOSE);
+      return _ret(1, TOKEN_CLOSE);
   }
 
   // ops: i.e., anything made up of =<& etc (except '/', handled above)
   // note: 'in' and 'instanceof' are ops in most cases, but here they are lit
   do {
-    const char start = c;
+    char c = start;
     int len = 0;
     int allowed;  // how many ops of the same type we can safely consume
 
-    if (strchr("=&|^~!%+-", c)) {
+    if (strchr("=&|^~!%+-", start)) {
       allowed = 1;
-    } else if (c == '*' || c == '<') {
+    } else if (start == '*' || start == '<') {
       allowed = 2;  // exponention operator **, or shift
-    } else if (c == '>') {
+    } else if (start == '>') {
       allowed = 3;  // right shift, or zero-fill right shift
     } else {
       break;
     }
 
     while (len < allowed) {
-      c = peek_char(eat, ++len);
+      c = p[++len];
       if (c != start) {
         break;
       }
     }
 
     if (start == '=' && c == '>') {
-      // arrow function: nb. if this is after a newline, it's invalid (doesn't generate ASI), ignore
-      return _CONSUME(2, TOKEN_ARROW);
+      return _ret(2, TOKEN_ARROW);  // arrow for arrow function
     } else if (c == start && strchr("+-|&", start)) {
       ++len;  // eat --, ++, || or &&: but no more
     } else if (c == '=') {
       // consume a suffix '=' (or whole ===, !==)
-      c = peek_char(eat, ++len);
+      c = p[++len];
       if (c == '=' && (start == '=' || start == '!')) {
         ++len;
       }
     }
 
-    return _CONSUME(len, TOKEN_OP);
+    return _ret(len, TOKEN_OP);
   } while (0);
 
   // strings (handled by parent)
-  if (c == '\'' || c == '"' || c == '`') {
-    return _CONSUME(0, TOKEN_STRING);
+  if (start == '\'' || start == '"' || start == '`') {
+    return _ret(0, TOKEN_STRING);
   }
 
   // number: "0", ".01", "0x100"
-  char next = peek_char(eat, 1);
-  if (isnum(c) || (c == '.' && isnum(next))) {
+  const char next = p[1];
+  if (isnum(start) || (start == '.' && isnum(next))) {
     int len = 1;
-    c = next;
+    char c = next;
     for (;;) {
       if (!(isalnum(c) || c == '.')) {  // letters, dots, etc- misuse is invalid, so eat anyway
         break;
       }
-      c = peek_char(eat, ++len);
+      c = p[++len];
     }
-    return _CONSUME(len, TOKEN_NUMBER);
+    return _ret(len, TOKEN_NUMBER);
   }
 
   // dot notation
-  if (c == '.') {
-    if (next == '.' && peek_char(eat, 2) == '.') {
-      return _CONSUME(3, TOKEN_SPREAD);  // '...' operator
+  if (start == '.') {
+    if (next == '.' && p[2] == '.') {
+      return _ret(3, TOKEN_SPREAD);  // '...' operator
     }
-    return _CONSUME(1, TOKEN_DOT);  // it's valid to say e.g., "foo . bar", so separate token
+    return _ret(1, TOKEN_DOT);  // it's valid to say e.g., "foo . bar", so separate token
   }
 
   // literals
   int len = 0;
+  char c = start;
   do {
+    // FIXME: escapes aren't valid in literals, but check whether this matches UTF-8
     if (c == '\\') {
       ++len;  // don't care, eat whatever aferwards
-      c = peek_char(eat, ++len);
+      c = p[++len];
       if (c != '{') {
         continue;
       }
       while (c && c != '}') {
-        c = peek_char(eat, ++len);
+        c = p[++len];
       }
       ++len;
       continue;
@@ -244,17 +236,17 @@ static int eat_token(eat_context *eat) {
     if (!valid) {
       break;
     }
-    c = peek_char(eat, ++len);
+    c = p[++len];
   } while (c);
 
   if (len) {
     // we don't care what this is, give to caller
-    return _CONSUME(len, TOKEN_LIT);
+    return _ret(len, TOKEN_LIT);
   }
 
   // found nothing :(
-  return _CONSUME(0, -1);
-#undef _CONSUME
+  return _ret(0, -1);
+#undef _ret
 }
 
 static int consume_comment(char *p, int *line_no) {
@@ -349,20 +341,20 @@ static void eat_next(tokendef *d) {
   }
 
   // match real token
-  eat_context eat = {p, d->buf + d->len};
-  d->next.type = eat_token(&eat);
+  eat_out eat = eat_token(p);
+  d->next.type = eat.type;
   d->next.line_no = d->line_no;
   d->next.p = p;
 
   if (d->next.type == TOKEN_STRING) {
-    // consume string
+    // consume string (assume eat.len is zero)
     int litflag = 0;
     d->next.len = consume_string(p, &d->line_no, &litflag);
     if (litflag) {
       d->flag = FLAG__PENDING_T_BRACE;
     }
   } else {
-    d->next.len = eat.p - p;
+    d->next.len = eat.len;
   }
 }
 
@@ -389,23 +381,24 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
   }
 
   memcpy(out, &d->next, sizeof(token));
-  if (out->type == TOKEN_SLASH) {
-    // consume this token as lookup can't know what it was
-    if (has_value) {
-      out->type = TOKEN_OP;
-      out->len = consume_slash_op(out->p);
-    } else {
-      out->type = TOKEN_REGEXP;
-      out->len = consume_slash_regexp(out->p);
-    }
-    d->next.len = out->len;
-  }
 
   // actually enact token
   if (d->depth == __STACK_SIZE) {
     return ERROR__STACK;
   }
   switch (out->type) {
+    case TOKEN_SLASH:
+      // consume this token as lookup can't know what it was
+      if (has_value) {
+        out->type = TOKEN_OP;
+        out->len = consume_slash_op(out->p);
+      } else {
+        out->type = TOKEN_REGEXP;
+        out->len = consume_slash_regexp(out->p);
+      }
+      d->next.len = out->len;
+      break;
+
     case TOKEN_PAREN:
     case TOKEN_ARRAY:
     case TOKEN_BRACE:

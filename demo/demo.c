@@ -92,9 +92,8 @@ int main() {
     render(&out, td.depth);
   } while (out.type);
 
-  printf("failed ret=%d type=%d rest=`%s`\n", ret, out.type, out.p);
-  if (!out.type && !ret) {
-    return -1;
+  if (ret) {
+    printf("failed ret=%d type=%d rest=`%s`\n", ret, out.type, out.p);
   }
   return ret;
 }
