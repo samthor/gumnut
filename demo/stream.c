@@ -195,7 +195,7 @@ int prsr_has_value(streamdef *sd) {
   return 0;
 }
 
-int prsr_stream_next(streamdef *sd, token *out) {
+int prsr_stream_next(streamdef *sd, token *out, token *next) {
   if (out->type == TOKEN_COMMENT) {
     return 0;  // don't process comment
   }

@@ -58,6 +58,6 @@ typedef struct {
 
 streamdef prsr_stream_init();
 int prsr_has_value(streamdef *sd);
-int prsr_stream_next(streamdef *sd, token *out);
+int prsr_stream_next(streamdef *sd, token *curr, token *next);
 
 #endif//_STREAM_H
