@@ -61,7 +61,8 @@ typedef struct {
 #define TOKEN_LABEL     20  // to the left of a ':', e.g. 'foo:'
 
 // literal: internal use except for reporting ambiguous tokens
-#define TOKEN_LIT       21
+#define TOKEN_LIT       21  // symbol, keyword or label
+#define TOKEN_SLASH     22  // ambigous slash
 
 #endif//_TYPES_H
 

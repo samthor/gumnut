@@ -6,6 +6,8 @@
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
+#define _CONSUME(_len, _type) (eat->len = _len, eat->type = _type, 0);
+
 typedef struct {
   int len;
   int type;
@@ -51,11 +53,56 @@ static int stack_dec(tokendef *d) {
   return 0;
 }
 
-int eat_token(tokendef *d, eat_out *eat, int has_value) {
+static int consume_slash_op(char *p) {
+  // can match "/" or "/="
+  if (p[1] == '=') {
+    return 2;
+  }
+  return 1;
+}
+
+static int consume_slash_regexp(char *p) {
+  char *start = p;
+  int is_charexpr = 0;
+
+  for (;;) {
+    ++p;
+
+    switch (*p) {
+      case '/':
+        // nb. already known not to be a comment `//`
+        if (is_charexpr) {
+          break;
+        }
+
+        // eat trailing flags
+        do {
+          ++p;
+        } while (isalnum(*p));
+
+        // fall-through
+      case 0:
+      case '\n':
+        return (p - start);
+
+      case '[':
+        is_charexpr = 1;
+        break;
+
+      case ']':
+        is_charexpr = 0;
+        break;
+
+      case '\\':
+        ++p;  // ignore next char
+    }
+  }
+}
+
+// nb. changes ->flag, ->depth and ->line_no
+static int eat_token(tokendef *d, eat_out *eat) {
   int flag = d->flag;
   d->flag = 0;
-
-#define _CONSUME(_len, _type) (eat->len = _len, eat->type = _type, 0);
 
   // look for EOF
   char c = peek_char(d, 0);
@@ -74,44 +121,6 @@ int eat_token(tokendef *d, eat_out *eat, int has_value) {
   } else if (flag & FLAG__RESUME_LIT) {
     goto resume_lit;
   }
-
-  // comments (C99 and long)
-  char next = peek_char(d, 1);
-  do {
-    char *find;
-    if (c != '/') {
-      break;
-    } else if (next == '/') {
-      find = "\n";
-    } else if (next == '*') {
-      find = "*/";
-    } else {
-      break;
-    }
-
-    const char *search = (const char *) d->buf + d->curr + 2;
-    char *end = strstr(search, find);
-    if (end == NULL) {
-      return _CONSUME(d->len - d->curr, TOKEN_COMMENT);  // comment to EOF
-    }
-    int len = end - search + 2;  // add preamble
-
-    if (next == '/') {
-      return _CONSUME(len, TOKEN_COMMENT);  // don't include newline
-    }
-
-    // count \n's for multiline comment
-    char *newline = (char *) search;
-    for (;;) {
-      newline = memchr(newline, '\n', end - newline);
-      if (!newline) {
-        break;
-      }
-      ++d->line_no;
-      ++newline;
-    }
-    return _CONSUME(len + 2, TOKEN_COMMENT);  // eat "*/"
-  } while (0);
 
   // unambiguous simple ascii characters
   switch (c) {
@@ -161,14 +170,11 @@ int eat_token(tokendef *d, eat_out *eat, int has_value) {
   // ops: i.e., anything made up of =<& etc
   // note: 'in' and 'instanceof' are ops in most cases, but here they are lit
   do {
-    if (c == '/' && !has_value) {
-      break;  // this is a regexp
-    }
     const char start = c;
     int len = 0;
     int allowed;  // how many ops of the same type we can safely consume
 
-    if (strchr("=&|^~!%/+-", c)) {
+    if (strchr("=&|^~!%+-", c)) {
       allowed = 1;
     } else if (c == '*' || c == '<') {
       allowed = 2;  // exponention operator **, or shift
@@ -230,6 +236,7 @@ start_string:
   }
 
   // number: "0", ".01", "0x100"
+  char next = peek_char(d, 1);
   if (isnum(c) || (c == '.' && isnum(next))) {
     int len = 1;
     c = next;
@@ -248,37 +255,6 @@ start_string:
       return _CONSUME(3, TOKEN_SPREAD);  // '...' operator
     }
     return _CONSUME(1, TOKEN_DOT);  // it's valid to say e.g., "foo . bar", so separate token
-  }
-
-  // regexp
-  if (c == '/') {
-    int is_charexpr = 0;
-    int len = 1;
-
-    c = next;
-    do {
-      if (c == '[') {
-        is_charexpr = 1;
-      } else if (c == ']') {
-        is_charexpr = 0;
-      } else if (c == '\\') {
-        c = peek_char(d, ++len);
-      } else if (!is_charexpr && c == '/') {
-        c = peek_char(d, ++len);
-        break;
-      }
-      if (c == '\n') {
-        ++d->line_no;  // nb. invalid in spec, but we allow here
-      }
-      c = peek_char(d, ++len);
-    } while (c);
-
-    // eat trailing flags
-    while (isalnum(c)) {
-      c = peek_char(d, ++len);
-    }
-
-    return _CONSUME(len, TOKEN_REGEXP);
   }
 
   // literals
@@ -312,99 +288,157 @@ start_string:
 
   // found nothing :(
   return _CONSUME(0, -1);
-#undef _CONSUME
 }
 
-static void consume_space_lookahead(tokendef *d) {
-  d->lookahead_newline = 0;
-
-  if (d->flag & FLAG__RESUME_LIT) {
-    d->lookahead = -1;  // invalid lookahead, inside template literal
-    return;
+static int consume_comment(char *p, int *line_no) {
+  if (*p != '/') {
+    return 0;
   }
 
-  // always consume space chars
-  for (char c;; ++d->curr) {
-    c = d->buf[d->curr];
-    if (!isspace(c)) {
+  char *find;
+  switch (p[1]) {
+    case '/':
+      find = "\n";
       break;
-    } else if (c == '\n') {
-      ++d->line_no;
+
+    case '*':
+      find = "*/";
+      break;
+
+    default:
+      return 0;
+  }
+
+  const char *search = p + 2;
+  char *end = strstr(search, find);
+  if (!end) {
+    // FIXME: unclosed multiline comments don't update line_no
+    return strlen(p);  // trailing comment goes to EOF
+  }
+
+  int len = end - p;
+  if (p[1] == '/') {
+    return len;
+  }
+
+  // count \n's for multiline comment
+  char *newline = (char *) search;
+  for (;;) {
+    newline = memchr(newline, '\n', end - newline);
+    if (!newline) {
+      break;
     }
+    ++(*line_no);
+    ++newline;
   }
+  return len + 2;
+}
 
-  if (d->lookahead <= d->curr) {
-    return;  // nothing to do, we did this already
-  }
-
-  // move past all found comments (and whitespace) to find next char
-  char *p = d->buf + d->curr;
+static char *consume_space(char *p, int *line_no) {
   for (;;) {
     char c = *p;
-    if (c != '/') {
-      break;  // not a regex or comment
+    if (!isspace(c)) {
+      return p;
+    } else if (c == '\n') {
+      ++(*line_no);
     }
+    ++p;
+  }
+}
 
-    char *find = NULL;
-    char next = p[1];
-    if (next == '/') {
-      find = "\n";
-    } else if (next == '*') {
-      find = "*/";
-    } else {
-      break;  // start of regex
-    }
+static void eat_next(tokendef *d) {
+  // consume from next, repeat(space, comment [first into pending]) and next token
+  char *from = d->next.p + d->next.len;
 
-    const char *search = (const char *) p + 2;
-    char *end = strstr(search, find);
-    if (end == NULL) {
-      d->lookahead = d->len;
-      return;  // EOF
-    }
+  // always consume space chars
+  char *p = consume_space(from, &d->line_no);
+  d->pending.p = p;
+  d->pending.line_no = d->line_no;
 
-    p = end + 1;
-    if (next != '/') {
-      if (!d->lookahead_newline) {
-        // record if multiline comment had newline
-        char *newline = memchr(search, '\n', end - search);
-        if (newline) {
-          d->lookahead_newline = 1;
-        }
-      }
-      ++p;  // add both chars in "*/"
-    }
-
-    // move over whitespace
-    while (isspace(*p)) {
-      if (*p == '\n') {
-        d->lookahead_newline = 1;
-      }
-      ++p;
-    }
+  // match comments (C99 and long), record first in pending
+  int len = consume_comment(p, &d->line_no);
+  d->pending.len = len;
+  d->line_after_pending = d->line_no;
+  while (len) {
+    p += len;
+    p = consume_space(p, &d->line_no);
+    len = consume_comment(p, &d->line_no);
   }
 
-  d->lookahead = p - d->buf;
+  // match real token
+  d->next.line_no = d->line_no;
+  d->next.p = p;
+
+  if (d->flag & FLAG__PENDING_T_BRACE) {
+
+  } else if (d->flag & FLAG__RESUME_LIT) {
+
+  }
+
+  // match real token
+  if (*p == '/') {
+    d->next.type = TOKEN_SLASH;
+    d->next.len = 0;
+    return;
+  }
 }
 
 int prsr_next_token(tokendef *d, token *out, int has_value) {
-  out->line_no = d->line_no;  // set first, in case it changes
+  if (d->pending.len) {
+    // copy pending comment out, try to yield more
+    memcpy(out, &d->pending, sizeof(token));
 
-  eat_out eo;
-  int ret = eat_token(d, &eo, has_value);
-  if (ret) {
-    return ret;
-  } else if (eo.type < 0) {
-    return ERROR__TOKEN;
+    char *p = consume_space(d->pending.p + d->pending.len, &d->line_after_pending);
+    if (p == d->next.p) {
+      d->pending.len = 0;
+      return 0;  // nothing to do, reached real token
+    }
+
+    // queue up upcoming comment
+    d->pending.p = p;
+    d->pending.line_no = d->line_after_pending;
+    d->pending.len = consume_comment(p, &d->line_after_pending);
+
+    if (!d->pending.len) {
+      return ERROR__INTERNAL;
+    }
+    return 0;
   }
 
-  out->p = d->buf + d->curr;
-  out->len = eo.len;
-  out->type = eo.type;
-  d->curr += eo.len;
+  memcpy(out, &d->next, sizeof(token));
+  if (out->type == TOKEN_SLASH) {
+    // consume this token as lookup can't know what it was
+    if (has_value) {
+      out->len = consume_slash_op(out->p);
+      out->type = TOKEN_OP;
+    } else {
+      out->len = consume_slash_regexp(out->p);
+      out->type = TOKEN_REGEXP;
+    }
+    d->next.len = out->len;
+  }
 
-  // point to next token
-  consume_space_lookahead(d);
+  eat_next(d);
   return 0;
+
+  // out->line_no = d->line_no;  // set first, in case it changes
+
+  // eat_out eo;
+  // int ret = eat_token(d, &eo, has_value);
+  // if (ret) {
+  //   return ret;
+  // } else if (eo.type < 0) {
+  //   return ERROR__TOKEN;
+  // }
+
+  // out->p = d->buf + d->curr;
+  // out->len = eo.len;
+  // out->type = eo.type;
+  // d->curr += eo.len;
+
+  // // point to next token
+  // consume_space_lookahead(d);
+  // return 0;
 }
 
 tokendef prsr_init_token(char *p) {
@@ -414,7 +448,10 @@ tokendef prsr_init_token(char *p) {
   d.len = strlen(p);
   d.line_no = 1;
 
+  d.pending.type = TOKEN_COMMENT;
+  d.next.p = p;  // place next cursor
+
   // prsr state always points to next token
-  consume_space_lookahead(&d);
+  eat_next(&d);
   return d;
 }

@@ -22,11 +22,13 @@
 
 typedef struct {
   char *buf;
-  int curr;
   int len;
-  int line_no;
-  int lookahead;
-  uint8_t lookahead_newline : 1;  // used for ASI insertion
+  int line_no;    // after next
+  token next;     // next useful token
+  token pending;  // pending comment
+  int line_after_pending;
+
+  // depth/flag used to record ${} state (resume literal once brace done)
   uint8_t flag : 2;
   uint16_t depth : __STACK_SIZE_BITS;
   uint32_t stack[((__STACK_SIZE - 1) >> 5) + 1];
