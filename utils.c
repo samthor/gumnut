@@ -16,10 +16,6 @@
 
 #include <string.h>
 
-int isnum(char c) {
-  return c >= '0' && c <= '9';
-}
-
 // nb. buf must contain words start/end with space, aka " test foo "
 int in_space_string(const char *big, char *s, int len) {
   // TODO: do something better? strstr is probably fast D:
