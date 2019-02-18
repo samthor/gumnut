@@ -119,9 +119,9 @@ static int stream_next(streamdef *sd, token *out) {
     }
 
     // TODO(samthor): Lots of cases where this isn't true.
-    if (out->lit_next_colon) {
-      out->type = TOKEN_LABEL;
-    }
+    // if (out->lit_next_colon) {
+    //   out->type = TOKEN_LABEL;
+    // }
 
   } while (0);
 
@@ -133,7 +133,7 @@ static int stream_next(streamdef *sd, token *out) {
 
 int prsr_has_value(streamdef *sd) {
   streamlev *lev = sd->lev + sd->dlev;
-  printf(";;check;; got prev2=`%.*s` prev1=`%.*s`\n", lev->prev2.len, lev->prev2.p, lev->prev1.len, lev->prev1.p);
+//  printf(";;check;; got prev2=`%.*s` prev1=`%.*s`\n", lev->prev2.len, lev->prev2.p, lev->prev1.len, lev->prev1.p);
 
   if (!lev->prev1.type) {
     // first token in section

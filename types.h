@@ -20,6 +20,8 @@
 #define _TYPES_H
 
 #define ERROR__INTERNAL -1  // internal error
+#define ERROR__STACK    -2
+#define ERROR__TOKEN    -3
 
 #define __STACK_SIZE      256  // stack size used by token
 #define __STACK_SIZE_BITS 8    // bits needed for __STACK_SIZE
@@ -29,7 +31,6 @@ typedef struct {
   int len;
   int line_no;
   uint8_t type : 5;
-  uint8_t lit_next_colon : 1;
 } token;
 
 // empty: will not contain text

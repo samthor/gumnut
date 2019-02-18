@@ -70,6 +70,12 @@ int main() {
   int ret = 0;
   token out;
   do {
+    if (td.lookahead >= 0) {
+      printf(">>> peek char='%c'\n", td.buf[td.lookahead]);
+    } else {
+      printf(">>> peek char TEMPLATE LIT\n");
+    }
+
     // get next token
     int has_value = prsr_has_value(&sd);
     ret = prsr_next_token(&td, &out, has_value);
@@ -90,6 +96,7 @@ int main() {
     render(&out);
   } while (out.type);
 
+  printf("failed ret=%d type=%d rest=`%s`\n", ret, out.type, td.buf + td.curr);
   if (!out.type && !ret) {
     return -1;
   }
