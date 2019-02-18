@@ -85,20 +85,43 @@ static int consume_slash_regexp(char *p) {
   }
 }
 
+static int consume_string(char *p, int *line_no, int *litflag) {
+  int len;
+  char start;
+  if (*litflag) {
+    len = -1;
+    start = '`';
+    *litflag = 0;
+  } else {
+    len = 0;
+    start = p[0];
+  }
+
+  for (;;) {
+    char c = p[++len];
+    if (c == start) {
+      ++len;
+      break;
+    } else if (start == '`' && c == '$' && p[len+1] == '{') {
+      *litflag = 1;
+      break;
+    } else if (c == '\n') {
+      // FIXME: only allowed in template literals
+      ++(*line_no);
+    }
+  }
+
+  return len;
+}
+
 // nb. changes ->flag, and ->line_no
-static int eat_token(eat_context *eat, int *line_no, int *litflag) {
+static int eat_token(eat_context *eat) {
 #define _CONSUME(_len, _type) ((eat->p += _len, _type));
 
   // look for EOF
   char c = peek_char(eat, 0);
   if (!c) {
     return _CONSUME(0, TOKEN_EOF);
-  }
-
-  // flag states
-  if (*litflag) {
-    *litflag = 0;
-    goto resume_lit;
   }
 
   // unambiguous simple ascii characters
@@ -173,32 +196,9 @@ static int eat_token(eat_context *eat, int *line_no, int *litflag) {
     return _CONSUME(len, TOKEN_OP);
   } while (0);
 
-  // strings
+  // strings (handled by parent)
   if (c == '\'' || c == '"' || c == '`') {
-    char start = c;
-    int len = 0;
-    goto start_string;
-resume_lit:
-    start = '`';
-    len = -1;
-start_string:
-    while ((c = peek_char(eat, ++len))) {
-      // TODO: strchr for final, and check
-      if (c == start) {
-        ++len;
-        break;
-      } else if (c == '\\') {
-        c = peek_char(eat, ++len);
-      } else if (start == '`' && c == '$' && peek_char(eat, len + 1) == '{') {
-        *litflag = 1;  // next is "${"
-        break;
-      }
-      if (c == '\n') {
-        // FIXME: only allowed in template literals
-        ++(*line_no);
-      }
-    }
-    return _CONSUME(len, TOKEN_STRING);
+    return _CONSUME(0, TOKEN_STRING);
   }
 
   // number: "0", ".01", "0x100"
@@ -317,6 +317,22 @@ static void eat_next(tokendef *d) {
   // consume from next, repeat(space, comment [first into pending]) and next token
   char *from = d->next.p + d->next.len;
 
+  // short-circuit for token state machine
+  if (d->flag) {
+    if (d->flag == FLAG__PENDING_T_BRACE) {
+      d->next.type = TOKEN_T_BRACE;
+      d->next.len = 2;  // "${"
+      d->flag = 0;
+    } else if (d->flag == FLAG__RESUME_LIT) {
+      int litflag = 1;
+      d->next.type = TOKEN_STRING;
+      d->next.len = consume_string(from, &d->line_no, &litflag);
+      d->flag = litflag ? FLAG__PENDING_T_BRACE : 0;
+    }
+    d->next.p = from;
+    return;
+  }
+
   // always consume space chars
   char *p = consume_space(from, &d->line_no);
   d->pending.p = p;
@@ -333,25 +349,20 @@ static void eat_next(tokendef *d) {
   }
 
   // match real token
+  eat_context eat = {p, d->buf + d->len};
+  d->next.type = eat_token(&eat);
   d->next.line_no = d->line_no;
   d->next.p = p;
 
-  if (d->flag & FLAG__PENDING_T_BRACE) {
-    d->next.type = TOKEN_T_BRACE;
-    d->next.len = 2;  // "${"
-    d->flag = 0;
-  } else {
-    eat_context eat = {p, d->buf + d->len};
-    int litflag = (d->flag & FLAG__RESUME_LIT);
-
-    d->next.type = eat_token(&eat, &d->line_no, &litflag);
-    d->next.len = eat.p - p;
-
+  if (d->next.type == TOKEN_STRING) {
+    // consume string
+    int litflag = 0;
+    d->next.len = consume_string(p, &d->line_no, &litflag);
     if (litflag) {
       d->flag = FLAG__PENDING_T_BRACE;
-    } else {
-      d->flag = 0;
     }
+  } else {
+    d->next.len = eat.p - p;
   }
 }
 
