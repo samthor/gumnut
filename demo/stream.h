@@ -39,7 +39,8 @@
 
 typedef struct {
   uint8_t type : 5;  // opening type
-  uint8_t is_block : 1;
+  uint8_t is_dict : 1;
+  uint8_t is_dict_right : 1;
   token prev1;
   token prev2;
 } streamlev;
