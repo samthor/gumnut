@@ -43,10 +43,17 @@ int read_stdin(char **buf) {
   return pos;
 }
 
-int render(token *out) {
+int render(token *out, streamlev *lev) {
   char c = ' ';
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';
+  } else if (lev) {
+    // render interesting statuses
+    if (out->type == TOKEN_BRACE && lev->is_dict) {
+      c = 'd';
+    } else if (out->type == TOKEN_COLON && lev->is_dict_right) {
+      c = 'r';
+    }
   }
   printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
   return 0;
@@ -86,14 +93,15 @@ retry_asi:
 
     if (ret == TOKEN_SEMICOLON) {
       asi.line_no = last_line_no;
-      render(&asi);
+      render(&asi, NULL);
       goto retry_asi;
     }
 
     if (ret != 0) {
       out.type = ret;
     }
-    render(&out);
+    streamlev *lev = sd.lev + sd.dlev;
+    render(&out, lev);
     last_line_no = out.line_no;
   } while (out.type);
 
