@@ -166,7 +166,7 @@ int is_allows_re(char *s, int len) {
 }
 
 int is_oplike(char *s, int len) {
-  static const char v[] = " await case delete instanceof is new return throw typeof void yield ";
+  static const char v[] = " await case delete in instanceof is new return throw typeof void yield ";
   return in_space_string(v, s, len);
 }
 

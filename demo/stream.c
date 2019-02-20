@@ -18,6 +18,13 @@
 #include "stream.h"
 #include "../utils.h"
 
+static int lev_follows_control(streamlev *lev) {
+  if (lev->prev1.type == TOKEN_PAREN && lev->prev2.type == TOKEN_KEYWORD) {
+    return is_control_paren(lev->prev2.p, lev->prev2.len);
+  }
+  return 0;
+}
+
 static int token_string(token *t, char *s, int len) {
   return t->len == len && !memcmp(t->p, s, len);
 }
@@ -167,7 +174,7 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
 
   if (lev->is_dict && !lev->is_dict_right) {
     // right-side of dict, allow "get" "set" "async" etc
-    if (is_getset(curr->p, curr->len) || is_async(curr->p, curr->len)) {
+    if (is_getset(curr->p, curr->len) || token_string(curr, "async", 5)) {
       switch (next->type) {
         case TOKEN_PAREN:  // {get() {}}
         case TOKEN_COLON:  // {get: 1}
@@ -192,7 +199,7 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
     }
 
     if (next->type == TOKEN_LIT) {
-      if (!token_string(next, "in", 2) && !token_string(next, "instanceof", 10)) {
+      if (token_string(next, "in", 2) || token_string(next, "instanceof", 10)) {
         // "let instanceof Foo", for symbol use
         sd->type_next = TOKEN_OP;
         return TOKEN_KEYWORD;
@@ -208,8 +215,9 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
     return 0;
   }
 
+  // look for "break foo;" or "continue bar;""
   if (is_label_keyword(curr->p, curr->len)) {
-    if (next->line_no != curr->line_no) {
+    if (curr->line_no != next->line_no) {
       sd->insert_asi = 1;
     } else if (next->type == TOKEN_LIT) {
       // mark next as label
@@ -223,19 +231,61 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
     return TOKEN_KEYWORD;
   }
 
-  if (next->line_no != curr->line_no) {
-    if (is_asi_change(curr->p, curr->len)) {
-      sd->insert_asi = 1;
+  // look for "return \n {}" or "yield \n bar"
+  if (is_asi_change(curr->p, curr->len)) {
+    sd->insert_asi = (curr->line_no != next->line_no);
+    if (curr->p[0] == 'y') {
+      return TOKEN_OP;  // yield is oplike
+    }
+    return TOKEN_KEYWORD;
+  }
+
+  // try to match "label:"
+  if (next->type == TOKEN_COLON) {
+    if (lev->prev1.line_no == curr->line_no && !lev_follows_control(lev)) {
+      goto skip_label_colon;
+    }
+
+    switch (lev->prev1.type) {
+      case TOKEN_OP:
+      case TOKEN_TERNARY:
+      case TOKEN_DOT:
+        goto skip_label_colon;
+    }
+
+    if (is_reserved_word(curr->p, curr->len)) {
+      // nb. invalid grammar
+      return TOKEN_KEYWORD;
+    }
+    return TOKEN_LABEL;
+skip_label_colon:
+    ;  // empty statement
+  }
+
+  // match ops
+  if (is_oplike(curr->p, curr->len)) {
+    return TOKEN_OP;
+  }
+
+  // match async
+  if (token_string(curr, "async", 5)) {
+    if (token_string(next, "function", 8)) {
+      // TODO(samthor): start function state machine
+      sd->type_next = TOKEN_KEYWORD;
+      return TOKEN_KEYWORD;
+    } else if (next->type == TOKEN_PAREN) {
+      // FIXME: this is _likely_ to be a keyword. But not always. We have to
+      // look forward for the => after the () section.
       return TOKEN_KEYWORD;
     }
   }
 
-  // TODO(samthor): Lots of cases where this isn't true.
-  // if (curr->lit_next_colon) {
-  //   curr->type = TOKEN_LABEL;
-  // }
+  // match other keywords
+  if (is_keyword(curr->p, curr->len)) {
+    return TOKEN_KEYWORD;
+  }
 
-  return 0;
+  return TOKEN_SYMBOL;
 }
 
 int prsr_has_value(streamdef *sd) {
@@ -254,15 +304,17 @@ int prsr_has_value(streamdef *sd) {
     return 0;
   }
 
-  switch (lev->prev1.type) {
-    case TOKEN_PAREN:
-      // e.g. "if (abc) /foo/"
-      return lev->prev2.type == TOKEN_KEYWORD &&
-          !is_control_paren(lev->prev2.p, lev->prev2.len);
+  // look for `if () /foo/`
+  if (lev_follows_control(lev)) {
+    return 0;
+  }
 
+  switch (lev->prev1.type) {
     case TOKEN_LABEL:
-      // should never happen, LABEL is from lookahead to find :
-      return -1;
+      return 0;  // should either be "foo:" (next known) or "break foo;" (no value)
+
+    case TOKEN_KEYWORD:
+      return 0;
 
     default:
       printf(";;check;; got unhandled type=%d\n", lev->prev1.type);
@@ -271,6 +323,7 @@ int prsr_has_value(streamdef *sd) {
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
     case TOKEN_SYMBOL:
+    case TOKEN_PAREN:
       return 1;
 
     case TOKEN_BRACE:
