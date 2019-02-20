@@ -208,8 +208,23 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
     return 0;
   }
 
+  if (is_label_keyword(curr->p, curr->len)) {
+    if (next->line_no != curr->line_no) {
+      sd->insert_asi = 1;
+    } else if (next->type == TOKEN_LIT) {
+      // mark next as label
+      if (is_reserved_word(next->p, next->len)) {
+        // nb. invalid grammar
+        sd->type_next = TOKEN_KEYWORD;
+      } else {
+        sd->type_next = TOKEN_LABEL;
+      }
+    }
+    return TOKEN_KEYWORD;
+  }
+
   if (next->line_no != curr->line_no) {
-    if (is_asi_change(curr->p, curr->len) || is_label_keyword(curr->p, curr->len)) {
+    if (is_asi_change(curr->p, curr->len)) {
       sd->insert_asi = 1;
       return TOKEN_KEYWORD;
     }
@@ -298,15 +313,20 @@ int prsr_stream_next(streamdef *sd, token *curr, token *next) {
   streamlev *lev = sd->lev + sd->dlev;
 
   int update_type = sd->type_next;  // zero or updated type
-  int type = curr->type;            // always curr->type or update
-  if (!update_type) {
+  int type;                         // always curr->type or update
+  if (update_type) {
+    sd->type_next = 0;
+    type = update_type;
+  } else {
     int ret = stream_next(sd, curr, next);
     if (ret < 0) {
       return ret;
     } else if (ret) {
       type = ret;
+      update_type = ret;
+    } else {
+      type = curr->type;
     }
-    update_type = ret;
   }
 
   // don't record TOKEN_CLOSE in prev log

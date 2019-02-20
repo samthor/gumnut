@@ -38,6 +38,9 @@ int is_keyword(char *s, int len) {
       return 0;  // only a-z
     }
   }
+
+  // nb. reserved "enum", strict reserved "implements package protected interface private public"
+
   // nb. does not contain 'in' or 'instanceof', as they are ops
   // does not contain 'super' or 'this', treated as symbol
   static const char v[] =
@@ -47,6 +50,7 @@ int is_keyword(char *s, int len) {
   return in_space_string(v, s, len);
 }
 
+// nb. this is "is label safe", minus strict reserved words
 int is_reserved_word(char *s, int len) {
   if (is_keyword(s, len)) {
     return 1;
@@ -54,7 +58,7 @@ int is_reserved_word(char *s, int len) {
   if (len < 4 || len > 5) {
     return 0;
   }
-  static const char v[] = " null true false ";
+  static const char v[] = " false in instanceof null super this true ";
   return in_space_string(v, s, len);
 }
 
