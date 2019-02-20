@@ -126,51 +126,8 @@ static int validate_close(int type, char close) {
   return 0;
 }
 
-static int stream_next(streamdef *sd, token *curr, token *next) {
+static int stream_next_lit(streamdef *sd, token *curr, token *next) {
   streamlev *lev = sd->lev + sd->dlev;  // always starting lev
-
-  // handle pop stack
-  if (curr->type == TOKEN_CLOSE) {
-    if (!sd->dlev) {
-      return ERROR__STACK;
-    } else if (!validate_close(lev->type, curr->p[0])) {
-      return ERROR__CLOSE;
-    }
-    --sd->dlev;
-    return 0;
-    // TODO(samthor): pop execution state
-  }
-
-  // handle descend into stack
-  int mod = stack_mod(sd, curr);
-  if (mod < 0) {
-    return mod;  // err
-  } else if (mod) {
-    return 0;
-  }
-
-  // dictionary mode for non-lit
-  if (lev->is_dict) {
-    if (lev->is_dict_right) {
-      // right side of dict, comma moves us back to left state
-      if (curr->type == TOKEN_COMMA) {
-        lev->is_dict_right = 0;
-        return 0;
-      }
-    } else {
-      // left side of dict, colon moves us to right state
-      if (curr->type == TOKEN_COLON) {
-        lev->is_dict_right = 1;
-      } else if (curr->type == TOKEN_OP && curr->len == 1 && curr->p[0] == '*') {
-        // TODO(samthor): next function is generator
-      }
-    }
-  }
-
-  // we mostly care about changing lit to keyword/symbol
-  if (curr->type != TOKEN_LIT) {
-    return 0;
-  }
 
   if (lev->is_dict && !lev->is_dict_right) {
     // right-side of dict, allow "get" "set" "async" etc
@@ -193,6 +150,10 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
   // "let" is either a keyword or symbol depending on use
   // TODO: what is to the left of us?
   if (token_string(curr, "let", 3)) {
+    if (lev->prev1.type != TOKEN_SEMICOLON && !lev_follows_control(lev)) {
+      return TOKEN_SYMBOL;  // not in an expected place for 'let'
+    }
+
     if (next->type == TOKEN_BRACE || next->type == TOKEN_ARRAY) {
       // e.g. "let[..]" or "let{..}", destructuring
       return TOKEN_KEYWORD;
@@ -208,11 +169,6 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
 
     // otherwise, anything else is "let.foo" or whatever
     return TOKEN_SYMBOL;
-  }
-
-  if (lev->is_dict) {
-    // few keywords are allowed here (depending on L/R)
-    return 0;
   }
 
   // look for "break foo;" or "continue bar;""
@@ -280,12 +236,69 @@ skip_label_colon:
     }
   }
 
-  // match other keywords
-  if (is_keyword(curr->p, curr->len)) {
+  // match other keywords "always keywords"
+  if (is_always_keyword(curr->p, curr->len)) {
     return TOKEN_KEYWORD;
   }
 
   return TOKEN_SYMBOL;
+}
+
+static int stream_next(streamdef *sd, token *curr, token *next) {
+  streamlev *lev = sd->lev + sd->dlev;  // always starting lev
+
+  // handle pop stack
+  if (curr->type == TOKEN_CLOSE) {
+    if (!sd->dlev) {
+      return ERROR__STACK;
+    } else if (!validate_close(lev->type, curr->p[0])) {
+      return ERROR__CLOSE;
+    }
+    --sd->dlev;
+    return 0;
+    // TODO(samthor): pop execution state
+  }
+
+  // handle descend into stack
+  int mod = stack_mod(sd, curr);
+  if (mod < 0) {
+    return mod;  // err
+  } else if (mod) {
+    return 0;
+  }
+
+  // dictionary mode for non-lit
+  if (lev->is_dict) {
+    if (lev->is_dict_right) {
+      // right side of dict, comma moves us back to left state
+      if (curr->type == TOKEN_COMMA) {
+        lev->is_dict_right = 0;
+        return 0;
+      }
+    } else {
+      // left side of dict, colon moves us to right state
+      if (curr->type == TOKEN_COLON) {
+        lev->is_dict_right = 1;
+      } else if (curr->type == TOKEN_OP && curr->len == 1 && curr->p[0] == '*') {
+        // TODO(samthor): next function is generator
+      }
+    }
+  }
+
+  // we mostly care about changing lit to keyword/symbol
+  if (curr->type != TOKEN_LIT) {
+    return 0;
+  }
+  int type = stream_next_lit(sd, curr, next);
+
+  // TODO: if `var/let` starts op, insert ASI for newline
+  // "foo \n ++" is disallowed
+  if (type == TOKEN_SYMBOL && curr->line_no != next->line_no) {
+    if (next->type == TOKEN_OP && is_double_addsub(next->p, next->len)) {
+      sd->insert_asi = 1;
+    }
+  }
+  return type;
 }
 
 int prsr_has_value(streamdef *sd) {
@@ -331,18 +344,14 @@ int prsr_has_value(streamdef *sd) {
   }
 
   // brace case
-  if (lev->is_dict) {
+  if ((lev + 1)->is_dict) {
     return 1;  // was a dict, has value
   }
 
-  switch (lev->prev2.type) {
-    case TOKEN_ARROW:
-      return 1;  // `... => {}` has value
-
-    case TOKEN_PAREN:
-      // p2=() p1={} <X>
-      // TODO(samthor): Deviate from sweet-js. Store class/function-ness?
-      break;
+  // ... () {} ? (e.g. `function foo() {}`)
+  if (lev->prev2.type == TOKEN_PAREN) {
+    // p2=() p1={} <X>
+    // TODO(samthor): Deviate from sweet-js. Store class/function-ness?
   }
 
   return 0;

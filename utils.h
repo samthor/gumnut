@@ -14,7 +14,7 @@
  * the License.
  */
 
-int is_keyword(char *s, int len);
+int is_always_keyword(char *s, int len);
 int is_reserved_word(char *s, int len);
 int is_control_keyword(char *s, int len);
 int is_trailing_control_keyword(char *s, int len);

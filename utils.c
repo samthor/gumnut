@@ -16,8 +16,25 @@
 
 #include <string.h>
 
+static const char always_keyword[] =
+    " await break case catch class const continue debugger default delete do else enum export"
+    " extends finally for function if implements import interface new package private"
+    " protected public return static switch throw try typeof var void while with yield ";
+
+static int could_be_keyword(char *s, int len) {
+  if (len > 10 || len < 2) {
+    return 0;  // no statements <2 ('if' etc) or >10 ('implements')
+  }
+  for (int i = 0; i < len; ++i) {
+    if (s[i] < 'a' || s[i] > 'z') {
+      return 0;  // only a-z
+    }
+  }
+  return 1;
+}
+
 // nb. buf must contain words start/end with space, aka " test foo "
-int in_space_string(const char *big, char *s, int len) {
+static int in_space_string(const char *big, char *s, int len) {
   // TODO: do something better? strstr is probably fast D:
   // search for: space + candidate + space
   char cand[16];
@@ -29,37 +46,25 @@ int in_space_string(const char *big, char *s, int len) {
   return strstr(big, cand) != NULL;
 }
 
-int is_keyword(char *s, int len) {
-  if (len > 10 || len < 2) {
-    return 0;  // no statements <2 ('if' etc) or >10 ('implements')
-  }
-  for (int i = 0; i < len; ++i) {
-    if (s[i] < 'a' || s[i] > 'z') {
-      return 0;  // only a-z
-    }
-  }
-
-  // nb. reserved "enum", strict reserved "implements package protected interface private public"
-
-  // nb. does not contain 'in' or 'instanceof', as they are ops
-  // does not contain 'super' or 'this', treated as symbol
-  static const char v[] =
-    " await break case catch class const continue debugger default delete do else enum export"
-    " extends finally for function if implements import interface let new package private"
-    " protected public return static switch throw try typeof var void while with yield ";
-  return in_space_string(v, s, len);
-}
-
-// nb. this is "is label safe", minus strict reserved words
-int is_reserved_word(char *s, int len) {
-  if (is_keyword(s, len)) {
-    return 1;
-  }
-  if (len < 4 || len > 5) {
+int is_always_keyword(char *s, int len) {
+  if (!could_be_keyword(s, len)) {
     return 0;
   }
-  static const char v[] = " false in instanceof null super this true ";
-  return in_space_string(v, s, len);
+  // FIXME: strict mode reserved "implements package protected interface private public"
+  // nb. reserved "enum"
+  // nb. does not contain 'in' or 'instanceof', as they are ops
+  // does not contain 'super' or 'this', treated as symbol
+  return in_space_string(always_keyword, s, len);
+}
+
+// nb. this is "is label safe"
+int is_reserved_word(char *s, int len) {
+  if (!could_be_keyword(s, len)) {
+    return 0;
+  }
+  // FIXME: strict mode reserved "implements package protected interface private public"
+  static const char v[] = " false in instanceof let null super this true ";
+  return in_space_string(always_keyword, s, len) || in_space_string(v, s, len);
 }
 
 // whether this is a control keyword that is not an expr

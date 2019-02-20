@@ -1,17 +1,21 @@
-A JavaScript chunker (possibly a tokenizer) in C.
+A JavaScript tokenizer in C.
 It's compilable to Web Assembly and has a demo in the `wasm` path.
 
 This is not a polished or documented product.
 
 ## Stages
 
-prsr consists of three component:
+1. a raw JavaScript tokenizer, which understands UTF-8 bytes and generates simple tokens
 
-1. a raw JavaScript tokenizer, which understands UTF-8 bytes and generates tokens
+2. stream code, which deals with JS nuances and outputs a correct^ stream of tokens
 
-2. a streamer, which deals with some of JS' nuances (mostly around `/` vs `/regexp/`) that can be fixed by moving forward
+^JS has a fun ambiguity which is hard to overcome without a complete lookahead parser.
+Without a lookahead step, it's not clear whether `async` below is a function call (calling the `async` function) or keyword (declaring an arrow function as `async`).
 
-3. a parser, which identifies literals as symbols or keywords (and requires more memory/time) 
+```js
+// this is a function call
+async(/*anything can go here*/) {}
 
-Each component includes its subordinate components.
-As an end-user, you probably want to use the parser directly.
+// this is the value of an arrow function
+async(/*anything can go here*/) => {}
+```
