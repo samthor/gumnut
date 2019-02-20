@@ -18,6 +18,11 @@
 #include "stream.h"
 #include "../utils.h"
 
+// 'keyword' start like if/while/else is 0
+#define _START__HOIST 1  // e.g. "class Foo {}", "function bar()"
+#define _START__VALUE 2  // e.g. "1", "foo", "console.log('foo')", "class {...}"
+#define _START__DECL  3  // e.g. "var ..." or "let ..."
+
 static int lev_follows_control(streamlev *lev) {
   if (lev->prev1.type == TOKEN_PAREN && lev->prev2.type == TOKEN_KEYWORD) {
     return is_control_paren(lev->prev2.p, lev->prev2.len);
@@ -129,94 +134,112 @@ static int validate_close(int type, char close) {
 static int stream_next_lit(streamdef *sd, token *curr, token *next) {
   streamlev *lev = sd->lev + sd->dlev;  // always starting lev
 
-  if (lev->is_dict && !lev->is_dict_right) {
-    // right-side of dict, allow "get" "set" "async" etc
-    if (is_getset(curr->p, curr->len) || token_string(curr, "async", 5)) {
-      switch (next->type) {
-        case TOKEN_PAREN:  // {get() {}}
-        case TOKEN_COLON:  // {get: 1}
-        case TOKEN_COMMA:  // {get,set}
-        case TOKEN_BRACE:  // {get}
-          break;
+  if (lev->is_dict) {
+    // block dict
 
-        default:
-          return TOKEN_KEYWORD;
+    if (!lev->is_dict_right) {
+      // right-side of dict, allow "get" "set" "async" etc
+      if (is_getset(curr->p, curr->len) || token_string(curr, "async", 5)) {
+        switch (next->type) {
+          case TOKEN_PAREN:  // {get() {}}
+          case TOKEN_COLON:  // {get: 1}
+          case TOKEN_COMMA:  // {get,set}
+          case TOKEN_BRACE:  // {get}
+            break;
+
+          default:
+            return TOKEN_KEYWORD;
+        }
+      }
+      return TOKEN_SYMBOL;
+    }
+
+  } else if (lev->type == TOKEN_BRACE) {
+    // brace mode (block execution, dict caught above)
+
+    if (!lev->statement) {
+      if (is_hoist_keyword(curr->p, curr->len)) {
+        lev->statement = _START__HOIST;
       }
     }
 
-    return TOKEN_SYMBOL;
-  }
+    // "let" is either a keyword or symbol depending on use
+    // TODO: what is to the left of us?
+    if (token_string(curr, "let", 3)) {
+      if (lev->prev1.type != TOKEN_SEMICOLON && !lev_follows_control(lev)) {
+        return TOKEN_SYMBOL;  // not in an expected place for 'let'
+      }
 
-  // "let" is either a keyword or symbol depending on use
-  // TODO: what is to the left of us?
-  if (token_string(curr, "let", 3)) {
-    if (lev->prev1.type != TOKEN_SEMICOLON && !lev_follows_control(lev)) {
-      return TOKEN_SYMBOL;  // not in an expected place for 'let'
-    }
-
-    if (next->type == TOKEN_BRACE || next->type == TOKEN_ARRAY) {
-      // e.g. "let[..]" or "let{..}", destructuring
-      return TOKEN_KEYWORD;
-    }
-
-    if (next->type == TOKEN_LIT) {
-      if (token_string(next, "in", 2) || token_string(next, "instanceof", 10)) {
-        // "let instanceof Foo", for symbol use
-        sd->type_next = TOKEN_OP;
+      if (next->type == TOKEN_BRACE || next->type == TOKEN_ARRAY) {
+        // e.g. "let[..]" or "let{..}", destructuring
         return TOKEN_KEYWORD;
       }
-    }
 
-    // otherwise, anything else is "let.foo" or whatever
-    return TOKEN_SYMBOL;
-  }
+      if (next->type == TOKEN_LIT) {
+        if (is_op_keyword(next->p, next->len)) {
+          // "let instanceof Foo", for symbol use
+          sd->type_next = TOKEN_OP;
+          return TOKEN_SYMBOL;
+        }
 
-  // look for "break foo;" or "continue bar;""
-  if (is_label_keyword(curr->p, curr->len)) {
-    if (curr->line_no != next->line_no) {
-      sd->insert_asi = 1;
-    } else if (next->type == TOKEN_LIT) {
-      // mark next as label
-      if (is_reserved_word(next->p, next->len)) {
-        // nb. invalid grammar
-        sd->type_next = TOKEN_KEYWORD;
-      } else {
-        sd->type_next = TOKEN_LABEL;
+        // variable declaration
+        return TOKEN_KEYWORD;
       }
-    }
-    return TOKEN_KEYWORD;
-  }
 
-  // look for "return \n {}" or "yield \n bar"
-  if (is_asi_change(curr->p, curr->len)) {
-    sd->insert_asi = (curr->line_no != next->line_no);
-    if (curr->p[0] == 'y') {
-      return TOKEN_OP;  // yield is oplike
-    }
-    return TOKEN_KEYWORD;
-  }
-
-  // try to match "label:"
-  if (next->type == TOKEN_COLON) {
-    if (lev->prev1.line_no == curr->line_no && !lev_follows_control(lev)) {
-      goto skip_label_colon;
+      // otherwise, anything else is "let.foo" or whatever
+      return TOKEN_SYMBOL;
     }
 
-    switch (lev->prev1.type) {
-      case TOKEN_OP:
-      case TOKEN_TERNARY:
-      case TOKEN_DOT:
-        goto skip_label_colon;
-    }
-
-    if (is_reserved_word(curr->p, curr->len)) {
-      // nb. invalid grammar
+    // look for "break foo;" or "continue bar;""
+    if (is_label_keyword(curr->p, curr->len)) {
+      if (curr->line_no != next->line_no) {
+        sd->insert_asi = 1;
+      } else if (next->type == TOKEN_LIT) {
+        // mark next as label
+        if (is_reserved_word(next->p, next->len)) {
+          // nb. invalid grammar
+          sd->type_next = TOKEN_KEYWORD;
+        } else {
+          sd->type_next = TOKEN_LABEL;
+        }
+      }
       return TOKEN_KEYWORD;
     }
-    return TOKEN_LABEL;
-skip_label_colon:
-    ;  // empty statement
+
+    // look for "return \n {}" or "yield \n bar"
+    if (is_asi_change(curr->p, curr->len)) {
+      sd->insert_asi = (curr->line_no != next->line_no);
+      if (curr->p[0] == 'y') {
+        return TOKEN_OP;  // yield is oplike
+      }
+      return TOKEN_KEYWORD;
+    }
+
+    // try to match "label:"
+    if (next->type == TOKEN_COLON) {
+      if (lev->prev1.line_no == curr->line_no && !lev_follows_control(lev)) {
+        goto skip_label_colon;
+      }
+
+      switch (lev->prev1.type) {
+        case TOKEN_OP:
+        case TOKEN_TERNARY:
+        case TOKEN_DOT:
+          goto skip_label_colon;
+      }
+
+      if (is_reserved_word(curr->p, curr->len)) {
+        // nb. invalid grammar
+        return TOKEN_KEYWORD;
+      }
+      return TOKEN_LABEL;
+  skip_label_colon:
+      ;  // empty statement
+    }
+
   }
+
+  // all execution modes here (block, paren, ...)
 
   // match ops
   if (is_oplike(curr->p, curr->len)) {

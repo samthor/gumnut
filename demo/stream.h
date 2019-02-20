@@ -41,6 +41,7 @@ typedef struct {
   uint8_t type : 5;  // opening type
   uint8_t is_dict : 1;
   uint8_t is_dict_right : 1;
+  uint8_t statement : 2;  // FIXME: could union with is_dict*
   token prev1;
   token prev2;
 } streamlev;
