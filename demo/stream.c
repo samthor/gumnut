@@ -19,9 +19,10 @@
 #include "../utils.h"
 
 // 'keyword' start like if/while/else is 0
-#define _START__HOIST 1  // e.g. "class Foo {}", "function bar()"
-#define _START__VALUE 2  // e.g. "1", "foo", "console.log('foo')", "class {...}"
-#define _START__DECL  3  // e.g. "var ..." or "let ..."
+#define _START__HOIST  1  // e.g. "class Foo {}", "function bar()"
+#define _START__VALUE  2  // e.g. "1", "foo", "console.log('foo')", "class {...}"
+#define _START__DECL   3  // e.g. "var ..." or "let ..."
+#define _START__MODULE 4  // import/export statements
 
 static int lev_follows_control(streamlev *lev) {
   if (lev->prev1.type == TOKEN_PAREN && lev->prev2.type == TOKEN_KEYWORD) {
@@ -97,7 +98,7 @@ static int stack_mod(streamdef *sd, token *t) {
   bzero(lev, sizeof(streamlev));
   lev->type = t->type;  // opening reason
 
-  // setup level so parser never has to see PAREN, ARRAY etc
+  // setup level so parser never looks back on start PAREN, ARRAY etc
   switch (t->type) {
     case TOKEN_BRACE:
       if (!token_is_dict(lev - 1)) {
@@ -155,11 +156,25 @@ static int stream_next_lit(streamdef *sd, token *curr, token *next) {
     }
 
   } else if (lev->type == TOKEN_BRACE) {
-    // brace mode (block execution, dict caught above)
+    // brace mode (begin statement in regular brace mode)
+
+    int statement_begin =
+        lev->prev1.type == TOKEN_ARROW ||
+        lev->prev1.type == TOKEN_SEMICOLON ||
+        lev_follows_control(lev) || 
+        (lev->prev1.type == TOKEN_BRACE && !(lev + 1)->is_dict);
+
+    if (statement_begin) {
+      // this is a new statement
+      // TODO(samthor): we should probably only be here at all if it's new
+      printf("got new statement\n");
+    } else if (curr->line_no != lev->prev1.line_no) {
+      // .. but might also be a new statement if invalid grammar
+    }
 
     if (!lev->statement) {
       if (is_hoist_keyword(curr->p, curr->len)) {
-        lev->statement = _START__HOIST;
+//        lev->statement = _START__HOIST;
       }
     }
 
@@ -218,9 +233,11 @@ static int stream_next_lit(streamdef *sd, token *curr, token *next) {
     // try to match "label:"
     if (next->type == TOKEN_COLON) {
       if (lev->prev1.line_no == curr->line_no && !lev_follows_control(lev)) {
+        // TODO(samthor): we should catch this in state machine
         goto skip_label_colon;
       }
 
+      // TODO(samthor): we should catch this in state machine
       switch (lev->prev1.type) {
         case TOKEN_OP:
         case TOKEN_TERNARY:
