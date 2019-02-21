@@ -38,10 +38,10 @@
 // } streamstack;
 
 typedef struct {
-  uint8_t type : 5;  // opening type
-  uint8_t is_dict : 1;
-  uint8_t is_dict_right : 1;
-  uint8_t statement : 3;  // FIXME: could union with is_dict*
+  uint8_t type : 5;  // opening type, blank for virtual
+  uint8_t mode : 3;  // mode for this stack
+  uint8_t state : 2;
+
   token prev1;
   token prev2;
 } streamlev;

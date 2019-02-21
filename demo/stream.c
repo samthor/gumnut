@@ -18,11 +18,9 @@
 #include "stream.h"
 #include "../utils.h"
 
-// 'keyword' start like if/while/else is 0
-#define _START__HOIST  1  // e.g. "class Foo {}", "function bar()"
-#define _START__VALUE  2  // e.g. "1", "foo", "console.log('foo')", "class {...}"
-#define _START__DECL   3  // e.g. "var ..." or "let ..."
-#define _START__MODULE 4  // import/export statements
+#define _MODE__DEFAULT 0  // default block state
+#define _MODE__VALUE   1  // consume value
+#define _MODE__DICT    2  // lhs of dict
 
 static int lev_follows_control(streamlev *lev) {
   if (lev->prev1.type == TOKEN_PAREN && lev->prev2.type == TOKEN_KEYWORD) {
@@ -307,6 +305,16 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
     return 0;
   }
 
+  // mode: dict (left side)
+  
+
+  switch (lev->mode) {
+    case _MODE__DICT: {
+
+      break;
+    }
+  }
+
   // dictionary mode for non-lit
   if (lev->is_dict) {
     if (lev->is_dict_right) {
@@ -343,58 +351,7 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
 
 int prsr_has_value(streamdef *sd) {
   streamlev *lev = sd->lev + sd->dlev;
-//  printf(";;check;; got prev2=`%.*s` (%d) prev1=`%.*s` (%d)\n", lev->prev2.len, lev->prev2.p, lev->prev2.type, lev->prev1.len, lev->prev1.p, lev->prev1.type);
-
-  if (lev->is_dict) {
-    if (!lev->is_dict_right) {
-      return 1;  // pretend that `{/foo: bar}` is division (spec insists), even though invalid
-    }
-    // otherwise, use normal logic
-  }
-
-  // catchall for simple cases: semicolon, comma etc
-  if (type_implies_statement(lev->prev1.type)) {
-    return 0;
-  }
-
-  // look for `if () /foo/`
-  if (lev_follows_control(lev)) {
-    return 0;
-  }
-
-  switch (lev->prev1.type) {
-    case TOKEN_LABEL:
-      return 0;  // should either be "foo:" (next known) or "break foo;" (no value)
-
-    case TOKEN_KEYWORD:
-      return 0;
-
-    default:
-      printf(";;check;; got unhandled type=%d\n", lev->prev1.type);
-    case TOKEN_ARRAY:
-    case TOKEN_STRING:
-    case TOKEN_REGEXP:
-    case TOKEN_NUMBER:
-    case TOKEN_SYMBOL:
-    case TOKEN_PAREN:
-      return 1;
-
-    case TOKEN_BRACE:
-      break;
-  }
-
-  // brace case
-  if ((lev + 1)->is_dict) {
-    return 1;  // was a dict, has value
-  }
-
-  // ... () {} ? (e.g. `function foo() {}`)
-  if (lev->prev2.type == TOKEN_PAREN) {
-    // p2=() p1={} <X>
-    // TODO(samthor): Deviate from sweet-js. Store class/function-ness?
-  }
-
-  return 0;
+  return lev->mode == _MODE__VALUE && lev->state;
 }
 
 int prsr_stream_next(streamdef *sd, token *curr, token *next) {
@@ -447,7 +404,6 @@ streamdef prsr_stream_init() {
 
   // pretend top-level started with a semicolon inside a brace
   streamlev *base = sd.lev;
-  base->prev1.type = TOKEN_SEMICOLON;
   base->type = TOKEN_BRACE;
 
   return sd;
