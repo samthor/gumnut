@@ -306,7 +306,35 @@ static int stream_next(streamdef *sd, token *curr, token *next) {
   }
 
   // mode: dict (left side)
-  
+  if (lev->mode == _MODE__DICT) {
+
+    switch (curr->type) {
+      case TOKEN_LIT:
+        // left-side of dict, allow "get" "set" "async" etc
+        if (is_getset(curr->p, curr->len) || token_string(curr, "async", 5)) {
+          switch (next->type) {
+            case TOKEN_PAREN:  // {get() {}}
+            case TOKEN_COLON:  // {get: 1}
+            case TOKEN_COMMA:  // {get,set,async}
+            case TOKEN_BRACE:  // {get}
+              break;
+
+            default:
+              return TOKEN_KEYWORD;
+          }
+        }
+
+        return TOKEN_SYMBOL;
+
+      case TOKEN_COLON:
+        // TODO: consume value
+        break;
+
+      case TOKEN_BRACE:
+        // TODO: will we even get here?
+        break;
+    }
+  }
 
   switch (lev->mode) {
     case _MODE__DICT: {
