@@ -113,6 +113,14 @@ int is_labellike_keyword(char *s, int len) {
   return (len == 4 && !memcmp(s, "case", 4)) || (len == 7 && !memcmp(s, "default", 7));
 }
 
+int is_decl_keyword(char *s, int len) {
+  if (len < 3 || len > 5) {
+    return 0;
+  }
+  static const char v[] = " var let const ";
+  return in_space_string(v, s, len);
+}
+
 int is_begin_expr_keyword(char *s, int len) {
   if (len < 3 || len > 6) {
     return 0;

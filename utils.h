@@ -21,6 +21,7 @@ int is_trailing_control_keyword(char *s, int len);
 int is_restrict_keyword(char *s, int len);
 int is_hoist_keyword(char *s, int len);
 int is_expr_keyword(char *s, int len);
+int is_decl_keyword(char *s, int len);
 int is_labellike_keyword(char *s, int len);
 int is_begin_expr_keyword(char *s, int len);
 int is_op_keyword(char *s, int len);
