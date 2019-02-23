@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../token.h"
-#include "stream.h"
+#include "feed.h"
 
 // reads stdin into buf, reallocating as necessary. returns strlen(buf) or < 0 for error.
 int read_stdin(char **buf) {
@@ -43,70 +43,22 @@ int read_stdin(char **buf) {
   return pos;
 }
 
-int render(token *out, streamlev *lev) {
+void render_callback(void *arg, token *out) {
   char c = ' ';
   if (out->type == TOKEN_SEMICOLON && !out->len) {
-    c = ';';
-  } else if (lev) {
-    // render interesting statuses
-    if (out->type == TOKEN_BRACE && lev->is_dict) {
-      c = 'd';
-    } else if (out->type == TOKEN_COLON && lev->is_dict_right) {
-      c = 'r';
-    }
+    c = ';';  // this is an ASI
   }
   printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
-  return 0;
 }
 
 int main() {
-  printf("sizeof(tokendef)=%lu sizeof(streamdef)=%lu\n", sizeof(tokendef), sizeof(streamdef));
+  printf("sizeof(tokendef)=%lu\n", sizeof(tokendef));
 
   char *buf;
   if (read_stdin(&buf) < 0) {
     return -1;
   }
 
-  token asi;
-  asi.type = TOKEN_SEMICOLON;
-
   tokendef td = prsr_init_token(buf);
-  streamdef sd = prsr_stream_init();
-
-  int last_line_no = 0;
-  int ret = 0;
-  token out;
-  do {
-    // get next token
-    int has_value = prsr_has_value(&sd);
-    ret = prsr_next_token(&td, &out, has_value);
-    if (ret) {
-      break;
-    }
-
-    // stream processor
-retry_asi:
-    ret = prsr_stream_next(&sd, &out, &td.next);
-    if (ret < 0) {
-      break;
-    }
-
-    if (ret == TOKEN_SEMICOLON) {
-      asi.line_no = last_line_no;
-      render(&asi, NULL);
-      goto retry_asi;
-    }
-
-    if (ret != 0) {
-      out.type = ret;
-    }
-    streamlev *lev = sd.lev + sd.dlev;
-    render(&out, lev);
-    last_line_no = out.line_no;
-  } while (out.type);
-
-  if (ret) {
-    printf("failed ret=%d type=%d rest=`%s`\n", ret, out.type, out.p);
-  }
-  return ret;
+  return prsr_feed(&td, render_callback, NULL);
 }

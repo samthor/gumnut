@@ -38,8 +38,7 @@
 // } streamstack;
 
 typedef struct {
-  uint8_t type : 5;  // opening type, blank for virtual
-  uint8_t mode : 3;  // mode for this stack
+  uint8_t type : 5;  // opening type
   uint8_t state : 2;
 
   token prev1;
@@ -53,12 +52,13 @@ typedef struct {
 
 typedef struct {
   uint8_t insert_asi : 1;
-  uint8_t type_next : 5;
 
   uint8_t dlev;
-  streamlev lev[256];
+  streamlev lev[__STACK_SIZE];
   // uint8_t dexc;
   // streamexc exc[256];
+
+  token last;
 } streamdef;
 
 streamdef prsr_stream_init();

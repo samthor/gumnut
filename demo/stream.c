@@ -18,9 +18,15 @@
 #include "stream.h"
 #include "../utils.h"
 
-#define _MODE__DEFAULT 0  // default block state
-#define _MODE__VALUE   1  // consume value
-#define _MODE__DICT    2  // lhs of dict
+// stream: internal modes
+#define _STREAM_INIT      0
+#define _STREAM_LABEL     25
+#define _STREAM_FUNCTION  26
+#define _STREAM_HOIST     27
+#define _STREAM_DICT      28
+#define _STREAM_VALUE     29
+#define _STREAM_CONTROL   30  // `()` part of control, e.g. "if ()"
+#define _STREAM_STATEMENT 31
 
 static int lev_follows_control(streamlev *lev) {
   if (lev->prev1.type == TOKEN_PAREN && lev->prev2.type == TOKEN_KEYWORD) {
@@ -292,85 +298,217 @@ static int smatch_decl(token *curr, token *next) {
     // const or var
   } else if (next->type == TOKEN_BRACE || next->type == TOKEN_ARRAY) {
     // e.g. "let[..]" or "let{..}", destructuring
-  } else if (next->type != TOKEN_LIT || is_op_keyword(next->p, next->len)) {
-    // no following literal ("let = 1"), or clear variable use ("let instanceof Foo")
-
+  } else if (next->type != TOKEN_LIT) {
+    return 0;  // no following literal (e.g. "let = 1")
+  } else if (is_op_keyword(next->p, next->len)) {
+    // clear variable use ("let instanceof Foo" or "let in bar")
+    next->type = TOKEN_OP;  // these are op-like
     return 0;
   }
 
   return 1;
 }
 
-static int stream_next(streamdef *sd, token *curr, token *next) {
-  streamlev *lev = sd->lev + sd->dlev;  // always starting lev
-
-  switch (lev->mode) {
-    case _MODE__DEFAULT:
-      if (smatch_decl(curr, next)) {
-
-        return TOKEN_KEYWORD;
-      }
+/**
+ * push type/mode onto stack
+ */
+static int stack_push(streamdef *sd, int type) {
+  if (sd->dlev == __STACK_SIZE - 1) {
+    return ERROR__STACK;
   }
 
+  ++sd->dlev;
+  streamlev *lev = sd->lev + sd->dlev;
+  bzero(lev, sizeof(streamlev));
+  lev->type = type;  // opening reason, zero/EOF for virtual
+  return 0;
+}
+
+/**
+ * pop until non-virtual mode on stack
+ */
+static int stack_pop(streamdef *sd) {
+  if (!sd->dlev) {
+    return ERROR__STACK;
+  }
+  --sd->dlev;
+  return 0;
+}
+
+static int stream_next(streamdef *sd, token *curr, token *next) {
+  streamlev *lev = sd->lev + sd->dlev;  // always starting lev
+  int _retcheck;
+#define _CHECK(v) {_retcheck = (v); if (_retcheck) {return _retcheck;}};
+#define _RUN(_type) \
+    for (int _h = 1; _h && lev->type == _type; _h = 0)
+
+  int always_keyword = (curr->type == TOKEN_LIT && is_always_keyword(curr->p, curr->len));
+
+  // zero block mode
+  _RUN(_STREAM_INIT) {
+    if (curr->type == TOKEN_CLOSE) {
+      _CHECK(stack_pop(sd));
+
+      // if this was a block statement (e.g. unattached "{}"), then break it too
+      streamlev *up = lev - 1;
+      if (up->type == _STREAM_STATEMENT) {
+        return stack_pop(sd);
+      }
+      return 0;
+    }
+
+    // otherwise, consume a statement
+    _CHECK(stack_push(sd, _STREAM_STATEMENT));
+  }
+
+  // label mode
+  _RUN(_STREAM_LABEL) {
+    if (!always_keyword && curr->type == TOKEN_LIT) {
+      curr->type = TOKEN_LABEL;
+    } else {
+      _CHECK(stack_pop(sd));
+    }
+  }
+
+  // statement mode
+  _RUN(_STREAM_STATEMENT) {
+    // unattached "{"
+    if (curr->type == TOKEN_BRACE) {
+      return stack_push(sd, _STREAM_INIT);
+    }
+
+    // only lit below
+    if (curr->type != TOKEN_LIT) {
+      break;
+    }
+
+    // "var x"
+    if (smatch_decl(curr, next)) {
+      curr->type = TOKEN_KEYWORD;
+      return stack_push(sd, _STREAM_VALUE);
+    }
+
+    // "if (x)"
+    if (is_control_paren(curr->p, curr->len)) {
+      curr->type = TOKEN_KEYWORD;
+      return stack_push(sd, _STREAM_CONTROL);
+    }
+
+    // "try {"
+    if (is_block_creator(curr->p, curr->len)) {
+      curr->type = TOKEN_KEYWORD;
+      return stack_push(sd, _STREAM_STATEMENT);
+    }
+
+    // "function" or "class"
+    if (is_hoist_keyword(curr->p, curr->len)) {
+      curr->type = TOKEN_KEYWORD;
+      _CHECK(stack_push(sd, _STREAM_HOIST));
+      break;
+    }
+
+    // "async"
+    if (token_string(curr, "async", 5)) {
+      if (next->type == TOKEN_LIT && token_string(next, "function", 8)) {
+        curr->type = TOKEN_KEYWORD;
+        return stack_push(sd, _STREAM_HOIST);
+      }
+      break;
+    }
+
+    // "throw"
+    if (token_string(curr, "throw", 5)) {
+      curr->type = TOKEN_KEYWORD;
+      return stack_push(sd, _STREAM_VALUE);
+    }
+
+    // "return"
+    if (token_string(curr, "return", 6)) {
+      curr->type = TOKEN_KEYWORD;
+      if (next->line_no == curr->line_no) {
+        return stack_push(sd, _STREAM_VALUE);  // effected by ASI
+      }
+      sd->insert_asi = 1;
+      return 0;
+    }
+
+    // "continue" or "break foo"
+    if (is_label_keyword(curr->p, curr->len)) {
+      if (next->line_no == curr->line_no) {
+        return stack_push(sd, _STREAM_LABEL);
+      }
+      sd->insert_asi = 1;
+      return 0;
+    }
+
+    // look for labels
+    if (!is_always_keyword && next->type == TOKEN_COLON) {
+
+    }
+
+    // otherwise, always start value
+    _CHECK(stack_push(sd, _STREAM_VALUE));
+  }
+
+  // read a general value mode
+  _RUN(_STREAM_VALUE) {
+
+    if (curr->type == TOKEN_CLOSE) {
+      return stack_pop(sd);
+    }
+
+    if (curr->type == TOKEN_BRACE) {
+      return stack_push(sd, _STREAM_DICT);
+    }
+
+    if (curr->type == TOKEN_ARRAY || curr->type == TOKEN_PAREN || curr->type == TOKEN_T_BRACE) {
+      return stack_push(sd, _STREAM_VALUE);
+    }
+
+
+
+  }
+
+#undef _RUN
+#undef _CHECK
 }
 
 int prsr_has_value(streamdef *sd) {
   streamlev *lev = sd->lev + sd->dlev;
-  return lev->mode == _MODE__VALUE && lev->state;
+  if (lev->type != _STREAM_VALUE) {
+    return 0;
+  }
+
+  switch (sd->last.type) {
+    case TOKEN_STRING:
+    case TOKEN_REGEXP:
+    case TOKEN_NUMBER:
+    case TOKEN_SYMBOL:
+    case TOKEN_CLOSE:
+      return 1;
+  }
+
+  return 0;
 }
 
 int prsr_stream_next(streamdef *sd, token *curr, token *next) {
   if (sd->insert_asi) {
-    streamlev *lev = sd->lev + sd->dlev;
-    lev->prev2 = lev->prev1;
-    lev->prev1 = (token) {.type = TOKEN_SEMICOLON};
-
+    sd->last = (token) {.type = TOKEN_SEMICOLON};
     sd->insert_asi = 0;
     return TOKEN_SEMICOLON;
   }
-
-  if (curr->type == TOKEN_COMMENT) {
-    return 0;  // don't process comment
-  }
-
-  // record *lev first, as we log prev1/prev2 on current level (not descendant)
-  streamlev *lev = sd->lev + sd->dlev;
-
-  int update_type = sd->type_next;  // zero or updated type
-  int type;                         // always curr->type or update
-  if (update_type) {
-    sd->type_next = 0;
-    type = update_type;
-  } else {
+  if (curr->type != TOKEN_COMMENT) {
     int ret = stream_next(sd, curr, next);
-    if (ret < 0) {
+    if (ret) {
       return ret;
-    } else if (ret) {
-      type = ret;
-      update_type = ret;
-    } else {
-      type = curr->type;
     }
+    sd->last = *curr;
   }
-
-  // don't record TOKEN_CLOSE in prev log
-  if (type != TOKEN_CLOSE) {
-    lev->prev2 = lev->prev1;
-    lev->prev1 = *curr;
-    lev->prev1.type = type;
-  }
-
-  return update_type;
+  return 0;
 }
 
 streamdef prsr_stream_init() {
   streamdef sd;
   bzero(&sd, sizeof(sd));
-
-  // pretend top-level started with a semicolon inside a brace
-  streamlev *base = sd.lev;
-  base->type = TOKEN_BRACE;
-  base->mode = _MODE__DEFAULT;
-
   return sd;
 }

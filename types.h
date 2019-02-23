@@ -64,6 +64,7 @@ typedef struct {
 // literal: internal use except for reporting ambiguous tokens
 #define TOKEN_LIT       21  // symbol, keyword or label
 #define TOKEN_SLASH     22  // ambigous slash
+#define TOKEN_MAX       23
 
 #endif//_TYPES_H
 
