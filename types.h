@@ -23,6 +23,8 @@
 #define ERROR__STACK    -2
 #define ERROR__TOKEN    -3
 #define ERROR__CLOSE    -4
+#define ERROR__SYNTAX   -5
+#define ERROR__TODO     -9
 
 #define __STACK_SIZE      256  // stack size used by token
 #define __STACK_SIZE_BITS 8    // bits needed for __STACK_SIZE

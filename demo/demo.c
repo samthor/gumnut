@@ -60,5 +60,9 @@ int main() {
   }
 
   tokendef td = prsr_init_token(buf);
-  return prsr_feed(&td, render_callback, NULL);
+  int out = prsr_feed(&td, render_callback, NULL);
+  if (out) {
+    printf("ret=%d\n", out);
+  }
+  return out;
 }
