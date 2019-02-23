@@ -117,26 +117,25 @@ static int state__decl(feeddef *fd) {
   }
 }
 
-static int _read_ensure_semicolon(feeddef *fd) {
-  if (fd->next->type == TOKEN_SEMICOLON) {
-    return _read(fd, 0);
-  } else if (fd->next->line_no != fd->curr.line_no) {
-    return _read_asi(fd);
-  } else {
-    _read(fd, 0);  // read invalid
-    return ERROR__SYNTAX;
-  }
-}
-
 static int _read_maybe_semicolon(feeddef *fd) {
-  if (fd->next->type == TOKEN_SEMICOLON) {
+  token *n = fd->next;
+
+  if (n->type == TOKEN_SEMICOLON) {
     _read(fd, 0);
-  } else if (fd->next->line_no != fd->curr.line_no) {
+  } else if (n->line_no != fd->curr.line_no || n->type == TOKEN_CLOSE || n->type == TOKEN_EOF) {
     _read_asi(fd);
   } else {
     return 0;  // does NOT read
   }
   return 1;
+}
+
+static int _read_ensure_semicolon(feeddef *fd) {
+  if (_read_maybe_semicolon(fd)) {
+    return 0;
+  }
+  _read(fd, 0);  // read invalid
+  return ERROR__SYNTAX;
 }
 
 static int state__paren(feeddef *fd, int flag) {
@@ -184,6 +183,23 @@ static int state__paren(feeddef *fd, int flag) {
   return 0;
 }
 
+static int state__block(feeddef *fd, int is_next) {
+  if (is_next) {
+    _ret(_read(fd, 0));
+  }
+  if (fd->curr.type != TOKEN_BRACE) {
+    return ERROR__SYNTAX;
+  }
+
+  _ret(state__slist(fd));
+  _ret(_read(fd, 0));
+
+  if (fd->curr.type != TOKEN_CLOSE || fd->curr.p[0] != '}') {
+    return ERROR__SYNTAX;
+  }
+  return 0;
+}
+
 static int state__s(feeddef *fd) {
 restart_s:
   _ret(_read(fd, 0));
@@ -195,12 +211,7 @@ restart_s:
 
   // match orphaned {...}
   if (fd->curr.type == TOKEN_BRACE) {
-    _ret(state__slist(fd));
-
-    if (fd->next->type != TOKEN_CLOSE || fd->next->p[0] != '}') {
-      return ERROR__SYNTAX;
-    }
-    return _read(fd, 0);
+    return state__block(fd, 0);
   }
 
   // match special non-value options
@@ -262,23 +273,89 @@ restart_s:
         return ERROR__SYNTAX;
       }
 
+      fd->curr.type = TOKEN_LABEL;
       _read(fd, 0);  // consume colon
       goto restart_s;
     }
 
     // "if (x)" and similar
     if (is_control_paren(fd->curr.p, fd->curr.len)) {
-      if (fd->curr.p[0] == 'c') {
+      fd->curr.type = TOKEN_KEYWORD;
+
+      char start_char = fd->curr.p[0];
+      if (start_char == 'c') {
         return ERROR__SYNTAX;  // "catch" not allowed here
       }
 
       int flag = 0;
-      if (fd->curr.p[0] == 'f') {
+      if (start_char == 'f') {
         flag = _PAREN_FOR;
       }
 
+      // match paren block "if (x == 1)"
       _ret(state__paren(fd, flag));
-      return state__s(fd);
+
+      if (start_char == 's') {
+        return ERROR__TODO;  // match switch/cases
+      }
+
+      _ret(state__s(fd));
+
+      // allow "else"
+      if (start_char == 'i' && fd->next->type == TOKEN_LIT && token_string(fd->next, "else", 4)) {
+        _read(fd, 0);
+        fd->curr.type = TOKEN_KEYWORD;
+        goto restart_s;
+      }
+
+      return 0;
+    }
+
+    // "try"
+    if (token_string(&(fd->curr), "try", 3)) {
+      fd->curr.type = TOKEN_KEYWORD;
+      _ret(state__block(fd, 1));
+      int seen_either = 0;
+
+      // allow trailing "catch"
+      if (fd->next->type == TOKEN_LIT && token_string(fd->next, "catch", 5)) {
+        seen_either = 1;
+        _read(fd, 0);
+        fd->curr.type = TOKEN_KEYWORD;
+
+        _ret(state__paren(fd, _PAREN_CATCH));
+        _ret(state__block(fd, 1));
+      }
+
+      // allow trailing "finally"
+      if (fd->next->type == TOKEN_LIT && token_string(fd->next, "finally", 5)) {
+        seen_either = 1;
+        _read(fd, 0);
+        fd->curr.type = TOKEN_KEYWORD;
+
+        _ret(state__block(fd, 1));
+      }
+
+      if (!seen_either) {
+        // nb. error here is on closing } of try
+        return ERROR__SYNTAX;
+      }
+      return 0;
+    }
+
+    // "do"
+    if (token_string(&(fd->curr), "do", 2)) {
+      fd->curr.type = TOKEN_KEYWORD;
+
+      _ret(state__s(fd));
+
+      _read(fd, 0);  // always read next
+      if (fd->curr.type != TOKEN_LIT || !token_string(&(fd->curr), "while", 5)) {
+        return ERROR__SYNTAX;
+      }
+      fd->curr.type = TOKEN_KEYWORD;
+      return state__paren(fd, 0);  // conditional after "while"
+      // nb. "do ; while(0)" does not require a trailing semicolon or ASI
     }
 
     if (token_string(&(fd->curr), "function", 8)) {
