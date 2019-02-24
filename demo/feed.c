@@ -74,24 +74,89 @@ static int _read_asi(feeddef *fd) {
 }
 
 static int state__value(feeddef *fd, int is_next) {
+restart_value:
   if (is_next) {
     _ret(_read(fd, 0));
   }
 
+  // a value is loosely a series of formulas separated by commas
   for (;;) {
-    switch (fd->curr.type) {
-      case TOKEN_STRING:
-      case TOKEN_REGEXP:
-      case TOKEN_NUMBER:
-        // FIXME: values are just numbers, for now
+    // match early qualifiers +, -, await, delete, new, typeof, void, yield
+    // FIXME: 'yield'/'await' placement rules
+    // FIXME: "new" is tightly coupled to a single rvalue
+
+    // Match any number of +, -, await, delete, typeof, void, yield
+    for (;;) {
+      if (fd->curr.type == TOKEN_OP) {
+        if (fd->curr.len == 1 && (fd->curr.p[0] == '-' || fd->curr.p[0] == '+')) {
+          // ok
+        } else {
+          break;
+        }
+      } else if (fd->curr.type == TOKEN_LIT) {
+        if (!is_expr_keyword(fd->curr.p, fd->curr.len) || fd->curr.p[0] == 'n') {
+          break;
+        }
+        fd->curr.type = TOKEN_KEYWORD;
+      } else {
+        // TODO: is this right? no match - return?
         return 0;
+      }
+      _ret(_read(fd, 0));  // consume
     }
 
-    break;
-  }
+    // "new" can only appear right before a value, and only once
+    if (fd->curr.type == TOKEN_LIT && token_string(&(fd->curr), "new", 3)) {
+      fd->curr.type = TOKEN_KEYWORD;
+      _read(fd, 0);
+    }
 
-  printf("got unhandled value: %d\n", fd->curr.type);
-  return ERROR__TODO;
+    // allow prefix ++ or --
+    if (fd->curr.type == TOKEN_OP && is_double_addsub(fd->curr.p, fd->curr.len)) {
+      _read(fd, 0);
+    }
+
+    // actually match a value-able thing
+    if (fd->curr.type == TOKEN_STRING) {
+      _read(fd, 0);
+
+      // match inner parts of template literal string
+      while (fd->curr.type == TOKEN_T_BRACE) {
+        _ret(state__value(fd, 1));
+
+        if (fd->curr.type != TOKEN_CLOSE) {
+          return ERROR__SYNTAX;
+        }
+        _read(fd, 0);
+        if (fd->curr.type != TOKEN_STRING) {
+          return ERROR__SYNTAX;
+        }
+        _read(fd, 0);  // now resting on thing after string again
+      }
+      continue;
+
+    } else if (fd->curr.type == TOKEN_NUMBER || fd->curr.type == TOKEN_REGEXP) {
+      // easy, number or regexp
+      _read(fd, 0);
+      continue;
+
+    } else if (fd->curr.type == TOKEN_PAREN) {
+      return ERROR__TODO;
+    } else if (fd->curr.type == TOKEN_ARRAY) {
+      return ERROR__TODO;
+    } else if (fd->curr.type == TOKEN_BRACE) {
+      return ERROR__TODO;  // dict
+    } else if (fd->curr.type != TOKEN_LIT) {
+
+      // are we missing anything?
+
+      printf("got unhandled value: %d\n", fd->curr.type);
+      return ERROR__SYNTAX;
+    }
+
+    // TODO: more
+    return 0;
+  }
 }
 
 static int state__expand_decl(feeddef *fd) {
