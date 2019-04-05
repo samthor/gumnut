@@ -27,11 +27,13 @@ static int token_string(token *t, char *s, int len) {
 static int is_optional_keyword(sstack *dep) {
   if (token_string(&(dep->t1), "await", 5)) {
     // TODO: check async
+    printf("foolishly allowing 'await'\n");
     return 1;
   }
 
   if (token_string(&(dep->t1), "yield", 5)) {
     // TODO: check generator
+    printf("foolishly allowing 'yield'\n");
     return 1;
   }
 
@@ -120,8 +122,8 @@ static int hoist_is_decl(sstack *dep, int line_no) {
     return 0;
   }
 
-  if (stack_has_value(dep)) {
-    return 1;
+  // if (stack_has_value(dep)) {
+  //   return 1;
 // TODO: same line is syntax error, so whatever?!
 //    return line_no != dep->t1.line_no;
     // same line is syntax error, e.g.:
@@ -130,7 +132,7 @@ static int hoist_is_decl(sstack *dep, int line_no) {
     // next line is valid, but needs ASI (?):
     //   "1
     //   function foo() {}"
-  }
+  // }
 
   int out = brace_is_block(dep, line_no);
   if (!out) {
@@ -140,7 +142,7 @@ static int hoist_is_decl(sstack *dep, int line_no) {
     }
   }
 
-  return 0;
+  return out;
 }
 
 static int simple_normal_step(simpledef *sd) {
@@ -161,7 +163,6 @@ static int simple_normal_step(simpledef *sd) {
 
     case TOKEN_BRACE:
       is_block = brace_is_block(dep, sd->tok.line_no);
-      printf("got block? %d\n", is_block);
       // fall-through
 
     case TOKEN_ARRAY:
@@ -184,13 +185,14 @@ static int simple_normal_step(simpledef *sd) {
         break;
       }
 
+      // FIXME: look for '[async] function' or 'class'
 
       if (is_hoist_keyword(sd->tok.p, sd->tok.len)) {
         // TODO: consume
-        printf("found hoistable: %.*s\n", sd->tok.len, sd->tok.p);
+        printf("found hoisted: %.*s\n", sd->tok.len, sd->tok.p);
 
       } else if (sd->td->next.type == TOKEN_COLON && !is_reserved_word(sd->tok.p, sd->tok.len)) {
-        // FIXME: reserved syntax error
+        // TODO(samthor): generate error if reserved word?
         sd->tok.type = TOKEN_LABEL;
       }
 

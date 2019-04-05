@@ -1,4 +1,6 @@
 
+function foo() {}
+/123/
 
 
 if:

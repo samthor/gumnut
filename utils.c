@@ -168,6 +168,7 @@ int is_block_creator(char *s, int len) {
 // keywords that operate on objects
 int is_operates(char *s, int len) {
   // nb. some of these are syntax errors, and some _missing_ are syntax errors
+  // nb. does NOT include `let` as it can be used as a keyword
   static const char v[] =
     " await break case const continue default delete do else export extends finally"
     " new return throw try typeof var void yield ";
