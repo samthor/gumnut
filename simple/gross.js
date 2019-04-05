@@ -1,9 +1,18 @@
 
-function foo() {}
+class Foo extends {} {
+
+  get foo() {
+    return 123;
+  }
+
+  *bar() {
+    yield 123;
+  }
+}
 /123/
 
 
-if:
+what:
 {
   console.info(123);
 }

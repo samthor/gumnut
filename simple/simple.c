@@ -4,12 +4,11 @@
 #include "../utils.h"
 
 typedef struct {
-  uint8_t type : 5;
   uint8_t is_block : 1;
+  uint8_t is_decl : 1;
 
   token t1;
   token t2;
-
 } sstack;
 
 typedef struct {
@@ -90,15 +89,16 @@ static int stack_has_value(sstack *dep) {
       return 1;
 
     case TOKEN_BRACE:
+      // TODO(samthor): This doesn't handle non-hoisted function, which has value.
+
+      if (dep->t2.type == TOKEN_EOF) {
+        return 0;  // used by decl (also valid e.g. "{{} /foo/}")
+      }
+
       if (!(dep + 1)->is_block || !dep->is_block) {
         return 1;  // prev was dict OR we are non-block
       }
 
-      // TODO: if _declaration_ of class or fn, has no value
-      // if _statement_, has value
-      // ... persist this beyond t1/t2 etc, can be "long"
-
-      printf("unknown decl/stmt case: %d\n", dep->t2.type);
       return 0;
 
     case TOKEN_LIT:
@@ -159,10 +159,25 @@ static int simple_normal_step(simpledef *sd) {
 
     case TOKEN_CLOSE:
       --sd->curr;  // pop stack
+
+      if (sd->curr->is_decl) {
+        if (sd->curr->t1.type == TOKEN_BRACE) {
+
+          if (sd->curr->t2.type == TOKEN_LIT && token_string(&(sd->curr->t2), "extends", 7)) {
+            // TODO(samthor): Awkward way to catch super-odd use case "extends {}".
+          } else {
+            // we found a closing }, close the above decl (function and class)
+            printf("ALSO ending decl: %.*s\n", sd->curr->t2.len, sd->curr->t2.p);
+            --sd->curr;
+          }
+        }
+      }
+
       return 0;    // nothing else to do, don't record
 
     case TOKEN_BRACE:
       is_block = brace_is_block(dep, sd->tok.line_no);
+      printf("brace_is_block: %d\n", is_block);
       // fall-through
 
     case TOKEN_ARRAY:
@@ -185,10 +200,22 @@ static int simple_normal_step(simpledef *sd) {
         break;
       }
 
-      // FIXME: look for '[async] function' or 'class'
+      if (token_string(&(sd->tok), "async", 5)) {
+        break;  // TODO: record for next callback if "function" follows?
+      }
 
       if (is_hoist_keyword(sd->tok.p, sd->tok.len)) {
-        // TODO: consume
+        // this pretends that instead of "function", we see EOF
+        // and the descendant level sees "function () {}", end popping back again
+        dep->t2 = dep->t1;
+        dep->t1 = sd->tok;
+        dep->t1.type = TOKEN_EOF;
+
+        // create faux-hoisted level
+        ++sd->curr;
+        ++dep;  // apply there
+        bzero(sd->curr, sizeof(sstack));
+        sd->curr->is_decl = 1;
         printf("found hoisted: %.*s\n", sd->tok.len, sd->tok.p);
 
       } else if (sd->td->next.type == TOKEN_COLON && !is_reserved_word(sd->tok.p, sd->tok.len)) {
