@@ -166,15 +166,17 @@ int is_block_creator(char *s, int len) {
 }
 
 // keywords that operate on objects
-int is_allows_re(char *s, int len) {
-  // nb. const/var (not let) can't, but V8 looks for a re
+int is_operates(char *s, int len) {
+  // nb. some of these are syntax errors, and some _missing_ are syntax errors
   static const char v[] =
-    " await case const delete do else extends new return throw typeof var void yield ";
+    " await break case const continue default delete do else export extends finally"
+    " new return throw try typeof var void yield ";
   return in_space_string(v, s, len);
 }
 
-int is_oplike(char *s, int len) {
-  static const char v[] = " await case delete in instanceof is new return throw typeof void yield ";
+int is_dict_after(char *s, int len) {
+  // nb. await/yield are optional
+  static const char v[] = " await case delete extends in instanceof new return throw typeof void yield ";
   return in_space_string(v, s, len);
 }
 
