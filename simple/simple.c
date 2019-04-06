@@ -4,11 +4,13 @@
 #include "../utils.h"
 
 typedef struct {
-  uint8_t is_block : 1;
-  uint8_t is_decl : 1;
 
   token t1;
   token t2;
+  uint8_t t3type : 5;
+
+  uint8_t is_block : 1;
+  uint8_t is_decl : 1;
 } sstack;
 
 typedef struct {
@@ -42,7 +44,21 @@ static int is_optional_keyword(sstack *dep) {
   return 0;
 }
 
+static int token_was_class(token *t) {
+  return t->type == TOKEN_INTERNAL && t->p[0] == 'c';
+}
+
 static int brace_is_block(sstack *dep, int line_no) {
+  if (dep->is_decl && (dep - 1)->t1.p[0] == 'c') {
+    // if we're a decl and parent is 'class', this is a dict
+    return 0;
+  }
+
+  if (token_was_class(&(dep->t1)) || token_was_class(&(dep->t2))) {
+    // we're a brace immediately after "class" or "class extends X", this is block
+    return 0;
+  }
+
   switch (dep->t1.type) {
     case TOKEN_COLON:
       // (weird but valid) after a label, e.g. "foo: {}"
@@ -92,10 +108,9 @@ static int stack_has_value(sstack *dep) {
       return 1;
 
     case TOKEN_BRACE:
-      // TODO(samthor): This doesn't handle non-hoisted function, which has value.
-
-      if (dep->t2.type == TOKEN_EOF) {
-        return 0;  // used by decl (also valid e.g. "{{} /foo/}")
+      if (dep->t3type == TOKEN_INTERNAL && dep->t2.type == TOKEN_PAREN) {
+        // 'function' '()' '{}'...
+        return 1;  // nb. this does NOT fire for hoisted since they don't leave paren/brace
       }
 
       if (!(dep + 1)->is_block || !dep->is_block) {
@@ -160,6 +175,53 @@ static int read_next(simpledef *sd, int has_value) {
   return 0;
 }
 
+static void process_function(simpledef *sd) {
+  token *next = &(sd->td->next);
+  int is_async = (sd->curr->t1.type == TOKEN_LIT && token_string(&(sd->curr->t1), "async", 5));
+  int is_generator = 0;
+
+  token fake = sd->tok;
+
+  // peek for generator star
+  if (next->type == TOKEN_OP && next->len == 1 && next->p[0] == '*') {
+    read_next(sd, 0);
+    is_generator = 1;
+  }
+
+  // peek for function name
+  if (next->type == TOKEN_LIT) {
+    read_next(sd, 0);  // FIXME: we can emit this as a lit?
+  }
+
+  // FIXME: do something with is_generator + is_async
+  // FIXME: need this for => and methods in dicts
+  printf("found function async=%d generator=%d\n", is_async, is_generator);
+
+  // push a fake thing onto our stack (will be 'function')
+  fake.type = TOKEN_INTERNAL;
+  sd->tok = fake;
+}
+
+static void process_class(simpledef *sd) {
+  token *next = &(sd->td->next);
+  token fake = sd->tok;
+
+  // peek for name
+  if (next->type == TOKEN_LIT && !token_string(next, "extends", 7)) {
+    read_next(sd, 0);  // FIXME: we can emit this as a lit?
+    printf("... name=%.*s\n", sd->tok.len, sd->tok.p);
+  }
+
+  // peek for extends
+  if (next->type == TOKEN_LIT && token_string(next, "extends", 7)) {
+    read_next(sd, 0);  // FIXME: we can emit this as a keyword?
+  }
+
+  // push a fake thing onto our stack (will be 'class')
+  fake.type = TOKEN_INTERNAL;
+  sd->tok = fake;
+}
+
 static int simple_step(simpledef *sd) {
   sstack *dep = sd->curr;
   uint8_t is_block = 0;
@@ -168,21 +230,9 @@ static int simple_step(simpledef *sd) {
     case TOKEN_CLOSE:
       --sd->curr;  // pop stack
 
-      if (sd->curr->is_decl) {
-        if (sd->curr->t1.type == TOKEN_BRACE) {
-
-          --sd->curr;
-          printf("ALSO ending decl: %.*s\n", sd->curr->t1.len, sd->curr->t1.p);
-          printf("hoist_is_decl: %d (line=%d)\n", hoist_is_decl(sd->curr, sd->tok.line_no), sd->tok.line_no);
-
-          // if (sd->curr->t2.type == TOKEN_LIT && token_string(&(sd->curr->t2), "extends", 7)) {
-          //   // TODO(samthor): Awkward way to catch super-odd use case "extends {}".
-          // } else {
-          //   // we found a closing }, close the above decl (function and class)
-          //   printf("ALSO ending decl: %.*s\n", sd->curr->t2.len, sd->curr->t2.p);
-          //   --sd->curr;
-          // }
-        }
+      if (sd->curr->is_decl && sd->curr->t1.type == TOKEN_BRACE) {
+        // ... if we're at decl level and just had a brace open/close
+        --sd->curr;
       }
 
       return -1;    // nothing else to do, don't record
@@ -214,62 +264,37 @@ static int simple_step(simpledef *sd) {
       return 0;
   }
 
-  if (!hoist_is_decl(dep, sd->tok.line_no)) {
-    return 0;
-  }
-
-  if (sd->td->next.type == TOKEN_COLON) {
-    if (!is_reserved_word(sd->tok.p, sd->tok.len)) {
-      // TODO(samthor): generate error if reserved word?
-      sd->tok.type = TOKEN_LABEL;
+  int is_decl = hoist_is_decl(dep, sd->tok.line_no);
+  if (is_decl) {
+    // match labels at top-level
+    if (sd->td->next.type == TOKEN_COLON) {
+      if (!is_reserved_word(sd->tok.p, sd->tok.len)) {
+        // TODO(samthor): generate error if reserved word?
+        sd->tok.type = TOKEN_LABEL;
+      }
+      return 0;
     }
+  }
+
+  if (!is_hoist_keyword(sd->tok.p, sd->tok.len)) {
     return 0;
   }
 
-  if (token_string(&(sd->tok), "async", 5)) {
-    return 0;  // TODO: record for next callback if "function" follows?
-  }
-
-  if (is_hoist_keyword(sd->tok.p, sd->tok.len)) {
-    // jump immediately to sublevel
+  // if this is a hoisted (declaration) class/function, increase level: this leaves TOKEN_INTERNAL
+  // marker in the "regular flow", but we ignore it (no value as decl)
+  if (is_decl) {
     dep = ++sd->curr;
     bzero(sd->curr, sizeof(sstack));
     dep->is_decl = 1;
+  }
 
-    // // this pretends that instead of "function", we see EOF
-    // // and the descendant level sees "function () {}", end popping back again
-    // dep->t2 = dep->t1;
-    // dep->t1 = sd->tok;
-    // dep->t1.type = TOKEN_EOF;
-
-    // // create faux-hoisted level
-    // ++sd->curr;
-    // ++dep;  // apply there
-    // bzero(sd->curr, sizeof(sstack));
-    // sd->curr->is_decl = 1;
-    printf("found hoisted: %.*s\n", sd->tok.len, sd->tok.p);
+  if (sd->tok.p[0] == 'f') {
+    process_function(sd);
+  } else {
+    process_class(sd);
   }
 
   return 0;
-}
-
-static int prsr_handle_function(simpledef *sd) {
-  int is_async = (sd->curr->t1.type == TOKEN_LIT && token_string(&(sd->curr->t1), "async", 5));
-
-  // get next
-
-  // if (next is star) {
-  //   // get next
-  // }
-
-  // if (next is name) {
-  //   // get next
-  // }
-
-  // if (next is parens) {
-  //   // get next
-  // }
-
 }
 
 int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
@@ -302,6 +327,7 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
       continue;  // don't record in t1/t2
     }
 
+    dep->t3type = dep->t2.type;
     dep->t2 = dep->t1;
     dep->t1 = sd.tok;
   }
