@@ -15,6 +15,9 @@ typedef struct {
   tokendef *td;
   token tok;
 
+  prsr_callback cb;
+  void *arg;
+
   sstack *curr;
   sstack stack[256];
 } simpledef;
@@ -145,6 +148,18 @@ static int hoist_is_decl(sstack *dep, int line_no) {
   return out;
 }
 
+static int read_next(simpledef *sd, int has_value) {
+  do {
+    // prsr_next_token can reveal comments, loop until over them
+    int out = prsr_next_token(sd->td, &(sd->tok), has_value);
+    if (out) {
+      return out;
+    }
+    sd->cb(sd->arg, &(sd->tok));
+  } while (sd->tok.type == TOKEN_COMMENT);
+  return 0;
+}
+
 static int simple_step(simpledef *sd) {
   sstack *dep = sd->curr;
   uint8_t is_block = 0;
@@ -238,11 +253,32 @@ static int simple_step(simpledef *sd) {
   return 0;
 }
 
+static int prsr_handle_function(simpledef *sd) {
+  int is_async = (sd->curr->t1.type == TOKEN_LIT && token_string(&(sd->curr->t1), "async", 5));
+
+  // get next
+
+  // if (next is star) {
+  //   // get next
+  // }
+
+  // if (next is name) {
+  //   // get next
+  // }
+
+  // if (next is parens) {
+  //   // get next
+  // }
+
+}
+
 int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
   simpledef sd;
   bzero(&sd, sizeof(simpledef));
   sd.curr = sd.stack;
   sd.td = td;
+  sd.cb = cb;
+  sd.arg = arg;
   sd.curr->is_block = 1;
 
   for (;;) {
@@ -251,14 +287,10 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
       has_value = stack_has_value(sd.curr);
     }
 
-    do {
-      // next_token can reveal comments, loop until over them
-      int out = prsr_next_token(td, &(sd.tok), has_value);
-      if (out) {
-        return out;
-      }
-      cb(arg, &(sd.tok));
-    } while (sd.tok.type == TOKEN_COMMENT);
+    int out = read_next(&sd, has_value);
+    if (out) {
+      return out;
+    }
     if (sd.tok.type == TOKEN_EOF) {
       break;
     }
