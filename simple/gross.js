@@ -1,5 +1,5 @@
 
-class Foo extends {} {
+class Foo {
 
   get foo() {
     return 123;
@@ -17,7 +17,7 @@ what:
   console.info(123);
 }
 
-console.info(fooz)
+console.info(this.fooz)
 
 // ---------
 
@@ -34,6 +34,9 @@ function *foo() {
 
 const g = foo();
 console.info(g.next());
+
+foo*(foo)
+{bar: 123};
 
 var a = 123;
 

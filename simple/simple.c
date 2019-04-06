@@ -145,35 +145,32 @@ static int hoist_is_decl(sstack *dep, int line_no) {
   return out;
 }
 
-static int simple_normal_step(simpledef *sd) {
-  int out = prsr_next_token(sd->td, &(sd->tok), 0);
-  if (out) {
-    return out;
-  }
+static int simple_step(simpledef *sd) {
   sstack *dep = sd->curr;
   uint8_t is_block = 0;
 
   switch (sd->tok.type) {
-    case TOKEN_COMMENT:
-      return 0;    // pending comment, don't record, just yield
-
     case TOKEN_CLOSE:
       --sd->curr;  // pop stack
 
       if (sd->curr->is_decl) {
         if (sd->curr->t1.type == TOKEN_BRACE) {
 
-          if (sd->curr->t2.type == TOKEN_LIT && token_string(&(sd->curr->t2), "extends", 7)) {
-            // TODO(samthor): Awkward way to catch super-odd use case "extends {}".
-          } else {
-            // we found a closing }, close the above decl (function and class)
-            printf("ALSO ending decl: %.*s\n", sd->curr->t2.len, sd->curr->t2.p);
-            --sd->curr;
-          }
+          --sd->curr;
+          printf("ALSO ending decl: %.*s\n", sd->curr->t1.len, sd->curr->t1.p);
+          printf("hoist_is_decl: %d (line=%d)\n", hoist_is_decl(sd->curr, sd->tok.line_no), sd->tok.line_no);
+
+          // if (sd->curr->t2.type == TOKEN_LIT && token_string(&(sd->curr->t2), "extends", 7)) {
+          //   // TODO(samthor): Awkward way to catch super-odd use case "extends {}".
+          // } else {
+          //   // we found a closing }, close the above decl (function and class)
+          //   printf("ALSO ending decl: %.*s\n", sd->curr->t2.len, sd->curr->t2.p);
+          //   --sd->curr;
+          // }
         }
       }
 
-      return 0;    // nothing else to do, don't record
+      return -1;    // nothing else to do, don't record
 
     case TOKEN_BRACE:
       is_block = brace_is_block(dep, sd->tok.line_no);
@@ -186,49 +183,58 @@ static int simple_normal_step(simpledef *sd) {
       ++sd->curr;
       bzero(sd->curr, sizeof(sstack));
       sd->curr->is_block = is_block;
-      break;
+      return 0;
 
     case TOKEN_OP:
       // if this ++/-- attaches to left, don't record: shouldn't change value-ness
       if (is_double_addsub(sd->tok.p, sd->tok.len) && stack_has_value(dep)) {
-        return 0;
+        return -1;
       }
-      break;
+      return 0;
 
     case TOKEN_LIT:
-      if (!hoist_is_decl(dep, sd->tok.line_no)) {
-        break;
-      }
+      break;  // continue below
 
-      if (token_string(&(sd->tok), "async", 5)) {
-        break;  // TODO: record for next callback if "function" follows?
-      }
-
-      if (is_hoist_keyword(sd->tok.p, sd->tok.len)) {
-        // this pretends that instead of "function", we see EOF
-        // and the descendant level sees "function () {}", end popping back again
-        dep->t2 = dep->t1;
-        dep->t1 = sd->tok;
-        dep->t1.type = TOKEN_EOF;
-
-        // create faux-hoisted level
-        ++sd->curr;
-        ++dep;  // apply there
-        bzero(sd->curr, sizeof(sstack));
-        sd->curr->is_decl = 1;
-        printf("found hoisted: %.*s\n", sd->tok.len, sd->tok.p);
-
-      } else if (sd->td->next.type == TOKEN_COLON && !is_reserved_word(sd->tok.p, sd->tok.len)) {
-        // TODO(samthor): generate error if reserved word?
-        sd->tok.type = TOKEN_LABEL;
-      }
-
-      break;
-
+    default:
+      return 0;
   }
 
-  dep->t2 = dep->t1;
-  dep->t1 = sd->tok;
+  if (!hoist_is_decl(dep, sd->tok.line_no)) {
+    return 0;
+  }
+
+  if (sd->td->next.type == TOKEN_COLON) {
+    if (!is_reserved_word(sd->tok.p, sd->tok.len)) {
+      // TODO(samthor): generate error if reserved word?
+      sd->tok.type = TOKEN_LABEL;
+    }
+    return 0;
+  }
+
+  if (token_string(&(sd->tok), "async", 5)) {
+    return 0;  // TODO: record for next callback if "function" follows?
+  }
+
+  if (is_hoist_keyword(sd->tok.p, sd->tok.len)) {
+    // jump immediately to sublevel
+    dep = ++sd->curr;
+    bzero(sd->curr, sizeof(sstack));
+    dep->is_decl = 1;
+
+    // // this pretends that instead of "function", we see EOF
+    // // and the descendant level sees "function () {}", end popping back again
+    // dep->t2 = dep->t1;
+    // dep->t1 = sd->tok;
+    // dep->t1.type = TOKEN_EOF;
+
+    // // create faux-hoisted level
+    // ++sd->curr;
+    // ++dep;  // apply there
+    // bzero(sd->curr, sizeof(sstack));
+    // sd->curr->is_decl = 1;
+    printf("found hoisted: %.*s\n", sd->tok.len, sd->tok.p);
+  }
+
   return 0;
 }
 
@@ -240,33 +246,32 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
   sd.curr->is_block = 1;
 
   for (;;) {
-    int out;
-
-    if (td->next.type != TOKEN_SLASH) {
-      out = simple_normal_step(&sd);
-      if (out) {
-        return out;
-      }
-      cb(arg, &(sd.tok));
-      if (sd.tok.type == TOKEN_EOF) {
-        break;
-      }
-      continue;
+    int has_value = 1;
+    if (td->next.type == TOKEN_SLASH) {
+      has_value = stack_has_value(sd.curr);
     }
 
-    int has_value = stack_has_value(sd.curr);
     do {
       // next_token can reveal comments, loop until over them
-      out = prsr_next_token(td, &(sd.tok), has_value);
+      int out = prsr_next_token(td, &(sd.tok), has_value);
       if (out) {
         return out;
       }
       cb(arg, &(sd.tok));
     } while (sd.tok.type == TOKEN_COMMENT);
+    if (sd.tok.type == TOKEN_EOF) {
+      break;
+    }
 
-    // TODO: combine with simple?
-    sd.curr->t2 = sd.curr->t1;
-    sd.curr->t1 = sd.tok;
+    sstack *dep = sd.curr;
+
+    int skip = simple_step(&sd);
+    if (skip) {
+      continue;  // don't record in t1/t2
+    }
+
+    dep->t2 = dep->t1;
+    dep->t1 = sd.tok;
   }
 
   return 0;
