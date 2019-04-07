@@ -3,14 +3,20 @@
 #include "simple.h"
 #include "../utils.h"
 
-typedef struct {
+#define SSTACK_BLOCK    1
+#define SSTACK_DECL     2
+#define SSTACK_INTERNAL 3  // function or class
+#define SSTACK_ROOT     4  // top-level
 
+#define FLAG_EXTENDS_BRACE   1
+#define FLAG_ASYNC           1
+#define FLAG_GENERATOR       2
+
+typedef struct {
   token t1;
   token t2;
-  uint8_t t3type : 5;
-
-  uint8_t is_block : 1;
-  uint8_t is_decl : 1;
+  uint8_t stype : 3;
+  uint8_t flags : 2;
 } sstack;
 
 typedef struct {
@@ -28,45 +34,50 @@ static int token_string(token *t, char *s, int len) {
   return t->len == len && !memcmp(t->p, s, len);
 }
 
+static char sstack_internal_mode(sstack *dep) {
+  if (dep->stype != SSTACK_INTERNAL) {
+    return 0;
+  }
+  return (dep - 1)->t1.p[0];
+}
+
 static int is_optional_keyword(sstack *dep) {
+  uint8_t mask = 0;
+
   if (token_string(&(dep->t1), "await", 5)) {
-    // TODO: check async
-    printf("foolishly allowing 'await'\n");
-    return 1;
+    mask = FLAG_ASYNC;
+  } else if (token_string(&(dep->t1), "yield", 5)) {
+    mask = FLAG_GENERATOR;
+  } else {
+    return 0;
   }
 
-  if (token_string(&(dep->t1), "yield", 5)) {
-    // TODO: check generator
-    printf("foolishly allowing 'yield'\n");
-    return 1;
+  // look up for mask
+  // TODO(samthor): we don't record object-functions
+  for (sstack *p = dep; p->stype != SSTACK_ROOT; --p) {
+    char mode = sstack_internal_mode(p);
+    if (mode == 'f') {
+      return p->flags & mask;
+    }
   }
 
   return 0;
 }
 
-static int token_was_class(token *t) {
-  return t->type == TOKEN_INTERNAL && t->p[0] == 'c';
-}
-
 static int brace_is_block(sstack *dep, int line_no) {
-  if (dep->is_decl && (dep - 1)->t1.p[0] == 'c') {
-    // if we're a decl and parent is 'class', this is a dict
-    return 0;
-  }
-
-  if (token_was_class(&(dep->t1)) || token_was_class(&(dep->t2))) {
-    // we're a brace immediately after "class" or "class extends X", this is block
-    return 0;
+  char mode = sstack_internal_mode(dep);
+  if (mode) {
+    return mode == 'f';
   }
 
   switch (dep->t1.type) {
     case TOKEN_COLON:
       // (weird but valid) after a label, e.g. "foo: {}"
       // ALT: inside dict OR inside ?: combo
-      return dep->is_block && dep->t2.type == TOKEN_LABEL;
+      return dep->stype == SSTACK_BLOCK && dep->t2.type == TOKEN_LABEL;
 
     case TOKEN_EOF:    // start of level, e.g. "[ X"
-      return dep->is_block;
+      return dep->stype == SSTACK_BLOCK;
 
     case TOKEN_OP:
       return 0;
@@ -82,7 +93,7 @@ static int brace_is_block(sstack *dep, int line_no) {
 
       // nb. don't bother with `import var let const`, their grammar is limited anyway
 
-      if (is_asi_change(dep->t1.p, dep->t1.len)) {
+      if (token_string(&(dep->t1), "return", 6)) {
         return line_no != dep->t1.line_no;   // return \n { if () { ... } }
       }
 
@@ -98,6 +109,9 @@ static int brace_is_block(sstack *dep, int line_no) {
 
 static int stack_has_value(sstack *dep) {
   switch (dep->t1.type) {
+    case TOKEN_INTERNAL:
+      return 1;  // if this was a decl, then TOKEN_INTERNAL wouldn't be in stream
+
     case TOKEN_EOF:
       return 0;
 
@@ -108,15 +122,9 @@ static int stack_has_value(sstack *dep) {
       return 1;
 
     case TOKEN_BRACE:
-      if (dep->t3type == TOKEN_INTERNAL && dep->t2.type == TOKEN_PAREN) {
-        // 'function' '()' '{}'...
-        return 1;  // nb. this does NOT fire for hoisted since they don't leave paren/brace
-      }
-
-      if (!(dep + 1)->is_block || !dep->is_block) {
+      if (!(dep + 1)->stype || !dep->stype) {
         return 1;  // prev was dict OR we are non-block
       }
-
       return 0;
 
     case TOKEN_LIT:
@@ -124,7 +132,7 @@ static int stack_has_value(sstack *dep) {
         return 0;
       }
 
-      return !is_operates(dep->t1.p, dep->t1.len);
+      return !is_always_operates(dep->t1.p, dep->t1.len);
 
     case TOKEN_STRING:
     case TOKEN_REGEXP:
@@ -136,7 +144,7 @@ static int stack_has_value(sstack *dep) {
 }
 
 static int hoist_is_decl(sstack *dep, int line_no) {
-  if (!dep->is_block) {
+  if (!dep->stype) {
     return 0;
   }
 
@@ -163,6 +171,14 @@ static int hoist_is_decl(sstack *dep, int line_no) {
   return out;
 }
 
+static sstack *stack_inc(simpledef *sd, uint8_t stype) {
+  // TODO: check bounds
+  ++sd->curr;
+  bzero(sd->curr, sizeof(sstack));
+  sd->curr->stype = stype;
+  return sd->curr;
+}
+
 static int read_next(simpledef *sd, int has_value) {
   do {
     // prsr_next_token can reveal comments, loop until over them
@@ -175,15 +191,17 @@ static int read_next(simpledef *sd, int has_value) {
   return 0;
 }
 
-static void process_function(simpledef *sd) {
+static uint8_t process_function(simpledef *sd) {
   token *next = &(sd->td->next);
-  int is_async = (sd->curr->t1.type == TOKEN_LIT && token_string(&(sd->curr->t1), "async", 5));
-  int is_generator = 0;
+  uint8_t flags = 0;
+  if (sd->curr->t1.type == TOKEN_LIT && token_string(&(sd->curr->t1), "async", 5)) {
+    flags = FLAG_ASYNC;
+  }
 
   // peek for generator star
   if (next->type == TOKEN_OP && next->len == 1 && next->p[0] == '*') {
     read_next(sd, 0);
-    is_generator = 1;
+    flags |= FLAG_GENERATOR;
   }
 
   // peek for function name
@@ -193,50 +211,72 @@ static void process_function(simpledef *sd) {
 
   // FIXME: do something with is_generator + is_async
   // FIXME: need this for => and methods in dicts
-  printf("found function async=%d generator=%d\n", is_async, is_generator);
+  printf("found function async=%d generator=%d\n", flags & FLAG_ASYNC, flags & FLAG_GENERATOR);
+  return flags;
 }
 
-static void process_class(simpledef *sd) {
+static uint8_t process_class(simpledef *sd) {
   token *next = &(sd->td->next);
 
   // peek for name
   if (next->type == TOKEN_LIT && !token_string(next, "extends", 7)) {
     read_next(sd, 0);  // FIXME: we can emit this as a lit?
-    printf("... name=%.*s\n", sd->tok.len, sd->tok.p);
+    // printf("... name=%.*s\n", sd->tok.len, sd->tok.p);
   }
 
   // peek for extends
   if (next->type == TOKEN_LIT && token_string(next, "extends", 7)) {
     read_next(sd, 0);  // FIXME: we can emit this as a keyword?
+
+    if (next->type == TOKEN_BRACE) {
+      // "class Foo extends {} {}" is nonsensical but valid; record it so both braces are dicts
+      return FLAG_EXTENDS_BRACE;
+    }
   }
+
+  return 0;
 }
 
 static int simple_step(simpledef *sd) {
   sstack *dep = sd->curr;
-  uint8_t is_block = 0;
+  uint8_t stype = 0;
 
   switch (sd->tok.type) {
     case TOKEN_CLOSE:
       --sd->curr;  // pop stack
-
-      if (sd->curr->is_decl && sd->curr->t1.type == TOKEN_BRACE) {
-        // ... if we're at decl level and just had a brace open/close
-        --sd->curr;
+      if (sd->curr->t1.type != TOKEN_BRACE) {
+        return -1;
       }
 
+      char mode = sstack_internal_mode(sd->curr);
+      if (!mode) {
+        return -1;  // random {}, not a special mode
+      }
+
+      // "class Foo extends {} {}" is nonsensical but valid; first brace ended
+      if (mode == 'c' && sd->curr->flags == FLAG_EXTENDS_BRACE) {
+        sd->curr->flags = 0;
+        return -1;
+      }
+      --sd->curr;  // class or function done
+
+      // ... also ended a decl
+      if (sd->curr->stype == SSTACK_DECL) {
+        --sd->curr;
+      }
       return -1;    // nothing else to do, don't record
 
     case TOKEN_BRACE:
-      is_block = brace_is_block(dep, sd->tok.line_no);
-      printf("brace_is_block: %d\n", is_block);
+      if (brace_is_block(dep, sd->tok.line_no)) {
+        stype = SSTACK_BLOCK;
+      }
+      printf("brace_is_block: %d\n", stype == SSTACK_BLOCK);
       // fall-through
 
     case TOKEN_ARRAY:
     case TOKEN_PAREN:
     case TOKEN_T_BRACE:
-      ++sd->curr;
-      bzero(sd->curr, sizeof(sstack));
-      sd->curr->is_block = is_block;
+      stack_inc(sd, stype);
       return 0;
 
     case TOKEN_OP:
@@ -269,23 +309,30 @@ static int simple_step(simpledef *sd) {
     return 0;
   }
 
-  // if this is a hoisted (declaration) class/function, increase level: this leaves TOKEN_INTERNAL
-  // marker in the "regular flow", but we ignore it (no value as decl)
-  if (is_decl) {
-    dep = ++sd->curr;
-    bzero(sd->curr, sizeof(sstack));
-    dep->is_decl = 1;
-  }
-
   token fake = sd->tok;  // process_... consumes tokens, so copy
+  uint8_t flags;
   if (fake.p[0] == 'f') {
-    process_function(sd);
+    flags = process_function(sd);
   } else {
-    process_class(sd);
+    flags = process_class(sd);
   }
   fake.type = TOKEN_INTERNAL;
-  sd->tok = fake;  // pretend the consumed tokens were a single TOKEN_INTERNAL
 
+  if (is_decl) {
+    // if this is hoisted, then don't leave anything in the regular flow
+    // it's like we were never here!
+    dep = stack_inc(sd, SSTACK_DECL);
+
+    // ... but write inside DECL, before SSTACK_INTERNAL
+    dep->t1 = fake;
+    dep = stack_inc(sd, SSTACK_INTERNAL);
+    dep->flags = flags;
+    return -1;  // don't write us
+  }
+
+  sd->tok = fake;
+  dep = stack_inc(sd, SSTACK_INTERNAL);
+  dep->flags = flags;
   return 0;
 }
 
@@ -296,7 +343,10 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
   sd.td = td;
   sd.cb = cb;
   sd.arg = arg;
-  sd.curr->is_block = 1;
+
+  sd.curr->stype = SSTACK_ROOT;
+  ++sd.curr;
+  sd.curr->stype = SSTACK_BLOCK;
 
   for (;;) {
     int has_value = 1;
@@ -319,7 +369,6 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
       continue;  // don't record in t1/t2
     }
 
-    dep->t3type = dep->t2.type;
     dep->t2 = dep->t1;
     dep->t1 = sd.tok;
   }

@@ -166,18 +166,19 @@ int is_block_creator(char *s, int len) {
 }
 
 // keywords that operate on objects
-int is_operates(char *s, int len) {
-  // nb. some of these are syntax errors, and some _missing_ are syntax errors
-  // nb. does NOT include `let` as it can be used as a keyword
+int is_always_operates(char *s, int len) {
+  // * some of these are syntax errors, and some _missing_ are syntax errors
+  // * does NOT include `let` as it can be used as a keyword
+  // * does NOT include `await` or `yield` as they are optional
   static const char v[] =
-    " await break case const continue default delete do else export extends finally"
-    " new return throw try typeof var void yield ";
+    " break case const continue default delete do else export extends finally"
+    " new return throw try typeof var void ";
   return in_space_string(v, s, len);
 }
 
 int is_dict_after(char *s, int len) {
-  // nb. await/yield are optional
-  static const char v[] = " await case delete extends in instanceof new return throw typeof void yield ";
+  // * does NOT include `await` or `yield` as they are optional
+  static const char v[] = " case delete extends in instanceof new return throw typeof void ";
   return in_space_string(v, s, len);
 }
 
@@ -187,9 +188,4 @@ int is_async(char *s, int len) {
 
 int is_case(char *s, int len) {
   return len == 4 && !memcmp(s, "case", 4);
-}
-
-int is_asi_change(char *s, int len) {
-  return (len == 6 && !memcmp(s, "return", 6)) ||
-      (len == 5 && !memcmp(s, "yield", 5));
 }
