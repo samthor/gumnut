@@ -180,8 +180,6 @@ static void process_function(simpledef *sd) {
   int is_async = (sd->curr->t1.type == TOKEN_LIT && token_string(&(sd->curr->t1), "async", 5));
   int is_generator = 0;
 
-  token fake = sd->tok;
-
   // peek for generator star
   if (next->type == TOKEN_OP && next->len == 1 && next->p[0] == '*') {
     read_next(sd, 0);
@@ -196,15 +194,10 @@ static void process_function(simpledef *sd) {
   // FIXME: do something with is_generator + is_async
   // FIXME: need this for => and methods in dicts
   printf("found function async=%d generator=%d\n", is_async, is_generator);
-
-  // push a fake thing onto our stack (will be 'function')
-  fake.type = TOKEN_INTERNAL;
-  sd->tok = fake;
 }
 
 static void process_class(simpledef *sd) {
   token *next = &(sd->td->next);
-  token fake = sd->tok;
 
   // peek for name
   if (next->type == TOKEN_LIT && !token_string(next, "extends", 7)) {
@@ -216,10 +209,6 @@ static void process_class(simpledef *sd) {
   if (next->type == TOKEN_LIT && token_string(next, "extends", 7)) {
     read_next(sd, 0);  // FIXME: we can emit this as a keyword?
   }
-
-  // push a fake thing onto our stack (will be 'class')
-  fake.type = TOKEN_INTERNAL;
-  sd->tok = fake;
 }
 
 static int simple_step(simpledef *sd) {
@@ -288,11 +277,14 @@ static int simple_step(simpledef *sd) {
     dep->is_decl = 1;
   }
 
-  if (sd->tok.p[0] == 'f') {
+  token fake = sd->tok;  // process_... consumes tokens, so copy
+  if (fake.p[0] == 'f') {
     process_function(sd);
   } else {
     process_class(sd);
   }
+  fake.type = TOKEN_INTERNAL;
+  sd->tok = fake;  // pretend the consumed tokens were a single TOKEN_INTERNAL
 
   return 0;
 }
