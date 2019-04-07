@@ -336,7 +336,6 @@ static int simple_step(simpledef *sd) {
       // nb. FLAG_DICT_VALUE is unique so we don't check sstack_is_dict
       if (sd->curr->flags & FLAG_DICT_VALUE) {
         sd->curr->flags &= ~FLAG_DICT_VALUE;
-        printf("ENDED : in dict\n");
       }
       return 0;
 
@@ -344,7 +343,6 @@ static int simple_step(simpledef *sd) {
       if (!sstack_is_dict(sd->curr)) {
         return 0;
       }
-      printf("found : in dict\n");
       sd->curr->flags = FLAG_DICT_VALUE;
       return 0;
 
