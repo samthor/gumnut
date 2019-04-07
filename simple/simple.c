@@ -18,6 +18,8 @@
 // for empty SSTACK (but unique for safety)
 #define FLAG_DICT_VALUE      4 // between ':' and ',' in dict
 
+static const char * functionStr = "f";
+
 typedef struct {
   token t1;
   token t2;
@@ -222,9 +224,7 @@ static uint8_t process_function(simpledef *sd) {
     read_next(sd, 0);  // FIXME: we can emit this as a lit?
   }
 
-  // FIXME: do something with is_generator + is_async
-  // FIXME: need this for => and methods in dicts
-  printf("found function async=%d generator=%d\n", flags & FLAG_ASYNC, flags & FLAG_GENERATOR);
+  // FIXME: need this for =>
   return flags;
 }
 
@@ -234,7 +234,6 @@ static uint8_t process_class(simpledef *sd) {
   // peek for name
   if (next->type == TOKEN_LIT && !token_string(next, "extends", 7)) {
     read_next(sd, 0);  // FIXME: we can emit this as a lit?
-    // printf("... name=%.*s\n", sd->tok.len, sd->tok.p);
   }
 
   // peek for extends
@@ -253,6 +252,40 @@ static uint8_t process_class(simpledef *sd) {
 static int simple_step(simpledef *sd) {
   sstack *dep = sd->curr;
   uint8_t stype = 0;
+
+  if (sstack_is_dict(sd->curr) && !(sd->curr->flags & FLAG_DICT_VALUE)) {
+    uint8_t flags = 0;
+
+    // look for 'async' without following '('
+    if (sd->tok.type == TOKEN_LIT &&
+        sd->td->next.type != TOKEN_PAREN &&
+        token_string(&(sd->tok), "async", 5)) {
+      // found, consume
+      flags |= FLAG_ASYNC;
+      read_next(sd, 0);
+    }
+
+    // look for '*'
+    if (sd->tok.type == TOKEN_OP && token_string(&(sd->tok), "*", 1)) {
+      flags |= FLAG_GENERATOR;
+      read_next(sd, 0);
+    }
+
+    // if we found something OR the next would open a paren (end of def), mark as a function
+    if (flags || sd->td->next.type == TOKEN_PAREN) {
+      token fake;
+      bzero(&fake, sizeof(token));
+      fake.type = TOKEN_INTERNAL;
+      fake.p = (char *) functionStr;  // FIXME: better way to do this?
+      fake.len = 1;
+
+      sd->tok = fake;  // caller writes us to t1 in the regular flow
+      dep = stack_inc(sd, SSTACK_INTERNAL);
+      dep->flags = flags;
+
+      return 0;
+    }
+  }
 
   switch (sd->tok.type) {
     case TOKEN_CLOSE:
@@ -359,7 +392,7 @@ static int simple_step(simpledef *sd) {
     return -1;  // don't write us
   }
 
-  sd->tok = fake;
+  sd->tok = fake;  // caller writes us to t1 in the regular flow
   dep = stack_inc(sd, SSTACK_INTERNAL);
   dep->flags = flags;
   return 0;

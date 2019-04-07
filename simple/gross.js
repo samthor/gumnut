@@ -1,3 +1,16 @@
+async function test() {
+  await /x/;
+  const blah = {
+    async x() {
+      await / z /
+      456;
+    },
+    y() {
+      await / q /
+      456;
+    },
+  };
+}
 
 class Foo {
 
