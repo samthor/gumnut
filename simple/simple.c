@@ -3,20 +3,26 @@
 #include "simple.h"
 #include "../utils.h"
 
-#define SSTACK_BLOCK    1
-#define SSTACK_DECL     2
-#define SSTACK_INTERNAL 3  // function or class
-#define SSTACK_ROOT     4  // top-level
+#define SSTACK_ROOT       1  // top-level
+#define SSTACK_INTERNAL   2  // function or class
+#define SSTACK_BLOCK      3
+#define SSTACK_DECL       4
 
+// for SSTACK_INTERNAL mode='c'
 #define FLAG_EXTENDS_BRACE   1
+
+// for SSTACK_INTERNAL mode='f'
 #define FLAG_ASYNC           1
 #define FLAG_GENERATOR       2
+
+// for empty SSTACK (but unique for safety)
+#define FLAG_DICT_VALUE      4 // between ':' and ',' in dict
 
 typedef struct {
   token t1;
   token t2;
   uint8_t stype : 3;
-  uint8_t flags : 2;
+  uint8_t flags : 3;
 } sstack;
 
 typedef struct {
@@ -39,6 +45,10 @@ static char sstack_internal_mode(sstack *dep) {
     return 0;
   }
   return (dep - 1)->t1.p[0];
+}
+
+static int sstack_is_dict(sstack *dep) {
+  return !dep->stype && (dep - 1)->t1.type == TOKEN_BRACE;
 }
 
 static int is_optional_keyword(sstack *dep) {
@@ -79,7 +89,10 @@ static int brace_is_block(sstack *dep, int line_no) {
     case TOKEN_EOF:    // start of level, e.g. "[ X"
       return dep->stype == SSTACK_BLOCK;
 
+    case TOKEN_COMMA:
+    case TOKEN_SPREAD:  // nonsensical, but valid: "[...{}]"
     case TOKEN_OP:
+    case TOKEN_TERNARY:
       return 0;
 
     case TOKEN_LIT:
@@ -284,6 +297,22 @@ static int simple_step(simpledef *sd) {
       if (is_double_addsub(sd->tok.p, sd->tok.len) && stack_has_value(dep)) {
         return -1;
       }
+      return 0;
+
+    case TOKEN_COMMA:
+      // nb. FLAG_DICT_VALUE is unique so we don't check sstack_is_dict
+      if (sd->curr->flags & FLAG_DICT_VALUE) {
+        sd->curr->flags &= ~FLAG_DICT_VALUE;
+        printf("ENDED : in dict\n");
+      }
+      return 0;
+
+    case TOKEN_COLON:
+      if (!sstack_is_dict(sd->curr)) {
+        return 0;
+      }
+      printf("found : in dict\n");
+      sd->curr->flags = FLAG_DICT_VALUE;
       return 0;
 
     case TOKEN_LIT:
