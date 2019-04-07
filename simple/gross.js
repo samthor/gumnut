@@ -24,6 +24,7 @@ class Foo {
 }
 /123/
 
+async yield => 1;
 
 what:
 {

@@ -288,6 +288,20 @@ static int simple_step(simpledef *sd) {
   }
 
   switch (sd->tok.type) {
+    case TOKEN_ARROW:
+      if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_LIT)) {
+        return 0;  // not a valid construct
+      }
+
+      uint8_t flags = 0;
+      if (sd->curr->t2.type == TOKEN_LIT && token_string(&(sd->curr->t2), "async", 5)) {
+         flags = FLAG_ASYNC;
+      }
+
+      // TODO: push for {} or single statement :(
+      printf("found arrow, flags=%d\n", flags);
+      return 0;
+
     case TOKEN_CLOSE:
       --sd->curr;  // pop stack
       if (sd->curr->t1.type != TOKEN_BRACE) {
