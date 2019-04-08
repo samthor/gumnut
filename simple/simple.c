@@ -18,7 +18,6 @@
 // for empty SSTACK (but unique for safety)
 #define FLAG_DICT_VALUE      4  // between ':' and ',' in dict
 
-
 typedef struct {
   token t1;
   token t2;
@@ -82,18 +81,14 @@ static int brace_is_block(sstack *dep, int line_no) {
   }
 
   switch (dep->t1.type) {
-    case TOKEN_COLON:
-      // (weird but valid) after a label, e.g. "foo: {}"
-      // ALT: inside dict OR inside ?: combo
-      return dep->stype == SSTACK_BLOCK && dep->t2.type == TOKEN_LABEL;
-
     case TOKEN_EOF:    // start of level, e.g. "[ X"
+    case TOKEN_COLON:  // "foo: {}" for block, "{key: {}}" in dict-like
       return dep->stype == SSTACK_BLOCK;
 
     case TOKEN_COMMA:
-    case TOKEN_SPREAD:  // nonsensical, but valid: "[...{}]"
+    case TOKEN_SPREAD:   // nonsensical, but valid: "[...{}]"
     case TOKEN_OP:
-    case TOKEN_TERNARY:
+    case TOKEN_TERNARY:  // following a "? ... :" stack
       return 0;
 
     case TOKEN_LIT:
