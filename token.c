@@ -132,7 +132,7 @@ static eat_out eat_token(char *p) {
       return _ret(1, TOKEN_TERNARY);
 
     case ':':
-      return _ret(1, TOKEN_COLON);
+      return _ret(1, TOKEN_COLON);  // nb. might change to TOKEN_CLOSE in parent
 
     case ',':
       return _ret(1, TOKEN_COMMA);
@@ -352,6 +352,7 @@ static void eat_next(tokendef *d) {
   d->next.p = p;
   d->next.len = eat.len;
 
+  // special-case token
   switch (d->next.type) {
     case TOKEN_STRING: {
       // consume string (assume eat.len is zero)
@@ -364,10 +365,9 @@ static void eat_next(tokendef *d) {
     }
 
     case TOKEN_COLON:
+      // inside ternary stack, close it
       if (d->depth && d->stack[d->depth - 1] == TOKEN_TERNARY) {
         d->next.type = TOKEN_CLOSE;
-      } else {
-
       }
       break;
   }
