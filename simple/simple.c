@@ -16,15 +16,14 @@
 #define FLAG_GENERATOR       2
 
 // for empty SSTACK (but unique for safety)
-#define FLAG_DICT_VALUE      4 // between ':' and ',' in dict
+#define FLAG_DICT_VALUE      4  // between ':' and ',' in dict
 
-static const char * functionStr = "f";
 
 typedef struct {
   token t1;
   token t2;
-  uint8_t stype : 3;
-  uint8_t flags : 3;
+  uint8_t stype : 4;
+  uint8_t flags : 4;
 } sstack;
 
 typedef struct {
@@ -43,10 +42,10 @@ static int token_string(token *t, char *s, int len) {
 }
 
 static char sstack_internal_mode(sstack *dep) {
-  if (dep->stype != SSTACK_INTERNAL) {
-    return 0;
+  if (dep->stype == SSTACK_INTERNAL) {
+    return (dep - 1)->t1.p[0];
   }
-  return (dep - 1)->t1.p[0];
+  return 0;
 }
 
 static int sstack_is_dict(sstack *dep) {
@@ -224,12 +223,12 @@ static uint8_t process_function(simpledef *sd) {
     read_next(sd, 0);  // FIXME: we can emit this as a lit?
   }
 
-  // FIXME: need this for =>
   return flags;
 }
 
 static uint8_t process_class(simpledef *sd) {
   token *next = &(sd->td->next);
+  uint8_t flags = 0;
 
   // peek for name
   if (next->type == TOKEN_LIT && !token_string(next, "extends", 7)) {
@@ -242,17 +241,35 @@ static uint8_t process_class(simpledef *sd) {
 
     if (next->type == TOKEN_BRACE) {
       // "class Foo extends {} {}" is nonsensical but valid; record it so both braces are dicts
-      return FLAG_EXTENDS_BRACE;
+      flags = FLAG_EXTENDS_BRACE;
     }
   }
 
-  return 0;
+  return flags;
+}
+
+static sstack *stack_inc_fakefunction(simpledef *sd, uint8_t flags) {
+  static const char *functionStr = "f";
+
+  token fake;
+  bzero(&fake, sizeof(token));
+  fake.type = TOKEN_INTERNAL;
+  fake.p = (char *) functionStr;
+  fake.len = 1;
+
+  sd->tok = fake;  // caller writes us to t1 in the regular flow
+  sstack *dep = stack_inc(sd, SSTACK_INTERNAL);
+  if (dep) {
+    dep->flags = flags;
+  }
+  return dep;
 }
 
 static int simple_step(simpledef *sd) {
   sstack *dep = sd->curr;
   uint8_t stype = 0;
 
+  // left-side of dictionary
   if (sstack_is_dict(sd->curr) && !(sd->curr->flags & FLAG_DICT_VALUE)) {
     uint8_t flags = 0;
 
@@ -273,16 +290,8 @@ static int simple_step(simpledef *sd) {
 
     // if we found something OR the next would open a paren (end of def), mark as a function
     if (flags || sd->td->next.type == TOKEN_PAREN) {
-      token fake;
-      bzero(&fake, sizeof(token));
-      fake.type = TOKEN_INTERNAL;
-      fake.p = (char *) functionStr;  // FIXME: better way to do this?
-      fake.len = 1;
-
-      sd->tok = fake;  // caller writes us to t1 in the regular flow
-      dep = stack_inc(sd, SSTACK_INTERNAL);
-      dep->flags = flags;
-
+      // ... this replaces "async * foo" with a TOKEN_INTERNAL in stream
+      dep = stack_inc_fakefunction(sd, flags);
       return 0;
     }
   }
@@ -295,11 +304,19 @@ static int simple_step(simpledef *sd) {
 
       uint8_t flags = 0;
       if (sd->curr->t2.type == TOKEN_LIT && token_string(&(sd->curr->t2), "async", 5)) {
-         flags = FLAG_ASYNC;
+        flags = FLAG_ASYNC;
+      }
+
+      if (sd->td->next.type == TOKEN_BRACE) {
+        // the sensible arrow function case, with a proper body
+        // e.g. "() => { statements }"
+        // ... this replaces "=>" with a TOKEN_INTERNAL in stream
+        dep = stack_inc_fakefunction(sd, flags);
+        return 0;
       }
 
       // TODO: push for {} or single statement :(
-      printf("found arrow, flags=%d\n", flags);
+      printf("found arrow with statement only :(, flags=%d\n", flags);
       return 0;
 
     case TOKEN_CLOSE:
