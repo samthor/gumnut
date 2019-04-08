@@ -26,16 +26,6 @@ typedef struct {
   int type;
 } eat_out;
 
-static void stack_inc(tokendef *d, uint8_t type) {
-  d->stack[d->depth] = type;
-  ++d->depth;
-}
-
-static uint8_t stack_dec(tokendef *d) {
-  --d->depth;
-  return d->stack[d->depth];
-}
-
 static int consume_slash_op(char *p) {
   // can match "/" or "/="
   if (p[1] == '=') {
@@ -398,9 +388,6 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
   memcpy(out, &d->next, sizeof(token));
 
   // actually enact token
-  if (d->depth == __STACK_SIZE) {
-    return ERROR__STACK;
-  }
   switch (out->type) {
     case TOKEN_SLASH:
       // consume this token as lookup can't know what it was
@@ -421,14 +408,17 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
     case TOKEN_ARRAY:
     case TOKEN_BRACE:
     case TOKEN_T_BRACE:
-      stack_inc(d, out->type);
+      if (d->depth == __STACK_SIZE - 1) {
+        return ERROR__STACK;
+      }
+      d->stack[d->depth++] = out->type;
       break;
 
     case TOKEN_CLOSE:
       if (!d->depth) {
         return ERROR__STACK;
       }
-      uint8_t type = stack_dec(d);
+      uint8_t type = d->stack[--d->depth];
       if (type == TOKEN_T_BRACE) {
         d->flag |= FLAG__RESUME_LIT;
       }
