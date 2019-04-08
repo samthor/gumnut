@@ -11,7 +11,7 @@
 // for SSTACK_INTERNAL mode='c'
 #define FLAG_EXTENDS_BRACE   1
 
-// for SSTACK_INTERNAL mode='f'
+// for SSTACK_INTERNAL mode='f'/'s'
 #define FLAG_ASYNC           1
 #define FLAG_GENERATOR       2
 
@@ -66,7 +66,7 @@ static int is_optional_keyword(sstack *dep) {
   // TODO(samthor): we don't record object-functions
   for (sstack *p = dep; p->stype != SSTACK_ROOT; --p) {
     char mode = sstack_internal_mode(p);
-    if (mode == 'f') {
+    if (mode != 'c') {
       return p->flags & mask;
     }
   }
@@ -76,7 +76,8 @@ static int is_optional_keyword(sstack *dep) {
 
 static int brace_is_block(sstack *dep, int line_no) {
   char mode = sstack_internal_mode(dep);
-  if (mode) {
+  if (mode && mode != 's') {
+    // "() => {}" are set as block on their creation, because they have a "{}"
     return mode == 'f';
   }
 
@@ -138,9 +139,8 @@ static int stack_has_value(sstack *dep) {
 
     case TOKEN_LIT:
       if (is_optional_keyword(dep)) {
-        return 0;
+        return 0;  // async or await are valid, they have no value
       }
-
       return !is_always_operates(dep->t1.p, dep->t1.len);
 
     case TOKEN_STRING:
@@ -260,6 +260,33 @@ static sstack *stack_inc_fakefunction(simpledef *sd, uint8_t flags) {
   return dep;
 }
 
+static int maybe_close_statement(simpledef *sd) {
+  if (sstack_internal_mode(sd->curr) != 's') {
+    return 0;
+  }
+
+  // immediate reasons to bail out
+  switch (sd->tok.type) {
+    case TOKEN_EOF:
+    case TOKEN_SEMICOLON:
+    case TOKEN_COMMA:
+    case TOKEN_CLOSE:
+      return 1;
+  }
+
+  if (sd->curr->t1.type == TOKEN_EOF) {
+    return 0;  // allow whatever in first place, even on different line
+  }
+
+  // if this position would be a dict, that's OK
+  if (!brace_is_block(sd->curr, sd->tok.line_no)) {
+    return 0;
+  }
+
+  // otherwise, close on new line
+  return sd->tok.line_no != sd->curr->t1.line_no;
+}
+
 static int simple_step(simpledef *sd) {
   uint8_t stype = 0;
 
@@ -290,6 +317,11 @@ static int simple_step(simpledef *sd) {
     }
   }
 
+  // try to close an outstanding "() => ..."
+  if (maybe_close_statement(sd)) {
+    --sd->curr;
+  }
+
   switch (sd->tok.type) {
     case TOKEN_ARROW:
       if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_LIT)) {
@@ -309,8 +341,15 @@ static int simple_step(simpledef *sd) {
         return 0;
       }
 
-      // TODO: push for {} or single statement :(
-      printf("found arrow with statement only :(, flags=%d\n", flags);
+      if (sstack_internal_mode(sd->curr) == 's') {
+        // valid but odd: "() => () => ...", just supercede as we go along
+        // or even e.g. "() => 1 + () => ..."
+        (sd->curr - 1)->flags = flags;  // update flags
+      } else {
+        stack_inc_fakefunction(sd, flags);
+        static const char *statementStr = "s";  // FIXME: put somewhere
+        sd->tok.p = (char *) statementStr;
+      }
       return 0;
 
     case TOKEN_CLOSE:
@@ -320,7 +359,7 @@ static int simple_step(simpledef *sd) {
       }
 
       char mode = sstack_internal_mode(sd->curr);
-      if (!mode) {
+      if (!mode || mode == 's') {
         return -1;  // random {}, not a special mode
       }
 
@@ -335,7 +374,7 @@ static int simple_step(simpledef *sd) {
       if (sd->curr->stype == SSTACK_DECL) {
         --sd->curr;
       }
-      return -1;    // nothing else to do, don't record
+      return -1; // nothing else to do, don't record
 
     case TOKEN_BRACE:
       if (brace_is_block(sd->curr, sd->tok.line_no)) {
@@ -447,14 +486,12 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
     if (out) {
       return out;
     }
-    if (sd.tok.type == TOKEN_EOF) {
-      break;
-    }
 
     sstack *dep = sd.curr;
-
     int skip = simple_step(&sd);
-    if (skip) {
+    if (sd.tok.type == TOKEN_EOF) {
+      break;  // process EOF but leave after
+    } else if (skip) {
       continue;  // don't record in t1/t2
     }
 
@@ -462,5 +499,8 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
     dep->t1 = sd.tok;
   }
 
+  if (sd.curr != sd.stack + 1) {
+    return ERROR__STACK;
+  }
   return 0;
 }
