@@ -26,24 +26,14 @@ typedef struct {
   int type;
 } eat_out;
 
-static void stack_inc(tokendef *d, int t_brace) {
-  uint32_t *p = d->stack + (d->depth >> 5);
-  uint32_t set = (uint32_t) 1 << (d->depth & 31);
-  if (t_brace) {
-    *p |= set;  // set bit
-  } else {
-    *p &= ~set; // clear bit
-  }
+static void stack_inc(tokendef *d, uint8_t type) {
+  d->stack[d->depth] = type;
   ++d->depth;
 }
 
-static int stack_dec(tokendef *d) {
+static uint8_t stack_dec(tokendef *d) {
   --d->depth;
-
-  uint32_t *p = d->stack + (d->depth >> 5);
-  uint32_t check = (uint32_t) 1 << (d->depth & 31);
-
-  return *p & check;
+  return d->stack[d->depth];
 }
 
 static int consume_slash_op(char *p) {
@@ -360,16 +350,26 @@ static void eat_next(tokendef *d) {
   d->next.type = eat.type;
   d->next.line_no = d->line_no;
   d->next.p = p;
+  d->next.len = eat.len;
 
-  if (d->next.type == TOKEN_STRING) {
-    // consume string (assume eat.len is zero)
-    int litflag = 0;
-    d->next.len = consume_string(p, &d->line_no, &litflag);
-    if (litflag) {
-      d->flag = FLAG__PENDING_T_BRACE;
+  switch (d->next.type) {
+    case TOKEN_STRING: {
+      // consume string (assume eat.len is zero)
+      int litflag = 0;
+      d->next.len = consume_string(p, &d->line_no, &litflag);
+      if (litflag) {
+        d->flag = FLAG__PENDING_T_BRACE;
+      }
+      break;
     }
-  } else {
-    d->next.len = eat.len;
+
+    case TOKEN_COLON:
+      if (d->depth && d->stack[d->depth - 1] == TOKEN_TERNARY) {
+        d->next.type = TOKEN_CLOSE;
+      } else {
+
+      }
+      break;
   }
 }
 
@@ -404,7 +404,7 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
   switch (out->type) {
     case TOKEN_SLASH:
       // consume this token as lookup can't know what it was
-      if (out->p[0] != '/') {
+      if (out->p[0] != '/' || has_value < 0) {
         return ERROR__INTERNAL;
       } else if (has_value) {
         out->type = TOKEN_OP;
@@ -416,22 +416,23 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
       d->next.len = out->len;
       break;
 
+    case TOKEN_TERNARY:
     case TOKEN_PAREN:
     case TOKEN_ARRAY:
     case TOKEN_BRACE:
-      stack_inc(d, 0);
-      break;
-
     case TOKEN_T_BRACE:
-      stack_inc(d, 1);
+      stack_inc(d, out->type);
       break;
 
     case TOKEN_CLOSE:
       if (!d->depth) {
         return ERROR__STACK;
-      } else if (stack_dec(d)) {
+      }
+      uint8_t type = stack_dec(d);
+      if (type == TOKEN_T_BRACE) {
         d->flag |= FLAG__RESUME_LIT;
       }
+      break;
   }
 
   eat_next(d);

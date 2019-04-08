@@ -31,7 +31,7 @@ typedef struct {
   // depth/flag used to record ${} state (resume literal once brace done)
   uint8_t flag : 2;
   uint16_t depth : __STACK_SIZE_BITS;
-  uint32_t stack[((__STACK_SIZE - 1) >> 5) + 1];
+  uint8_t stack[__STACK_SIZE];
 } tokendef;
 
 int prsr_next_token(tokendef *d, token *out, int has_value);

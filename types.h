@@ -46,13 +46,13 @@ typedef struct {
 #define TOKEN_DOT       4
 #define TOKEN_OP        5   // can include 'in', 'instanceof'
 #define TOKEN_ARROW     6
-#define TOKEN_COLON     7
-#define TOKEN_TERNARY   8
+#define TOKEN_COLON     7   // used in label
+#define TOKEN_TERNARY   8   // starts ternary block, ends with ':'
 #define TOKEN_BRACE     9
 #define TOKEN_ARRAY     10
 #define TOKEN_PAREN     11
 #define TOKEN_T_BRACE   12  // '${' within template literal
-#define TOKEN_CLOSE     13  // '}', ']' or ')'
+#define TOKEN_CLOSE     13  // '}', ']', ')' or ':'
 
 // variable: could be anything
 #define TOKEN_COMMENT   14
