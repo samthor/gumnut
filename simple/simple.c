@@ -344,7 +344,7 @@ static int simple_step(simpledef *sd) {
       if (sstack_internal_mode(sd->curr) == 's') {
         // valid but odd: "() => () => ...", just supercede as we go along
         // or even e.g. "() => 1 + () => ..."
-        (sd->curr - 1)->flags = flags;  // update flags
+        sd->curr->flags = flags;  // update flags
       } else {
         stack_inc_fakefunction(sd, flags);
         static const char *statementStr = "s";  // FIXME: put somewhere
