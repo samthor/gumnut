@@ -1,3 +1,6 @@
+var
+{ info }
+
 async function test() {
   await /x/;
   const blah = {

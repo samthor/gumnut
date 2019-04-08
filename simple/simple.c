@@ -63,7 +63,6 @@ static int is_optional_keyword(sstack *dep) {
   }
 
   // look up for mask
-  // TODO(samthor): we don't record object-functions
   for (sstack *p = dep; p->stype != SSTACK_ROOT; --p) {
     char mode = sstack_internal_mode(p);
     if (mode != 'c') {
@@ -215,7 +214,7 @@ static uint8_t process_function(simpledef *sd) {
 
   // peek for function name
   if (next->type == TOKEN_LIT) {
-    read_next(sd, 0);  // FIXME: we can emit this as a lit?
+    read_next(sd, 0);  // FIXME: we can emit this as a symbol?
   }
 
   return flags;
@@ -227,7 +226,7 @@ static uint8_t process_class(simpledef *sd) {
 
   // peek for name
   if (next->type == TOKEN_LIT && !token_string(next, "extends", 7)) {
-    read_next(sd, 0);  // FIXME: we can emit this as a lit?
+    read_next(sd, 0);  // FIXME: we can emit this as a symbol?
   }
 
   // peek for extends

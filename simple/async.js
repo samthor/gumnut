@@ -1,14 +1,12 @@
-abc = {def:123};
+var async = 123;
+var await = (v) => console.info(v);
+console.info(await);
 
-x = abc ? 1 :
-123;
+x = async () => await
+/123/;
 
-x = ++
-a;
-
-console.info(x);
-
-// implies read next line: op, dot, ternary, colon, ... (but doesn't matter, in paren)
-// ... don't care what's on next line, but treat as part of us
-
-// unhelpful: +/- can be joined to next thing, maybe drop?
+const out = x();
+console.info(out);
+out.then((x) => {
+  console.info('result from Promise', x);
+});
