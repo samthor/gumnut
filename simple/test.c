@@ -130,7 +130,7 @@ int main() {
     TOKEN_REGEXP,    // /123/
   );
 
-  _test("async arrow function", "() => async () => await /123/\nawait /1/",
+  _test("async arrow function", "() => async () => await\n/123/\nawait /1/",
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
     TOKEN_ARROW,     // =>
