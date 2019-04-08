@@ -1,5 +1,3 @@
-var
-{ info }
 
 async function test() {
   await /x/;
