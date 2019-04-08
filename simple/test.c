@@ -14,10 +14,10 @@ typedef struct {
   int at;
   int len;
   int error;
-} testdef_active;
+} testactive;
 
 static void testdef_step(void *arg, token *t) {
-  testdef_active *active = (testdef_active *) arg;
+  testactive *active = (testactive *) arg;
 
   ++active->at;
   if (active->at >= active->len) {
@@ -35,7 +35,7 @@ static void testdef_step(void *arg, token *t) {
 
 int run_testdef(testdef *def) {
   tokendef td = prsr_init_token((char *) def->input);
-  testdef_active active = {
+  testactive active = {
     .def = def,
     .at = -1,
     .len = 0,
