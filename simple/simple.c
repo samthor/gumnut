@@ -266,7 +266,6 @@ static sstack *stack_inc_fakefunction(simpledef *sd, uint8_t flags) {
 }
 
 static int simple_step(simpledef *sd) {
-  sstack *dep = sd->curr;
   uint8_t stype = 0;
 
   // left-side of dictionary
@@ -291,7 +290,7 @@ static int simple_step(simpledef *sd) {
     // if we found something OR the next would open a paren (end of def), mark as a function
     if (flags || sd->td->next.type == TOKEN_PAREN) {
       // ... this replaces "async * foo" with a TOKEN_INTERNAL in stream
-      dep = stack_inc_fakefunction(sd, flags);
+      stack_inc_fakefunction(sd, flags);
       return 0;
     }
   }
@@ -311,7 +310,7 @@ static int simple_step(simpledef *sd) {
         // the sensible arrow function case, with a proper body
         // e.g. "() => { statements }"
         // ... this replaces "=>" with a TOKEN_INTERNAL in stream
-        dep = stack_inc_fakefunction(sd, flags);
+        stack_inc_fakefunction(sd, flags);
         return 0;
       }
 
@@ -344,12 +343,13 @@ static int simple_step(simpledef *sd) {
       return -1;    // nothing else to do, don't record
 
     case TOKEN_BRACE:
-      if (brace_is_block(dep, sd->tok.line_no)) {
+      if (brace_is_block(sd->curr, sd->tok.line_no)) {
         stype = SSTACK_BLOCK;
       }
       printf("brace_is_block: %d\n", stype == SSTACK_BLOCK);
       // fall-through
 
+    case TOKEN_TERNARY:
     case TOKEN_ARRAY:
     case TOKEN_PAREN:
     case TOKEN_T_BRACE:
@@ -358,7 +358,7 @@ static int simple_step(simpledef *sd) {
 
     case TOKEN_OP:
       // if this ++/-- attaches to left, don't record: shouldn't change value-ness
-      if (is_double_addsub(sd->tok.p, sd->tok.len) && stack_has_value(dep)) {
+      if (is_double_addsub(sd->tok.p, sd->tok.len) && stack_has_value(sd->curr)) {
         return -1;
       }
       return 0;
@@ -371,6 +371,7 @@ static int simple_step(simpledef *sd) {
       return 0;
 
     case TOKEN_COLON:
+      // nb. only shows up if not part of "? ... :"
       if (!sstack_is_dict(sd->curr)) {
         return 0;
       }
@@ -384,11 +385,13 @@ static int simple_step(simpledef *sd) {
       return 0;
   }
 
+  sstack *dep = sd->curr;
   int is_decl = hoist_is_decl(dep, sd->tok.line_no);
   if (is_decl) {
     // match labels at top-level
     if (sd->td->next.type == TOKEN_COLON) {
       if (!is_reserved_word(sd->tok.p, sd->tok.len)) {
+        // FIXME: Output has already been generated at this point.
         // TODO(samthor): generate error if reserved word?
         sd->tok.type = TOKEN_LABEL;
       }
