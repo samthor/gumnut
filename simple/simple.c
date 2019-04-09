@@ -3,30 +3,30 @@
 #include "simple.h"
 #include "../utils.h"
 
-#define SSTACK_ROOT       1  // top-level
-#define SSTACK_INTERNAL   2  // function or class
-#define SSTACK_BLOCK      3
-#define SSTACK_DECL       4
+#define SSTACK__BLOCK 1  // block execution context
+#define SSTACK__GROUP 2  // group execution context
+#define SSTACK__FUNC  3  // expects upcoming "() {}"
+#define SSTACK__DECL  4  // discard implict value when done
+#define SSTACK__DO_WHILE 5
 
-// for SSTACK_INTERNAL mode='c'
-#define FLAG_EXTENDS_BRACE   1
+// context are set on all statements
+#define CONTEXT__STRICT    1
+#define CONTEXT__ASYNC     2
+#define CONTEXT__GENERATOR 4
 
-// for SSTACK_INTERNAL mode='f'/'s'
-#define FLAG_ASYNC           1
-#define FLAG_GENERATOR       2
-
-// for empty SSTACK (but unique for safety)
-#define FLAG_DICT_VALUE      4  // between ':' and ',' in dict
 
 typedef struct {
   token t1;
   token t2;
-  uint8_t stype : 4;
-  uint8_t flags : 4;
+  uint8_t stype : 3;
+  uint8_t context : 3;
+  uint8_t is_value : 1;
 } sstack;
+
 
 typedef struct {
   tokendef *td;
+  token *next;  // convenience
   token tok;
 
   prsr_callback cb;
@@ -36,93 +36,146 @@ typedef struct {
   sstack stack[256];
 } simpledef;
 
+
 static int token_string(token *t, char *s, int len) {
   return t->len == len && !memcmp(t->p, s, len);
 }
 
-static char sstack_internal_mode(sstack *dep) {
-  if (dep->stype == SSTACK_INTERNAL) {
-    return (dep - 1)->t1.p[0];
-  }
-  return 0;
+
+// stores a virtual token in the stream
+static void record_virt(simpledef *sd, int type) {
+  token *t = &(sd->curr->t1);
+  sd->curr->t2 = *t;  // move t1 => t2
+  bzero(t, sizeof(token));
+  t->type = type;
 }
 
-static int sstack_is_dict(sstack *dep) {
-  return !dep->stype && (dep - 1)->t1.type == TOKEN_BRACE;
+
+// // force-yields this token and records it
+// static void yield_tok(simpledef *sd) {
+//   if (!sd->tok.p) {
+//     return;  // can't record or already recorded
+//   }
+//   sd->cb(sd->arg, &(sd->))
+//   sd->curr->t2 = sd->curr->t1;
+//   sd->curr->t1 = sd->tok;
+// }
+
+
+// stores a virtual token in the stream, and yields it before the current token
+static void yield_virt(simpledef *sd, int type) {
+  record_virt(sd, type);
+  sd->cb(sd->arg, &(sd->curr->t1));
 }
+
+
+// places the next useful token in sd->tok, yielding previous current
+static int skip_walk(simpledef *sd, int has_value) {
+  if (sd->tok.p) {
+    sd->cb(sd->arg, &(sd->tok));
+  }
+  for (;;) {
+    // prsr_next_token can reveal comments, loop until over them
+    int out = prsr_next_token(sd->td, &(sd->tok), has_value);
+    if (out || sd->tok.type != TOKEN_COMMENT) {
+      return out;
+    }
+    sd->cb(sd->arg, &(sd->tok));
+  }
+}
+
+
+// records/yields the current token, places the next useful token
+static int record_walk(simpledef *sd, int has_value) {
+  sd->curr->t2 = sd->curr->t1;
+  sd->curr->t1 = sd->tok;
+  return skip_walk(sd, has_value);
+}
+
 
 static int is_optional_keyword(sstack *dep) {
   uint8_t mask = 0;
 
   if (token_string(&(dep->t1), "await", 5)) {
-    mask = FLAG_ASYNC;
+    mask = CONTEXT__ASYNC;
   } else if (token_string(&(dep->t1), "yield", 5)) {
-    mask = FLAG_GENERATOR;
+    mask = CONTEXT__GENERATOR;
   } else {
     return 0;
   }
+  // FIXME: strict mode keywords
 
-  // look up for mask
-  for (sstack *p = dep; p->stype != SSTACK_ROOT; --p) {
-    char mode = sstack_internal_mode(p);
-    if (mode != 'c') {
-      return p->flags & mask;
-    }
-  }
-
-  return 0;
+  return dep->context & mask;
 }
 
-static int brace_is_block(sstack *dep, int line_no) {
-  char mode = sstack_internal_mode(dep);
-  if (mode && mode != 's') {
-    // "() => {}" are set as block on their creation, because they have a "{}"
-    return mode == 'f';
+
+// whether the current position has a function decl/stmt
+static int peek_function(simpledef *sd) {
+  if (sd->tok.type != TOKEN_LIT) {
+    return 0;
+  } else if (token_string(&(sd->tok), "async", 5)) { 
+    return sd->next->type == TOKEN_LIT && token_string(sd->next, "function", 8);
   }
-
-  switch (dep->t1.type) {
-    case TOKEN_EOF:    // start of level, e.g. "[ X"
-    case TOKEN_COLON:  // "foo: {}" for block, "{key: {}}" in dict-like
-      return dep->stype == SSTACK_BLOCK;
-
-    case TOKEN_COMMA:
-    case TOKEN_SPREAD:   // nonsensical, but valid: "[...{}]"
-    case TOKEN_OP:
-    case TOKEN_TERNARY:  // following a "? ... :" stack
-      return 0;
-
-    case TOKEN_LIT:
-      if (is_optional_keyword(dep)) {
-        if (dep->t1.p[0] == 'y') {
-          // yield is a restricted keyword
-          return line_no != dep->t1.line_no;
-        }
-        return 0;
-      }
-
-      // nb. don't bother with `import var let const`, their grammar is limited anyway
-
-      if (token_string(&(dep->t1), "return", 6)) {
-        return line_no != dep->t1.line_no;   // return \n { if () { ... } }
-      }
-
-      if (is_dict_after(dep->t1.p, dep->t1.len)) {
-        return 0;
-      }
-
-      break;
-  }
-
-  return 1;
+  return token_string(&(sd->tok), "function", 8);
 }
+
+
+// matches any current function decl/stmt
+static int match_function(simpledef *sd) {
+  if (!peek_function(sd)) {
+    return -1;
+  }
+
+  uint8_t context = (sd->curr && CONTEXT__STRICT);
+  if (sd->tok.p[0] == 'a') {
+    context |= CONTEXT__ASYNC;
+    sd->tok.type = TOKEN_KEYWORD;
+    skip_walk(sd, 0);  // consume "async"
+  }
+  sd->tok.type = TOKEN_KEYWORD;
+  record_walk(sd, 0);  // consume "function"
+
+  // optionally consume generator star
+  if (sd->tok.type == TOKEN_OP && token_string(&(sd->tok), "*", 1)) {
+    skip_walk(sd, 0);
+    context |= CONTEXT__GENERATOR;
+  }
+
+  // optionally consume function name
+  if (sd->tok.type == TOKEN_LIT) {
+    sd->tok.type = TOKEN_SYMBOL;
+    skip_walk(sd, 0);  // consume name
+  }
+
+  return context;
+}
+
+
+static int is_use_strict(token *t) {
+  if (t->type != TOKEN_STRING || t->len != 12) {
+    return 0;
+  }
+  return !memcmp(t->p, "'use strict'", 12) || !memcmp(t->p, "\"use strict\"", 12);
+}
+
+
+static sstack *stack_inc(simpledef *sd, uint8_t stype) {
+  // TODO: check bounds
+  ++sd->curr;
+  bzero(sd->curr, sizeof(sstack));
+  sd->curr->stype = stype;
+  sd->curr->context = (sd->curr - 1)->context;  // copy context
+  return sd->curr;
+}
+
 
 static int stack_has_value(sstack *dep) {
   switch (dep->t1.type) {
-    case TOKEN_INTERNAL:
-      return 1;  // if this was a decl, then TOKEN_INTERNAL wouldn't be in stream
-
     case TOKEN_EOF:
       return 0;
+
+    case TOKEN_INTERNAL:
+      return 1;  // if this was a decl, then TOKEN_INTERNAL wouldn't be in stream
 
     case TOKEN_PAREN:
       if (dep->t2.type == TOKEN_LIT && is_control_paren(dep->t2.p, dep->t2.len)) {
@@ -151,355 +204,210 @@ static int stack_has_value(sstack *dep) {
   return 0;
 }
 
-static int hoist_is_decl(sstack *dep, int line_no) {
-  if (!dep->stype) {
-    return 0;
-  }
 
-  // if (stack_has_value(dep)) {
-  //   return 1;
-// TODO: same line is syntax error, so whatever?!
-//    return line_no != dep->t1.line_no;
-    // same line is syntax error, e.g.:
-    //   "1 function bar() {}"
-    //   "+{} class Foo {}"
-    // next line is valid, but needs ASI (?):
-    //   "1
-    //   function foo() {}"
-  // }
+static int simple_consume(simpledef *sd) {
 
-  int out = brace_is_block(dep, line_no);
-  if (!out) {
-    if (stack_has_value(dep)) {
-      printf("GOT INVARIANT BREAK: has value, but would not be block\n");
-      return 1;
-    }
-  }
-
-  return out;
-}
-
-static sstack *stack_inc(simpledef *sd, uint8_t stype) {
-  // TODO: check bounds
-  ++sd->curr;
-  bzero(sd->curr, sizeof(sstack));
-  sd->curr->stype = stype;
-  return sd->curr;
-}
-
-static int read_next(simpledef *sd, int has_value) {
-  do {
-    // prsr_next_token can reveal comments, loop until over them
-    int out = prsr_next_token(sd->td, &(sd->tok), has_value);
-    if (out) {
-      return out;
-    }
-    sd->cb(sd->arg, &(sd->tok));
-  } while (sd->tok.type == TOKEN_COMMENT);
-  return 0;
-}
-
-static uint8_t process_function(simpledef *sd) {
-  token *next = &(sd->td->next);
-  uint8_t flags = 0;
-  if (sd->curr->t1.type == TOKEN_LIT && token_string(&(sd->curr->t1), "async", 5)) {
-    flags = FLAG_ASYNC;
-  }
-
-  // peek for generator star
-  if (next->type == TOKEN_OP && next->len == 1 && next->p[0] == '*') {
-    read_next(sd, 0);
-    flags |= FLAG_GENERATOR;
-  }
-
-  // peek for function name
-  if (next->type == TOKEN_LIT) {
-    read_next(sd, 0);  // FIXME: we can emit this as a symbol?
-  }
-
-  return flags;
-}
-
-static uint8_t process_class(simpledef *sd) {
-  token *next = &(sd->td->next);
-  uint8_t flags = 0;
-
-  // peek for name
-  if (next->type == TOKEN_LIT && !token_string(next, "extends", 7)) {
-    read_next(sd, 0);  // FIXME: we can emit this as a symbol?
-  }
-
-  // peek for extends
-  if (next->type == TOKEN_LIT && token_string(next, "extends", 7)) {
-    read_next(sd, 0);  // FIXME: we can emit this as a keyword?
-
-    if (next->type == TOKEN_BRACE) {
-      // "class Foo extends {} {}" is nonsensical but valid; record it so both braces are dicts
-      flags = FLAG_EXTENDS_BRACE;
-    }
-  }
-
-  return flags;
-}
-
-static sstack *stack_inc_fakefunction(simpledef *sd, uint8_t flags) {
-  static const char *functionStr = "f";
-
-  token fake;
-  bzero(&fake, sizeof(token));
-  fake.type = TOKEN_INTERNAL;
-  fake.p = (char *) functionStr;
-  fake.len = 1;
-
-  sd->tok = fake;  // caller writes us to t1 in the regular flow
-  sstack *dep = stack_inc(sd, SSTACK_INTERNAL);
-  if (dep) {
-    dep->flags = flags;
-  }
-  return dep;
-}
-
-static int maybe_close_statement(simpledef *sd) {
-  if (sstack_internal_mode(sd->curr) != 's') {
-    return 0;
-  }
-
-  // immediate reasons to bail out
-  switch (sd->tok.type) {
-    case TOKEN_EOF:
-    case TOKEN_SEMICOLON:
-    case TOKEN_COMMA:
-    case TOKEN_CLOSE:
-      return 1;
-  }
-
-  if (sd->curr->t1.type == TOKEN_EOF) {
-    return 0;  // allow whatever in first place, even on different line
-  }
-
-  // if this position would be a dict, that's OK
-  if (!brace_is_block(sd->curr, sd->tok.line_no)) {
-    return 0;
-  }
-
-  // otherwise, close on new line
-  return sd->tok.line_no != sd->curr->t1.line_no;
-}
-
-static int simple_step(simpledef *sd) {
-  uint8_t stype = 0;
-
-  // left-side of dictionary
-  if (sstack_is_dict(sd->curr) && !(sd->curr->flags & FLAG_DICT_VALUE)) {
-    uint8_t flags = 0;
-
-    // look for 'async' without following '('
-    if (sd->tok.type == TOKEN_LIT &&
-        sd->td->next.type != TOKEN_PAREN &&
-        token_string(&(sd->tok), "async", 5)) {
-      // found, consume
-      flags |= FLAG_ASYNC;
-      read_next(sd, 0);
-    }
-
-    // look for '*'
-    if (sd->tok.type == TOKEN_OP && token_string(&(sd->tok), "*", 1)) {
-      flags |= FLAG_GENERATOR;
-      read_next(sd, 0);
-    }
-
-    // if we found something OR the next would open a paren (end of def), mark as a function
-    if (flags || sd->td->next.type == TOKEN_PAREN) {
-      // ... this replaces "async * foo" with a TOKEN_INTERNAL in stream
-      stack_inc_fakefunction(sd, flags);
+  // function state, allow () or {}
+  if (sd->curr->stype == SSTACK__FUNC) {
+    if (sd->tok.type == TOKEN_PAREN) {
+      // allow "function ()"
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__GROUP);
+      return 0;
+    } else if (sd->tok.type == TOKEN_BRACE) {
+      // terminal state of func, pop and insert normal block
+      --sd->curr;
+      skip_walk(sd, 0);
+      record_virt(sd, TOKEN_VALUE);
+      stack_inc(sd, SSTACK__BLOCK);
       return 0;
     }
-  }
 
-  // try to close an outstanding "() => ..."
-  if (maybe_close_statement(sd)) {
+    // invalid, abandon function def
     --sd->curr;
   }
 
+  // finished a decl, pop
+  if (sd->curr->stype == SSTACK__DECL) {
+    --sd->curr;
+  }
+
+  // zero state, determine what to push
+  if (sd->curr->stype == SSTACK__BLOCK) {
+
+    // match conditional
+    if (token_string(&(sd->tok), "do", 2)) {
+      if (sd->td->next.type == TOKEN_BRACE) {
+        record_walk(sd, -1);
+        stack_inc(sd, SSTACK__BLOCK);
+      }
+    }
+
+    // match anonymous block
+    if (sd->tok.type == TOKEN_BRACE) {
+      printf("got anon block\n");
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__BLOCK);
+      return 0;
+    }
+
+    // match label
+    if (sd->tok.type == TOKEN_LIT && sd->next->type == TOKEN_COLON) {
+      if (is_reserved_word(sd->tok.p, sd->tok.len)) {
+        // FIXME: this is an error
+        sd->tok.type = TOKEN_KEYWORD;
+      } else {
+        sd->tok.type = TOKEN_LABEL;
+      }
+      skip_walk(sd, -1);  // consume label
+      skip_walk(sd, -1);  // consume colon
+      return 0;
+    }
+
+    // match 'use strict';
+    if (sd->curr->t1.type == TOKEN_EOF && is_use_strict(&(sd->tok))) {
+      // FIXME: can't be e.g. `'use strict'.length`, must be single value
+      // ... could peek or check when statement is 'done'
+      sd->curr->context |= CONTEXT__STRICT;
+    }
+
+    // match hoisted class/function
+    if (peek_function(sd) ||
+        (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "class", 5))) {
+      stack_inc(sd, SSTACK__DECL);
+    }
+
+    // ... or start a regular statement
+    stack_inc(sd, 0);
+  }
+
+  // match statements
   switch (sd->tok.type) {
     case TOKEN_ARROW:
       if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_LIT)) {
+        record_walk(sd, 0);
         return 0;  // not a valid construct
       }
 
-      uint8_t flags = 0;
+      uint8_t context = (sd->curr->context & CONTEXT__STRICT);
       if (sd->curr->t2.type == TOKEN_LIT && token_string(&(sd->curr->t2), "async", 5)) {
-        flags = FLAG_ASYNC;
+        context |= CONTEXT__ASYNC;
       }
 
       if (sd->td->next.type == TOKEN_BRACE) {
         // the sensible arrow function case, with a proper body
         // e.g. "() => { statements }"
-        // ... this replaces "=>" with a TOKEN_INTERNAL in stream
-        stack_inc_fakefunction(sd, flags);
+        record_walk(sd, -1);
+        stack_inc(sd, SSTACK__BLOCK);
+        sd->curr->is_value = 1;
+        sd->curr->context = context;
         return 0;
       }
 
-      if (sstack_internal_mode(sd->curr) == 's') {
-        // valid but odd: "() => () => ...", just supercede as we go along
-        // or even e.g. "() => 1 + () => ..."
-        sd->curr->flags = flags;  // update flags
-      } else {
-        stack_inc_fakefunction(sd, flags);
-        static const char *statementStr = "s";  // FIXME: put somewhere
-        sd->tok.p = (char *) statementStr;
-      }
+      // ... otherwise, change our statement's context (e.g. () => async () => () => ...)
+      sd->curr->context = context;
+      record_walk(sd, 0);
       return 0;
 
+    case TOKEN_EOF:
+      if (sd->curr == sd->stack) {
+        return 0;
+      }
+      // fall-through (while sd->curr > sd->stack)
+
     case TOKEN_CLOSE:
-      --sd->curr;  // pop stack
-      if (sd->curr->t1.type != TOKEN_BRACE) {
-        return -1;
+      if (sd->curr->stype == 0) {
+        if ((sd->curr - 1)->stype == SSTACK__BLOCK && (sd->curr - 2)->stype != SSTACK__DECL) {
+          // closing a statement inside brace, yield ASI
+          yield_virt(sd, TOKEN_SEMICOLON);
+        }
+        --sd->curr;  // finish pending value
       }
 
-      char mode = sstack_internal_mode(sd->curr);
-      if (!mode || mode == 's') {
-        return -1;  // random {}, not a special mode
+      if (sd->curr->stype != SSTACK__BLOCK && sd->curr->stype != SSTACK__GROUP) {
+        printf("got unknown stype at TOKEN_CLOSE: %d\n", sd->curr->stype);
+        return 1;
       }
+      --sd->curr;  // finish block or group (at EOF this pops to zero stack)
 
-      // "class Foo extends {} {}" is nonsensical but valid; first brace ended
-      if (mode == 'c' && sd->curr->flags == FLAG_EXTENDS_BRACE) {
-        sd->curr->flags = 0;
-        return -1;
-      }
-      --sd->curr;  // class or function done
-
-      // ... also ended a decl
-      if (sd->curr->stype == SSTACK_DECL) {
-        --sd->curr;
-      }
-      return -1; // nothing else to do, don't record
+      // the token starting us is always TOKEN_VALUE, or not
+      int has_value = (sd->curr->t1.type == TOKEN_VALUE);
+      skip_walk(sd, has_value);
+      return 0;
 
     case TOKEN_BRACE:
-      if (brace_is_block(sd->curr, sd->tok.line_no)) {
-        stype = SSTACK_BLOCK;
-      }
-      printf("brace_is_block: %d\n", stype == SSTACK_BLOCK);
-      // fall-through
+      stack_inc(sd, SSTACK__GROUP);  // TODO: not just group
+      return 0;
 
     case TOKEN_TERNARY:
     case TOKEN_ARRAY:
     case TOKEN_PAREN:
     case TOKEN_T_BRACE:
-      stack_inc(sd, stype);
+      skip_walk(sd, 0);
+      stack_inc(sd, SSTACK__GROUP);
       return 0;
 
     case TOKEN_OP:
-      // if this ++/-- attaches to left, don't record: shouldn't change value-ness
-      if (is_double_addsub(sd->tok.p, sd->tok.len) && stack_has_value(sd->curr)) {
-        return -1;
-      }
-      return 0;
-
-    case TOKEN_COMMA:
-      // nb. FLAG_DICT_VALUE is unique so we don't check sstack_is_dict
-      if (sd->curr->flags & FLAG_DICT_VALUE) {
-        sd->curr->flags &= ~FLAG_DICT_VALUE;
-      }
-      return 0;
-
-    case TOKEN_COLON:
-      // nb. only shows up if not part of "? ... :"
-      if (!sstack_is_dict(sd->curr)) {
-        return 0;
-      }
-      sd->curr->flags = FLAG_DICT_VALUE;
-      return 0;
+      
 
     case TOKEN_LIT:
-      break;  // continue below
+      break;
 
     default:
       return 0;
+
   }
 
-  sstack *dep = sd->curr;
-  int is_decl = hoist_is_decl(dep, sd->tok.line_no);
-  if (is_decl) {
-    // match labels at top-level
-    if (sd->td->next.type == TOKEN_COLON) {
-      if (!is_reserved_word(sd->tok.p, sd->tok.len)) {
-        // FIXME: Output has already been generated at this point.
-        // TODO(samthor): generate error if reserved word?
-        sd->tok.type = TOKEN_LABEL;
-      }
-      return 0;
-    }
+
+  int context = match_function(sd);
+  if (context >= 0) {
+    // we now expect "() {}"
+    record_virt(sd, TOKEN_VALUE);
+    stack_inc(sd, SSTACK__FUNC);
+    sd->curr->context = context;
   }
 
-  if (!is_hoist_keyword(sd->tok.p, sd->tok.len)) {
-    return 0;
-  }
 
-  token fake = sd->tok;  // process_... consumes tokens, so copy
-  uint8_t flags;
-  if (fake.p[0] == 'f') {
-    flags = process_function(sd);
-  } else {
-    flags = process_class(sd);
-  }
-  fake.type = TOKEN_INTERNAL;
-
-  if (is_decl) {
-    // if this is hoisted, then don't leave anything in the regular flow
-    // it's like we were never here!
-    dep = stack_inc(sd, SSTACK_DECL);
-
-    // ... but write inside DECL, before SSTACK_INTERNAL
-    dep->t1 = fake;
-    dep = stack_inc(sd, SSTACK_INTERNAL);
-    dep->flags = flags;
-    return -1;  // don't write us
-  }
-
-  sd->tok = fake;  // caller writes us to t1 in the regular flow
-  dep = stack_inc(sd, SSTACK_INTERNAL);
-  dep->flags = flags;
   return 0;
 }
+
 
 int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
   simpledef sd;
   bzero(&sd, sizeof(simpledef));
-  sd.curr = sd.stack;
+  sd.curr = sd.stack + 1;
   sd.td = td;
+  sd.next = &(td->next);
   sd.cb = cb;
   sd.arg = arg;
 
-  sd.curr->stype = SSTACK_ROOT;
-  ++sd.curr;
-  sd.curr->stype = SSTACK_BLOCK;
+  sd.curr->stype = SSTACK__BLOCK;
+  record_walk(&sd, 0);
 
+  int ret = 0;
   for (;;) {
-    int has_value = 1;
-    if (td->next.type == TOKEN_SLASH) {
-      has_value = stack_has_value(sd.curr);
-    }
+    char *prev = sd.tok.p;
+    ret = simple_consume(&sd);
 
-    int out = read_next(&sd, has_value);
-    if (out) {
-      return out;
+    if (!ret && prev == sd.tok.p) {
+      // simple_consume didn't eat the token, consume it for them
+      printf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
+      ret = record_walk(&sd, -1);
     }
-
-    sstack *dep = sd.curr;
-    int skip = simple_step(&sd);
-    if (sd.tok.type == TOKEN_EOF) {
-      break;  // process EOF but leave after
-    } else if (skip) {
-      continue;  // don't record in t1/t2
+ 
+    if (ret) {
+      break;
     }
-
-    dep->t2 = dep->t1;
-    dep->t1 = sd.tok;
+    if (sd.tok.type == TOKEN_EOF && sd.curr == sd.stack) {
+      break;  // process EOF until curr == stack
+    }
   }
 
-  if (sd.curr != sd.stack + 1) {
+  if (sd.tok.type != TOKEN_EOF) {
+    return ERROR__CLOSE;
+  } else if (sd.curr != sd.stack) {
+    printf("stack is %ld too high\n", sd.curr - sd.stack);
     return ERROR__STACK;
   }
-  return 0;
+  return ret;
 }

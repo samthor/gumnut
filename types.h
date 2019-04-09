@@ -48,27 +48,26 @@ typedef struct {
 #define TOKEN_OP        5   // can include 'in', 'instanceof'
 #define TOKEN_ARROW     6
 #define TOKEN_COLON     7   // used in label
-#define TOKEN_BLOCK     8   // block-like {
-#define TOKEN_DICT      9   // dict-like {
-#define TOKEN_ARRAY     10
-#define TOKEN_PAREN     11
-#define TOKEN_T_BRACE   12  // '${' within template literal
-#define TOKEN_TERNARY   13  // starts ternary block, ends with ':'
-#define TOKEN_CLOSE     14  // '}', ']', ')' or ':'
+#define TOKEN_BRACE     8   // block-like {
+#define TOKEN_ARRAY     9
+#define TOKEN_PAREN     10
+#define TOKEN_T_BRACE   11  // '${' within template literal
+#define TOKEN_TERNARY   12  // starts ternary block, ends with ':'
+#define TOKEN_CLOSE     13  // '}', ']', ')' or ':'
 
 // variable: could be anything
-#define TOKEN_COMMENT   15
-#define TOKEN_STRING    16
-#define TOKEN_REGEXP    17  // literal "/foo/", not "new RegExp('foo')"
-#define TOKEN_NUMBER    18
-#define TOKEN_SYMBOL    19
-#define TOKEN_KEYWORD   20
-#define TOKEN_LABEL     21  // to the left of a ':', e.g. 'foo:'
+#define TOKEN_COMMENT   14
+#define TOKEN_STRING    15
+#define TOKEN_REGEXP    16  // literal "/foo/", not "new RegExp('foo')"
+#define TOKEN_NUMBER    17
+#define TOKEN_SYMBOL    18
+#define TOKEN_KEYWORD   19
+#define TOKEN_LABEL     20  // to the left of a ':', e.g. 'foo:'
 
 // internal/ambiguous tokens
 #define TOKEN_LIT       28  // symbol, keyword or label
-#define TOKEN_BRACE     29  // ambigous brace '{'
-#define TOKEN_SLASH     30  // ambigous slash that is op or regexp
+#define TOKEN_SLASH     29  // ambigous slash that is op or regexp
+#define TOKEN_VALUE     30
 #define TOKEN_INTERNAL  31
 
 #endif//_TYPES_H
