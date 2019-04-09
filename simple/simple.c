@@ -6,8 +6,6 @@
 #define SSTACK__BLOCK 1  // block execution context
 #define SSTACK__GROUP 2  // group execution context
 #define SSTACK__FUNC  3  // expects upcoming "() {}"
-#define SSTACK__DECL  4  // discard implict value when done
-#define SSTACK__DO_WHILE 5
 
 // context are set on all statements
 #define CONTEXT__STRICT    1
@@ -20,7 +18,6 @@ typedef struct {
   token t2;
   uint8_t stype : 3;
   uint8_t context : 3;
-  uint8_t is_value : 1;
 } sstack;
 
 
@@ -28,6 +25,7 @@ typedef struct {
   tokendef *td;
   token *next;  // convenience
   token tok;
+  int tok_has_value;  // has_value current tok was read with
 
   prsr_callback cb;
   void *arg;
@@ -78,6 +76,7 @@ static int skip_walk(simpledef *sd, int has_value) {
     // prsr_next_token can reveal comments, loop until over them
     int out = prsr_next_token(sd->td, &(sd->tok), has_value);
     if (out || sd->tok.type != TOKEN_COMMENT) {
+      sd->tok_has_value = has_value;
       return out;
     }
     sd->cb(sd->arg, &(sd->tok));
@@ -126,7 +125,7 @@ static int match_function(simpledef *sd) {
     return -1;
   }
 
-  uint8_t context = (sd->curr && CONTEXT__STRICT);
+  uint8_t context = (sd->curr->context & CONTEXT__STRICT);
   if (sd->tok.p[0] == 'a') {
     context |= CONTEXT__ASYNC;
     sd->tok.type = TOKEN_KEYWORD;
@@ -216,19 +215,15 @@ static int simple_consume(simpledef *sd) {
       return 0;
     } else if (sd->tok.type == TOKEN_BRACE) {
       // terminal state of func, pop and insert normal block
+      uint8_t context = sd->curr->context;
       --sd->curr;
-      skip_walk(sd, 0);
-      record_virt(sd, TOKEN_VALUE);
+      record_walk(sd, 0);
       stack_inc(sd, SSTACK__BLOCK);
+      sd->curr->context = context;
       return 0;
     }
 
     // invalid, abandon function def
-    --sd->curr;
-  }
-
-  // finished a decl, pop
-  if (sd->curr->stype == SSTACK__DECL) {
     --sd->curr;
   }
 
@@ -271,11 +266,15 @@ static int simple_consume(simpledef *sd) {
       sd->curr->context |= CONTEXT__STRICT;
     }
 
-    // match hoisted class/function
-    if (peek_function(sd) ||
-        (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "class", 5))) {
-      stack_inc(sd, SSTACK__DECL);
+    // match hoisted function (don't insert a regular statement first)
+    int context = match_function(sd);
+    if (context >= 0) {
+      stack_inc(sd, SSTACK__FUNC);
+      sd->curr->context = context;
+      return 0;
     }
+
+    // TODO: match hoisted class
 
     // ... or start a regular statement
     stack_inc(sd, 0);
@@ -283,15 +282,36 @@ static int simple_consume(simpledef *sd) {
 
   // match statements
   switch (sd->tok.type) {
+    case TOKEN_SEMICOLON:
+      if (!sd->curr->stype) {
+        --sd->curr;
+      }
+      return record_walk(sd, 0);
+
+    case TOKEN_COMMA:
+      // relevant in "async () => blah, foo", steal from parent
+      sd->curr->context = (sd->curr - 1)->context;
+      return record_walk(sd, 0);
+
     case TOKEN_ARROW:
       if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_LIT)) {
-        record_walk(sd, 0);
-        return 0;  // not a valid construct
+        // not a valid arrow func, treat as op
+        return record_walk(sd, 0);
       }
 
       uint8_t context = (sd->curr->context & CONTEXT__STRICT);
-      if (sd->curr->t2.type == TOKEN_LIT && token_string(&(sd->curr->t2), "async", 5)) {
-        context |= CONTEXT__ASYNC;
+      if (token_string(&(sd->curr->t2), "async", 5)) {
+        int type = sd->curr->t2.type;
+        if (type == TOKEN_LIT || type == TOKEN_KEYWORD) {
+          context |= CONTEXT__ASYNC;
+        }
+
+        if (type == TOKEN_LIT) {
+          // nb. we can now be confident this _was_async, announce
+          sd->curr->t2.type = TOKEN_KEYWORD;
+          // FIXME: allow testing/other to deal with out-of-order
+          // sd->cb(sd->arg, &(sd->curr->t2));
+        }
       }
 
       if (sd->td->next.type == TOKEN_BRACE) {
@@ -299,26 +319,19 @@ static int simple_consume(simpledef *sd) {
         // e.g. "() => { statements }"
         record_walk(sd, -1);
         stack_inc(sd, SSTACK__BLOCK);
-        sd->curr->is_value = 1;
-        sd->curr->context = context;
-        return 0;
+      } else {
+        // just change statement's context (e.g. () => async () => () => ...)
+        record_walk(sd, 0);
       }
-
-      // ... otherwise, change our statement's context (e.g. () => async () => () => ...)
       sd->curr->context = context;
-      record_walk(sd, 0);
       return 0;
 
     case TOKEN_EOF:
-      if (sd->curr == sd->stack) {
-        return 0;
-      }
-      // fall-through (while sd->curr > sd->stack)
-
     case TOKEN_CLOSE:
       if (sd->curr->stype == 0) {
-        if ((sd->curr - 1)->stype == SSTACK__BLOCK && (sd->curr - 2)->stype != SSTACK__DECL) {
+        if ((sd->curr - 1)->stype == SSTACK__BLOCK && sd->curr->t1.type != TOKEN_EOF) {
           // closing a statement inside brace, yield ASI
+          // FIXME(samthor): remove later, do this differently
           yield_virt(sd, TOKEN_SEMICOLON);
         }
         --sd->curr;  // finish pending value
@@ -330,25 +343,40 @@ static int simple_consume(simpledef *sd) {
       }
       --sd->curr;  // finish block or group (at EOF this pops to zero stack)
 
-      // the token starting us is always TOKEN_VALUE, or not
-      int has_value = (sd->curr->t1.type == TOKEN_VALUE);
-      skip_walk(sd, has_value);
-      return 0;
+      // if we're in a regular statement, this stack has value
+      int has_value = (sd->curr->stype == 0);
+      if (sd->curr->t1.type == TOKEN_TERNARY) {
+        has_value = 0; // ... not if "? ... :"
+      }
 
-    case TOKEN_BRACE:
-      stack_inc(sd, SSTACK__GROUP);  // TODO: not just group
-      return 0;
+      if (sd->tok.type != TOKEN_EOF) {
+        // noisy for EOF, where we don't care /shrug
+        printf("popped stack (%ld) in op? has_value=%d\n", sd->curr - sd->stack, has_value);
+      }
+      return skip_walk(sd, has_value);
 
+    case TOKEN_BRACE:    // always dict here (group)
     case TOKEN_TERNARY:
     case TOKEN_ARRAY:
     case TOKEN_PAREN:
     case TOKEN_T_BRACE:
-      skip_walk(sd, 0);
+      record_walk(sd, 0);
       stack_inc(sd, SSTACK__GROUP);
       return 0;
 
-    case TOKEN_OP:
-      
+    case TOKEN_OP: {
+      int has_value = 0;
+      if (is_double_addsub(sd->tok.p, sd->tok.len)) {
+        // ++ or -- don't change value-ness
+        has_value = sd->tok_has_value;
+      }
+      return record_walk(sd, has_value);
+    }
+
+    case TOKEN_STRING:
+    case TOKEN_REGEXP:
+    case TOKEN_NUMBER:
+      return record_walk(sd, 1);
 
     case TOKEN_LIT:
       break;
@@ -358,16 +386,16 @@ static int simple_consume(simpledef *sd) {
 
   }
 
-
   int context = match_function(sd);
   if (context >= 0) {
-    // we now expect "() {}"
-    record_virt(sd, TOKEN_VALUE);
+    // non-hoisted function
     stack_inc(sd, SSTACK__FUNC);
     sd->curr->context = context;
+    return 0;
   }
 
-
+  // FIXME: match keywords
+  record_walk(sd, 1);
   return 0;
 }
 
@@ -394,20 +422,24 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
       printf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
       ret = record_walk(&sd, -1);
     }
- 
+
     if (ret) {
       break;
     }
-    if (sd.tok.type == TOKEN_EOF && sd.curr == sd.stack) {
-      break;  // process EOF until curr == stack
+    if (sd.tok.type == TOKEN_EOF) {
+      ret = simple_consume(&sd);  // last run, run EOF to close statements
+      break;
     }
   }
 
-  if (sd.tok.type != TOKEN_EOF) {
+  if (ret) {
+    return ret;
+  } else if (sd.tok.type != TOKEN_EOF) {
     return ERROR__CLOSE;
   } else if (sd.curr != sd.stack) {
     printf("stack is %ld too high\n", sd.curr - sd.stack);
     return ERROR__STACK;
   }
-  return ret;
+
+  return 0;
 }
