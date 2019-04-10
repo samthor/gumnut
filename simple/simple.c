@@ -35,30 +35,15 @@ static int token_string(token *t, char *s, int len) {
 }
 
 
-// stores a virtual token in the stream
-static void record_virt(simpledef *sd, int type) {
+// stores a virtual token in the stream, and yields it before the current token
+static void yield_virt(simpledef *sd, int type) {
   token *t = &(sd->curr->t1);
   sd->curr->t2 = *t;  // move t1 => t2
   bzero(t, sizeof(token));
+  t->line_no = sd->curr->t2.line_no;  // ... on prev line
   t->type = type;
-}
 
-
-// // force-yields this token and records it
-// static void yield_tok(simpledef *sd) {
-//   if (!sd->tok.p) {
-//     return;  // can't record or already recorded
-//   }
-//   sd->cb(sd->arg, &(sd->))
-//   sd->curr->t2 = sd->curr->t1;
-//   sd->curr->t1 = sd->tok;
-// }
-
-
-// stores a virtual token in the stream, and yields it before the current token
-static void yield_virt(simpledef *sd, int type) {
-  record_virt(sd, type);
-  sd->cb(sd->arg, &(sd->curr->t1));
+  sd->cb(sd->arg, t);
 }
 
 
@@ -87,36 +72,31 @@ static int record_walk(simpledef *sd, int has_value) {
 }
 
 
-static int context_is_label(uint8_t context, token *t) {
-  if (t->type != TOKEN_LIT || is_reserved_word(t->p, t->len, context & CONTEXT__STRICT)) {
-    return 0;
+static int context_is_optional_keyword(uint8_t context, token *t) {
+  if (t->type != TOKEN_LIT) {
+    // do nothing
+  } else if (context & CONTEXT__ASYNC && token_string(t, "await", 5)) {
+    return 1;
+  } else if (context & CONTEXT__GENERATOR && token_string(t, "yield", 5)) {
+    return 1;
   }
-
-  if (context & CONTEXT__ASYNC && token_string(t, "async", 5)) {
-    return 0;
-  }
-
-  if (context & CONTEXT__GENERATOR && token_string(t, "yield", 5)) {
-    return 0;
-  }
-
-  return 1;
+  return 0;
 }
 
 
-static int is_optional_keyword(sstack *dep) {
-  uint8_t mask = 0;
+static int context_is_label(uint8_t context, token *t) {
+  return t->type == TOKEN_LIT &&
+      !is_reserved_word(t->p, t->len, context & CONTEXT__STRICT) &&
+      !context_is_optional_keyword(context, t);
+}
 
-  if (token_string(&(dep->t1), "await", 5)) {
-    mask = CONTEXT__ASYNC;
-  } else if (token_string(&(dep->t1), "yield", 5)) {
-    mask = CONTEXT__GENERATOR;
-  } else {
+
+static int context_is_unary(uint8_t context, token *t) {
+  if (t->type != TOKEN_LIT) {
     return 0;
   }
-  // FIXME: strict mode keywords
-
-  return dep->context & mask;
+  static const char always[] = " delete new typeof void ";
+  return in_space_string(always, t->p, t->len) || context_is_optional_keyword(context, t);
 }
 
 
@@ -209,6 +189,7 @@ static sstack *stack_inc(simpledef *sd, uint8_t stype) {
 
 
 static int simple_consume(simpledef *sd) {
+restart:
 
   // function state, allow () or {}
   if (sd->curr->stype == SSTACK__FUNC) {
@@ -407,7 +388,7 @@ regular_bail:
 
     case TOKEN_EOF:
     case TOKEN_CLOSE:
-      if (sd->curr->stype == 0) {
+      if (!sd->curr->stype) {
         if ((sd->curr - 1)->stype == SSTACK__BLOCK && sd->curr->t1.type != TOKEN_EOF) {
           // closing a statement inside brace, yield ASI
           // FIXME(samthor): remove later, do this differently
@@ -423,7 +404,7 @@ regular_bail:
       --sd->curr;  // finish block or group (at EOF this pops to zero stack)
 
       // if we're in a regular statement or group, this stack has value
-      int has_value = (sd->curr->stype == 0 || sd->curr->stype == SSTACK__GROUP);
+      int has_value = (!sd->curr->stype || sd->curr->stype == SSTACK__GROUP);
       if (sd->curr->t1.type == TOKEN_TERNARY) {
         has_value = 0; // ... not if "? ... :"
       }
@@ -469,7 +450,11 @@ regular_bail:
       return record_walk(sd, 1);
 
     default:
-      return 0;
+      printf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
+      // fall-through
+
+    case TOKEN_COLON:
+      return record_walk(sd, 0);
 
   }
 
@@ -481,17 +466,53 @@ regular_bail:
     return 0;
   }
 
+  // match valid unary ops
+  if (context_is_unary(sd->curr->context, &(sd->tok))) {
+    sd->tok.type = TOKEN_OP;
+    record_walk(sd, 0);
+
+    if (!sd->curr->stype && sd->curr->t1.p[0] == 'y' && sd->curr->t1.line_no != sd->tok.line_no) {
+      // yield is a restricted keyword
+      yield_virt(sd, TOKEN_SEMICOLON);
+    }
+
+    return 0;
+  }
+
+  // aggressive keyword match inside statement
+  if (is_always_keyword(sd->tok.p, sd->tok.len, sd->curr->context & CONTEXT__STRICT)) {
+    if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no) {
+      // ... if a keyword would make an invalid statement, restart with it
+      yield_virt(sd, TOKEN_SEMICOLON);
+      --sd->curr;
+      goto restart;
+    }
+    sd->tok.type = TOKEN_KEYWORD;
+    return record_walk(sd, 1);
+  }
+
   // TODO(samthor): really fragile
   if (token_string(&(sd->tok), "as", 2)) {
     token *cand = &((sd->curr - 1)->t1);
     if (cand->type == TOKEN_KEYWORD && token_string(cand, "import", 6)) {
       sd->tok.type = TOKEN_KEYWORD;
+      return record_walk(sd, 1);
     }
   }
 
-  // FIXME: match keywords
-  record_walk(sd, 1);
-  return 0;
+  if (token_string(&(sd->tok), "async", 5)) {
+    if (sd->next->type == TOKEN_LIT) {
+      sd->tok.type = TOKEN_KEYWORD;
+    } else if (sd->next->type == TOKEN_PAREN) {
+      // otherwise, actually ambiguous: leave as TOKEN_LIT
+      return record_walk(sd, 1);
+    }
+  }
+
+  if (sd->tok.type == TOKEN_LIT) {
+    sd->tok.type = TOKEN_SYMBOL;
+  }
+  return record_walk(sd, 1);
 }
 
 
@@ -512,19 +533,18 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
     char *prev = sd.tok.p;
     ret = simple_consume(&sd);
 
-    if (!ret && prev == sd.tok.p) {
-      // simple_consume didn't eat the token, consume it for them
+    if (ret) {
+      // regular failure case
+    } else if (prev == sd.tok.p) {
       printf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
-      ret = record_walk(&sd, -1);
+      ret = ERROR__TODO;
+    } else if (sd.tok.type == TOKEN_EOF) {
+      ret = simple_consume(&sd);  // last run, run EOF to close statements
+    } else {
+      continue;
     }
 
-    if (ret) {
-      break;
-    }
-    if (sd.tok.type == TOKEN_EOF) {
-      ret = simple_consume(&sd);  // last run, run EOF to close statements
-      break;
-    }
+    break;
   }
 
   if (ret) {
