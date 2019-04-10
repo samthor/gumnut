@@ -17,9 +17,12 @@
 #include <string.h>
 
 static const char always_keyword[] =
-    " await break case catch class const continue debugger default delete do else enum export"
-    " extends finally for function if implements import interface new package private"
-    " protected public return static switch throw try typeof var void while with yield ";
+    " break case catch class const continue debugger default delete do else enum export extends"
+    " finally for function if import new return static switch throw try typeof var void while"
+    " with ";
+
+static const char always_strict_keyword[] =
+    " implements package protected interface private public ";
 
 static int could_be_keyword(char *s, int len) {
   if (len > 10 || len < 2) {
@@ -34,7 +37,7 @@ static int could_be_keyword(char *s, int len) {
 }
 
 // nb. buf must contain words start/end with space, aka " test foo "
-static int in_space_string(const char *big, char *s, int len) {
+int in_space_string(const char *big, char *s, int len) {
   // TODO: do something better? strstr is probably fast D:
   // search for: space + candidate + space
   char cand[16];
@@ -46,7 +49,7 @@ static int in_space_string(const char *big, char *s, int len) {
   return strstr(big, cand) != NULL;
 }
 
-int is_always_keyword(char *s, int len) {
+int is_always_keyword(char *s, int len, int strict) {
   if (!could_be_keyword(s, len)) {
     return 0;
   }
@@ -58,31 +61,15 @@ int is_always_keyword(char *s, int len) {
 }
 
 // nb. this is "is label safe"
-int is_reserved_word(char *s, int len) {
+int is_reserved_word(char *s, int len, int strict) {
   if (!could_be_keyword(s, len)) {
     return 0;
   }
-  // FIXME: strict mode reserved "implements package protected interface private public"
-  static const char v[] = " false in instanceof let null super this true ";
+  if (strict && in_space_string(always_strict_keyword, s, len)) {
+    return 1;
+  }
+  static const char v[] = " const false in instanceof null super this true var ";
   return in_space_string(always_keyword, s, len) || in_space_string(v, s, len);
-}
-
-// whether this is a control keyword that is not an expr
-int is_control_keyword(char *s, int len) {
-  if (len > 6 || len < 2) {
-    return 0;  // no control <2 ('if' etc) or >7 ('switch')
-  }
-  static const char v[] = " do if for switch try while with ";
-  return in_space_string(v, s, len);
-}
-
-// is this a trailer to another control
-int is_trailing_control_keyword(char *s, int len) {
-  if (len > 7 || len < 4) {
-    return 0;  // no trailing control <4 ('else') or >7 ('finally')
-  }
-  static const char v[] = " catch else finally ";
-  return in_space_string(v, s, len);
 }
 
 int is_restrict_keyword(char *s, int len) {
@@ -152,16 +139,19 @@ int is_getset(char *s, int len) {
   return len == 3 && (s[0] == 'g' || s[0] == 's') && !memcmp(s+1, "et", 2);
 }
 
+// whether this is a control keyword
+int is_control_keyword(char *s, int len) {
+  if (len > 7 || len < 2) {
+    return 0;  // no control <2 ('if' etc) or >7 ('finally')
+  }
+  static const char v[] = " catch do else if finally for switch try while with ";
+  return in_space_string(v, s, len);
+}
+
 // control group that likely has an immediate () after it
 int is_control_paren(char *s, int len) {
   // nb. doesn't have "do", e.g., "do (100) / 100" is valid
   static const char v[] = " catch if for switch while with ";
-  return in_space_string(v, s, len);
-}
-
-// as is_control_paren, but for creators of blocks without ()
-int is_block_creator(char *s, int len) {
-  static const char v[] = " do else finally try ";
   return in_space_string(v, s, len);
 }
 

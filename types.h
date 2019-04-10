@@ -24,6 +24,7 @@
 #define ERROR__TOKEN    -3
 #define ERROR__CLOSE    -4
 #define ERROR__SYNTAX   -5
+#define ERROR__VALUE    -6
 #define ERROR__TODO     -9
 
 #define __STACK_SIZE      256  // stack size used by token
@@ -65,9 +66,8 @@ typedef struct {
 #define TOKEN_LABEL     20  // to the left of a ':', e.g. 'foo:'
 
 // internal/ambiguous tokens
-#define TOKEN_LIT       28  // symbol, keyword or label
-#define TOKEN_SLASH     29  // ambigous slash that is op or regexp
-#define TOKEN_VALUE     30
+#define TOKEN_LIT       29  // symbol, keyword or label
+#define TOKEN_SLASH     30  // ambigous slash that is op or regexp
 #define TOKEN_INTERNAL  31
 
 #endif//_TYPES_H

@@ -7,11 +7,6 @@
 #define SSTACK__GROUP 2  // group execution context
 #define SSTACK__FUNC  3  // expects upcoming "() {}"
 
-// context are set on all statements
-#define CONTEXT__STRICT    1
-#define CONTEXT__ASYNC     2
-#define CONTEXT__GENERATOR 4
-
 
 typedef struct {
   token t1;
@@ -92,6 +87,23 @@ static int record_walk(simpledef *sd, int has_value) {
 }
 
 
+static int context_is_label(uint8_t context, token *t) {
+  if (t->type != TOKEN_LIT || is_reserved_word(t->p, t->len, context & CONTEXT__STRICT)) {
+    return 0;
+  }
+
+  if (context & CONTEXT__ASYNC && token_string(t, "async", 5)) {
+    return 0;
+  }
+
+  if (context & CONTEXT__GENERATOR && token_string(t, "yield", 5)) {
+    return 0;
+  }
+
+  return 1;
+}
+
+
 static int is_optional_keyword(sstack *dep) {
   uint8_t mask = 0;
 
@@ -142,11 +154,39 @@ static int match_function(simpledef *sd) {
 
   // optionally consume function name
   if (sd->tok.type == TOKEN_LIT) {
+    // FIXME: disallow keywords here (or just mark as TOKEN_KEYWORD)
     sd->tok.type = TOKEN_SYMBOL;
     skip_walk(sd, 0);  // consume name
   }
 
   return context;
+}
+
+
+// matches a "break foo;" or "continue;", emits ASI if required
+static int match_label_keyword(simpledef *sd) {
+  if (sd->tok.type != TOKEN_LIT || !is_label_keyword(sd->tok.p, sd->tok.len)) {
+    return -1;
+  }
+
+  int line_no = sd->tok.line_no;
+
+  sd->tok.type = TOKEN_KEYWORD;
+  skip_walk(sd, 0);
+
+  if (sd->tok.line_no == line_no && context_is_label(sd->curr->context, &(sd->tok))) {
+    sd->tok.type = TOKEN_LABEL;
+    skip_walk(sd, 0);
+  }
+
+  // e.g. "break\n" or "break foo\n"
+  if (sd->tok.line_no != line_no) {
+    yield_virt(sd, TOKEN_SEMICOLON);  // yield semi because line change
+  } else if (sd->tok.type == TOKEN_SEMICOLON) {
+    skip_walk(sd, 0);  // consume valid semi
+  }
+
+  return 0;
 }
 
 
@@ -168,42 +208,6 @@ static sstack *stack_inc(simpledef *sd, uint8_t stype) {
 }
 
 
-static int stack_has_value(sstack *dep) {
-  switch (dep->t1.type) {
-    case TOKEN_EOF:
-      return 0;
-
-    case TOKEN_INTERNAL:
-      return 1;  // if this was a decl, then TOKEN_INTERNAL wouldn't be in stream
-
-    case TOKEN_PAREN:
-      if (dep->t2.type == TOKEN_LIT && is_control_paren(dep->t2.p, dep->t2.len)) {
-        return 0;
-      }
-      return 1;
-
-    case TOKEN_BRACE:
-      if (!(dep + 1)->stype || !dep->stype) {
-        return 1;  // prev was dict OR we are non-block
-      }
-      return 0;
-
-    case TOKEN_LIT:
-      if (is_optional_keyword(dep)) {
-        return 0;  // async or await are valid, they have no value
-      }
-      return !is_always_operates(dep->t1.p, dep->t1.len);
-
-    case TOKEN_STRING:
-    case TOKEN_REGEXP:
-    case TOKEN_NUMBER:
-      return 1;
-  }
-
-  return 0;
-}
-
-
 static int simple_consume(simpledef *sd) {
 
   // function state, allow () or {}
@@ -214,7 +218,7 @@ static int simple_consume(simpledef *sd) {
       stack_inc(sd, SSTACK__GROUP);
       return 0;
     } else if (sd->tok.type == TOKEN_BRACE) {
-      // terminal state of func, pop and insert normal block
+      // terminal state of func, pop and insert normal block w/retained context
       uint8_t context = sd->curr->context;
       --sd->curr;
       record_walk(sd, 0);
@@ -230,14 +234,6 @@ static int simple_consume(simpledef *sd) {
   // zero state, determine what to push
   if (sd->curr->stype == SSTACK__BLOCK) {
 
-    // match conditional
-    if (token_string(&(sd->tok), "do", 2)) {
-      if (sd->td->next.type == TOKEN_BRACE) {
-        record_walk(sd, -1);
-        stack_inc(sd, SSTACK__BLOCK);
-      }
-    }
-
     // match anonymous block
     if (sd->tok.type == TOKEN_BRACE) {
       printf("got anon block\n");
@@ -246,14 +242,14 @@ static int simple_consume(simpledef *sd) {
       return 0;
     }
 
+    // only care about lit here
+    if (sd->tok.type != TOKEN_LIT) {
+      goto regular_bail;
+    }
+
     // match label
-    if (sd->tok.type == TOKEN_LIT && sd->next->type == TOKEN_COLON) {
-      if (is_reserved_word(sd->tok.p, sd->tok.len)) {
-        // FIXME: this is an error
-        sd->tok.type = TOKEN_KEYWORD;
-      } else {
-        sd->tok.type = TOKEN_LABEL;
-      }
+    if (context_is_label(sd->curr->context, &(sd->tok)) && sd->next->type == TOKEN_COLON) {
+      sd->tok.type = TOKEN_LABEL;
       skip_walk(sd, -1);  // consume label
       skip_walk(sd, -1);  // consume colon
       return 0;
@@ -274,8 +270,91 @@ static int simple_consume(simpledef *sd) {
       return 0;
     }
 
+    // match label keyword (e.g. "break foo;")
+    if (match_label_keyword(sd) >= 0) {
+      return 0;
+    }
+
     // TODO: match hoisted class
 
+    // match single-only
+    if (token_string(&(sd->tok), "debugger", 8)) {
+      int line_no = sd->tok.line_no;
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+
+      if (sd->tok.line_no != line_no) {
+        yield_virt(sd, TOKEN_SEMICOLON);
+      }
+      return 0;
+    }
+
+    // match restricted statement starters
+    if (token_string(&(sd->tok), "return", 6) || token_string(&(sd->tok), "throw", 5)) {
+      int line_no = sd->tok.line_no;
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+
+      if (sd->tok.line_no != line_no) {
+        yield_virt(sd, TOKEN_SEMICOLON);
+        return 0;
+      }
+
+      goto regular_bail;  // e.g. "return ..." must be a statement
+    }
+
+    // match "import" which starts a statement
+    // (we can refer back to pre-statement token to allow "from", "as" etc)
+    if (token_string(&(sd->tok), "import", 6)) {
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+      goto regular_bail;  // starts statement
+    }
+
+    // match "export" which is sort of a no-op, resets to default state
+    if (token_string(&(sd->tok), "export", 6)) {
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+
+      if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "default", 7)) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+      }
+
+      // interestingly: "export default function() {}" is valid and a decl
+      // so classic JS rules around decl must have names are ignored
+      // ... "export default if (..)" is invalid, so we don't care if you do wrong things after
+      return 0;
+    }
+
+    // match "var", "let" and "const"
+    if (is_decl_keyword(sd->tok.p, sd->tok.len)) {
+      if (sd->tok.p[0] != 'l' || sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY) {
+        // OK: const, var or e.g. "let[..]" or "let{..}", destructuring
+      } else if (sd->next->type != TOKEN_LIT || is_op_keyword(sd->next->p, sd->next->len)) {
+        goto regular_bail;  // no following literal (e.g. "let = 1", "instanceof" counts as op)
+      }
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+      goto regular_bail;  // var, const, throw etc must create statement
+    }
+
+    // match e.g., "if", "catch"
+    if (is_control_keyword(sd->tok.p, sd->tok.len)) {
+      int maybe_paren = is_control_paren(sd->tok.p, sd->tok.len);
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+
+      // if we need a paren, consume without putting into statement
+      if (maybe_paren && sd->tok.type == TOKEN_PAREN) {
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__GROUP);
+      }
+
+      return 0;
+    }
+
+regular_bail:
     // ... or start a regular statement
     stack_inc(sd, 0);
   }
@@ -289,7 +368,7 @@ static int simple_consume(simpledef *sd) {
       return record_walk(sd, 0);
 
     case TOKEN_COMMA:
-      // relevant in "async () => blah, foo", steal from parent
+      // relevant in "async () => blah, foo", reset from parent
       sd->curr->context = (sd->curr - 1)->context;
       return record_walk(sd, 0);
 
@@ -343,8 +422,8 @@ static int simple_consume(simpledef *sd) {
       }
       --sd->curr;  // finish block or group (at EOF this pops to zero stack)
 
-      // if we're in a regular statement, this stack has value
-      int has_value = (sd->curr->stype == 0);
+      // if we're in a regular statement or group, this stack has value
+      int has_value = (sd->curr->stype == 0 || sd->curr->stype == SSTACK__GROUP);
       if (sd->curr->t1.type == TOKEN_TERNARY) {
         has_value = 0; // ... not if "? ... :"
       }
@@ -364,11 +443,22 @@ static int simple_consume(simpledef *sd) {
       stack_inc(sd, SSTACK__GROUP);
       return 0;
 
+    case TOKEN_LIT:
+      if (!is_op_keyword(sd->tok.p, sd->tok.len)) {
+        // nb. we catch "await", "delete", "new" etc below
+        break;
+      }
+      // fall-through
+
+    case TOKEN_DOT:
+    case TOKEN_SPREAD:
     case TOKEN_OP: {
       int has_value = 0;
-      if (is_double_addsub(sd->tok.p, sd->tok.len)) {
+      if (sd->tok.type == TOKEN_OP && is_double_addsub(sd->tok.p, sd->tok.len)) {
         // ++ or -- don't change value-ness
         has_value = sd->tok_has_value;
+      } else if (sd->tok.type == TOKEN_LIT) {
+        sd->tok.type = TOKEN_OP;
       }
       return record_walk(sd, has_value);
     }
@@ -377,9 +467,6 @@ static int simple_consume(simpledef *sd) {
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
       return record_walk(sd, 1);
-
-    case TOKEN_LIT:
-      break;
 
     default:
       return 0;
@@ -392,6 +479,14 @@ static int simple_consume(simpledef *sd) {
     stack_inc(sd, SSTACK__FUNC);
     sd->curr->context = context;
     return 0;
+  }
+
+  // TODO(samthor): really fragile
+  if (token_string(&(sd->tok), "as", 2)) {
+    token *cand = &((sd->curr - 1)->t1);
+    if (cand->type == TOKEN_KEYWORD && token_string(cand, "import", 6)) {
+      sd->tok.type = TOKEN_KEYWORD;
+    }
   }
 
   // FIXME: match keywords

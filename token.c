@@ -392,7 +392,7 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
     case TOKEN_SLASH:
       // consume this token as lookup can't know what it was
       if (out->p[0] != '/' || has_value < 0) {
-        return ERROR__INTERNAL;
+        return ERROR__VALUE;
       } else if (has_value) {
         out->type = TOKEN_OP;
         out->len = consume_slash_op(out->p);
