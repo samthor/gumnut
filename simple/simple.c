@@ -413,6 +413,15 @@ restart:
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
 
+      // match "for await"
+      if (sd->tok.type == TOKEN_LIT &&
+          token_string(&(sd->curr->t1), "for", 3) &&
+          token_string(&(sd->tok), "await", 5)) {
+        // even outside strict/async mode, this is valid, but an error
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+      }
+
       // if we need a paren, consume without putting into statement
       if (maybe_paren && sd->tok.type == TOKEN_PAREN) {
         record_walk(sd, 0);
