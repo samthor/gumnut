@@ -4,8 +4,11 @@
 #include "../utils.h"
 
 #define SSTACK__BLOCK 1  // block execution context
-#define SSTACK__GROUP 2  // group execution context
+#define SSTACK__GROUP 2  // group execution context "()" or "[]"
 #define SSTACK__FUNC  3  // expects upcoming "() {}"
+#define SSTACK__DICT  4  // within regular dict "{}"
+
+// TODO: missing SSTACK__DO_WHILE ?
 
 
 typedef struct {
@@ -349,6 +352,10 @@ regular_bail:
     stack_inc(sd, 0);
   }
 
+  if (sd->curr->stype == SSTACK__DICT) {
+    return ERROR__TODO;
+  }
+
   // match statements
   switch (sd->tok.type) {
     case TOKEN_SEMICOLON:
@@ -363,7 +370,7 @@ regular_bail:
       return record_walk(sd, 0);
 
     case TOKEN_ARROW:
-      if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_LIT)) {
+      if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_SYMBOL)) {
         // not a valid arrow func, treat as op
         return record_walk(sd, 0);
       }
@@ -378,6 +385,7 @@ regular_bail:
         if (type == TOKEN_LIT) {
           // nb. we can now be confident this _was_async, announce
           sd->curr->t2.type = TOKEN_KEYWORD;
+          printf("we now know that prior `async` is keyword\n");
           // FIXME: allow testing/other to deal with out-of-order
           // sd->cb(sd->arg, &(sd->curr->t2));
         }
@@ -421,7 +429,19 @@ regular_bail:
       }
       return skip_walk(sd, has_value);
 
-    case TOKEN_BRACE:    // always dict here (group)
+    case TOKEN_BRACE:
+      if (sd->tok_has_value && !sd->curr->stype) {
+        // found an invalid brace, restart as block
+        if (sd->tok.line_no != sd->curr->t1.line_no) {
+          yield_valid_asi(sd);
+        }
+        --sd->curr;
+        goto restart;
+      }
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__DICT);
+      return 0;
+
     case TOKEN_TERNARY:
     case TOKEN_ARRAY:
     case TOKEN_PAREN:
@@ -447,6 +467,9 @@ regular_bail:
         // disallows LineTerminator
         if (sd->tok_has_value && sd->tok.line_no != sd->curr->t1.line_no) {
           yield_valid_asi(sd);
+          if (!sd->curr->stype) {
+            --sd->curr;
+          }
         } else {
           // ++ or -- don't change value-ness
           has_value = sd->tok_has_value;
@@ -465,13 +488,19 @@ regular_bail:
       // fall-through
 
     case TOKEN_COLON:
+      // always invalid here
       return record_walk(sd, 0);
 
   }
 
   int is_start = (sd->curr->t1.type == TOKEN_EOF);
-  if (!is_start && sd->tok.line_no != sd->curr->t1.line_no) {
-
+  if (!is_start && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
+    sd->tok_has_value = 0;
+    yield_valid_asi(sd);
+    if (!sd->curr->stype) {
+      --sd->curr;
+    }
+    goto restart;
   }
 
   int context = match_function(sd);
@@ -490,6 +519,9 @@ regular_bail:
     if (!sd->curr->stype && sd->curr->t1.p[0] == 'y' && sd->curr->t1.line_no != sd->tok.line_no) {
       // yield is a restricted keyword
       yield_valid_asi(sd);
+      if (!sd->curr->stype) {
+        --sd->curr;
+      }
     }
     return 0;
   }
