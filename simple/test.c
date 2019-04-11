@@ -282,5 +282,16 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("for() matches let keyword", "for(let x;let;)",
+    TOKEN_KEYWORD,   // for
+    TOKEN_PAREN,     // (
+    TOKEN_KEYWORD,   // let
+    TOKEN_SYMBOL,    // x
+    TOKEN_SEMICOLON, // ;
+    TOKEN_SYMBOL,    // let
+    TOKEN_SEMICOLON, // ;
+    TOKEN_CLOSE,     // )
+  );
+
   return ok;
 }

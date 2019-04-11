@@ -146,6 +146,23 @@ static int match_function(simpledef *sd) {
 }
 
 
+// matches var/const/let, optional let based on context
+static int match_decl(simpledef *sd) {
+  if (!is_decl_keyword(sd->tok.p, sd->tok.len)) {
+    return -1;
+  }
+
+  if (sd->tok.p[0] != 'l' || sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY) {
+    // OK: const, var or e.g. "let[..]" or "let{..}", destructuring
+  } else if (sd->next->type != TOKEN_LIT || is_op_keyword(sd->next->p, sd->next->len)) {
+    return -1;  // no following literal (e.g. "let = 1", "instanceof" counts as op)
+  }
+
+  sd->tok.type = TOKEN_KEYWORD;
+  return record_walk(sd, 0);
+}
+
+
 // matches a "break foo;" or "continue;", emits ASI if required
 static int match_label_keyword(simpledef *sd) {
   if (sd->tok.type != TOKEN_LIT || !is_label_keyword(sd->tok.p, sd->tok.len)) {
@@ -385,14 +402,7 @@ restart:
     }
 
     // match "var", "let" and "const"
-    if (is_decl_keyword(sd->tok.p, sd->tok.len)) {
-      if (sd->tok.p[0] != 'l' || sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY) {
-        // OK: const, var or e.g. "let[..]" or "let{..}", destructuring
-      } else if (sd->next->type != TOKEN_LIT || is_op_keyword(sd->next->p, sd->next->len)) {
-        goto regular_bail;  // no following literal (e.g. "let = 1", "instanceof" counts as op)
-      }
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
+    if (match_decl(sd) >= 0) {
       goto regular_bail;  // var, const, throw etc must create statement
     }
 
@@ -600,6 +610,18 @@ regular_bail:
     return 0;
   }
 
+  // match curious case of decl inside "for ()"
+  sstack *up = (sd->curr - 1);
+  if (sd->curr->stype == SSTACK__GROUP &&
+      sd->curr->t1.type == TOKEN_EOF &&
+      up->t1.type == TOKEN_PAREN &&
+      up->t2.type == TOKEN_KEYWORD &&
+      token_string(&(up->t2), "for", 3)) {
+    if (match_decl(sd) >= 0) {
+      goto restart;
+    }
+  }
+
   // aggressive keyword match inside statement
   if (is_always_keyword(sd->tok.p, sd->tok.len, sd->curr->context & CONTEXT__STRICT)) {
     if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no) {
@@ -608,7 +630,9 @@ regular_bail:
       --sd->curr;
       goto restart;
     }
+
     // ... otherwise, it's an invalid keyword
+    // ... exception: `for (var x;;)` is valid
     sd->tok.type = TOKEN_KEYWORD;
     return record_walk(sd, 0);
   }
