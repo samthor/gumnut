@@ -78,8 +78,7 @@ static int record_walk(simpledef *sd, int has_value) {
 static int context_is_optional_keyword(uint8_t context, token *t) {
   if (t->type != TOKEN_LIT) {
     // do nothing
-  } else if (context & (CONTEXT__ASYNC | CONTEXT__STRICT) && token_string(t, "await", 5)) {
-    // await is a keyword in strict mode, but it's invalid without async
+  } else if (context & CONTEXT__ASYNC && token_string(t, "await", 5)) {
     return 1;
   } else if (context & CONTEXT__GENERATOR && token_string(t, "yield", 5)) {
     return 1;
@@ -331,7 +330,7 @@ restart:
     }
 
     // match 'use strict';
-    if (sd->curr->t1.type == TOKEN_EOF && is_use_strict(&(sd->tok))) {
+    if (!sd->curr->t1.type && is_use_strict(&(sd->tok))) {
       // FIXME: can't be e.g. `'use strict'.length`, must be single value
       // ... could peek or check when statement is 'done'
       sd->curr->context |= CONTEXT__STRICT;
@@ -587,8 +586,8 @@ regular_bail:
 
   }
 
-  int is_start = (sd->curr->t1.type == TOKEN_EOF);
-  if (!is_start && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
+  // basic ASI detection: lit on a new line than before, with value
+  if (sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
     sd->tok_has_value = 0;
     yield_valid_asi(sd);
     if (!sd->curr->stype) {
@@ -620,6 +619,20 @@ regular_bail:
     return 0;
   }
 
+  // match non-async await: this is valid iff it _looks_ like unary op use (e.g. await value).
+  // FIXME: move to helper, we should generate ASI like this (i.e., by looking at next) for many things
+  // FIXME: does this include all the closes?
+  if (token_string(&(sd->tok), "await", 5)) {
+    if ((sd->next->type == TOKEN_LIT && !is_op_keyword(sd->next->p, sd->next->len)) ||
+        sd->next->type == TOKEN_NUMBER ||
+        sd->next->type == TOKEN_STRING ||
+        sd->next->type == TOKEN_BRACE) {
+      sd->tok.type = TOKEN_KEYWORD;
+      return record_walk(sd, 0);
+    }
+    // ... otherwise, it's just a symbol
+  }
+
   // match curious case of decl inside "for ()"
   sstack *up = (sd->curr - 1);
   if (sd->curr->stype == SSTACK__GROUP &&
@@ -632,9 +645,19 @@ regular_bail:
     }
   }
 
+  // look for async arrow function
+  if (token_string(&(sd->tok), "async", 5)) {
+    if (sd->next->type == TOKEN_LIT) {
+      sd->tok.type = TOKEN_KEYWORD;
+    } else if (sd->next->type == TOKEN_PAREN) {
+      // otherwise, actually ambiguous: leave as TOKEN_LIT
+      return record_walk(sd, 0);
+    }
+  }
+
   // aggressive keyword match inside statement
   if (is_always_keyword(sd->tok.p, sd->tok.len, sd->curr->context & CONTEXT__STRICT)) {
-    if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no) {
+    if (!sd->curr->stype && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
       // if a keyword on a new line would make an invalid statement, restart with it
       yield_valid_asi(sd);
       --sd->curr;
@@ -652,15 +675,6 @@ regular_bail:
     token *cand = &((sd->curr - 1)->t1);
     if (cand->type == TOKEN_KEYWORD && token_string(cand, "import", 6)) {
       sd->tok.type = TOKEN_KEYWORD;
-      return record_walk(sd, 1);
-    }
-  }
-
-  if (token_string(&(sd->tok), "async", 5)) {
-    if (sd->next->type == TOKEN_LIT) {
-      sd->tok.type = TOKEN_KEYWORD;
-    } else if (sd->next->type == TOKEN_PAREN) {
-      // otherwise, actually ambiguous: leave as TOKEN_LIT
       return record_walk(sd, 1);
     }
   }
