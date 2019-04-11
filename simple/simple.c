@@ -188,6 +188,15 @@ static sstack *stack_inc(simpledef *sd, uint8_t stype) {
 }
 
 
+static void yield_valid_asi(simpledef *sd) {
+  if ((!sd->curr->stype || sd->curr->stype == SSTACK__BLOCK) && sd->curr->t1.type) {
+    // if parent is __BLOCK, just pretend a statement happened anyway
+    yield_virt(sd, TOKEN_SEMICOLON);
+  }
+  // can't emit here (but JS probably invalid?)
+}
+
+
 static int simple_consume(simpledef *sd) {
 restart:
 
@@ -265,7 +274,7 @@ restart:
       record_walk(sd, 0);
 
       if (sd->tok.line_no != line_no) {
-        yield_virt(sd, TOKEN_SEMICOLON);
+        yield_valid_asi(sd);
       }
       return 0;
     }
@@ -277,7 +286,7 @@ restart:
       record_walk(sd, 0);
 
       if (sd->tok.line_no != line_no) {
-        yield_virt(sd, TOKEN_SEMICOLON);
+        yield_valid_asi(sd);
         return 0;
       }
 
@@ -389,11 +398,8 @@ regular_bail:
     case TOKEN_EOF:
     case TOKEN_CLOSE:
       if (!sd->curr->stype) {
-        if ((sd->curr - 1)->stype == SSTACK__BLOCK && sd->curr->t1.type != TOKEN_EOF) {
-          // closing a statement inside brace, yield ASI
-          // FIXME(samthor): remove later, do this differently
-          yield_virt(sd, TOKEN_SEMICOLON);
-        }
+        // closing a statement inside brace, yield ASI
+        yield_valid_asi(sd);
         --sd->curr;  // finish pending value
       }
 
@@ -429,17 +435,22 @@ regular_bail:
         // nb. we catch "await", "delete", "new" etc below
         break;
       }
-      // fall-through
+      sd->tok.type = TOKEN_OP;
+      return record_walk(sd, 0);
 
     case TOKEN_DOT:
     case TOKEN_SPREAD:
     case TOKEN_OP: {
       int has_value = 0;
       if (sd->tok.type == TOKEN_OP && is_double_addsub(sd->tok.p, sd->tok.len)) {
-        // ++ or -- don't change value-ness
-        has_value = sd->tok_has_value;
-      } else if (sd->tok.type == TOKEN_LIT) {
-        sd->tok.type = TOKEN_OP;
+        // if we had value, but are on new line, insert an ASI: this is a PostfixExpression that
+        // disallows LineTerminator
+        if (sd->tok_has_value && sd->tok.line_no != sd->curr->t1.line_no) {
+          yield_valid_asi(sd);
+        } else {
+          // ++ or -- don't change value-ness
+          has_value = sd->tok_has_value;
+        }
       }
       return record_walk(sd, has_value);
     }
@@ -458,6 +469,11 @@ regular_bail:
 
   }
 
+  int is_start = (sd->curr->t1.type == TOKEN_EOF);
+  if (!is_start && sd->tok.line_no != sd->curr->t1.line_no) {
+
+  }
+
   int context = match_function(sd);
   if (context >= 0) {
     // non-hoisted function
@@ -473,22 +489,22 @@ regular_bail:
 
     if (!sd->curr->stype && sd->curr->t1.p[0] == 'y' && sd->curr->t1.line_no != sd->tok.line_no) {
       // yield is a restricted keyword
-      yield_virt(sd, TOKEN_SEMICOLON);
+      yield_valid_asi(sd);
     }
-
     return 0;
   }
 
   // aggressive keyword match inside statement
   if (is_always_keyword(sd->tok.p, sd->tok.len, sd->curr->context & CONTEXT__STRICT)) {
     if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no) {
-      // ... if a keyword would make an invalid statement, restart with it
-      yield_virt(sd, TOKEN_SEMICOLON);
+      // if a keyword on a new line would make an invalid statement, restart with it
+      yield_valid_asi(sd);
       --sd->curr;
       goto restart;
     }
+    // ... otherwise, it's an invalid keyword
     sd->tok.type = TOKEN_KEYWORD;
-    return record_walk(sd, 1);
+    return record_walk(sd, 0);
   }
 
   // TODO(samthor): really fragile

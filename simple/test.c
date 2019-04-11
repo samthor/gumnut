@@ -214,6 +214,14 @@ int main() {
     TOKEN_OP,        // /
   );
 
+  _test("ASI for PostfixExpression", "a\n++\nb",
+    TOKEN_SYMBOL,    // a
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_OP,        // ++
+    TOKEN_SYMBOL,    // b
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("yield is symbol", "yield",
     TOKEN_SYMBOL,    // yield
     TOKEN_SEMICOLON, // ASI ;
