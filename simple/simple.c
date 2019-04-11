@@ -208,7 +208,7 @@ restart:
     uint8_t context = 0;
 
     // search for function
-    // ... look for 'async' without following '('
+    // ... look for 'async' without '(' next
     if (sd->tok.type == TOKEN_LIT &&
         sd->td->next.type != TOKEN_PAREN &&
         token_string(&(sd->tok), "async", 5)) {
@@ -223,7 +223,7 @@ restart:
       record_walk(sd, 0);
     }
 
-    // ... look for get/set (without following lit)
+    // ... look for get/set without '(' next
     if (sd->tok.type == TOKEN_LIT &&
         sd->td->next.type != TOKEN_PAREN &&
         is_getset(sd->tok.p, sd->tok.len)) {
@@ -238,6 +238,13 @@ restart:
     }
 
     switch (sd->tok.type) {
+      case TOKEN_ARRAY:
+        // e.g. "{[foo]: ...}"
+        // FIXME: we're throwing away context and treating right-side as brand new
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__GROUP);
+        return 0;
+
       case TOKEN_PAREN:
         // ... don't need to consume
         stack_inc(sd, SSTACK__FUNC);
@@ -254,7 +261,9 @@ restart:
         return 0;
 
       case TOKEN_COLON:
-        return ERROR__TODO;
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__GROUP);
+        return 0;
     }
   }
 
@@ -456,27 +465,41 @@ regular_bail:
 
     case TOKEN_EOF:
     case TOKEN_CLOSE:
+      // are we on the right side of a dictionary?
+      if (sd->curr->stype == SSTACK__GROUP &&
+          (sd->curr - 1)->t1.type == TOKEN_COLON) {
+        --sd->curr;
+        if (sd->curr->stype != SSTACK__DICT) {
+          return ERROR__INTERNAL;
+        }
+        goto restart;  // let dict handle this one (as if it was back on left)
+      }
+
       if (!sd->curr->stype) {
         // closing a statement inside brace, yield ASI
         yield_valid_asi(sd);
         --sd->curr;  // finish pending value
       }
 
+      // should be normal block or group, no other cases handled
       if (sd->curr->stype != SSTACK__BLOCK && sd->curr->stype != SSTACK__GROUP) {
-        printf("got unknown stype at TOKEN_CLOSE: %d\n", sd->curr->stype);
-        return 1;
+        return ERROR__INTERNAL;
       }
-      --sd->curr;  // finish block or group (at EOF this pops to zero stack)
+      --sd->curr;
 
-      // if we're in a regular statement or group, this stack has value
-      int has_value = (!sd->curr->stype || sd->curr->stype == SSTACK__GROUP);
-      if (sd->curr->t1.type == TOKEN_TERNARY) {
-        has_value = 0; // ... not if "? ... :"
+      // anything but ending up in naked block has value
+      int has_value = (sd->curr->stype != SSTACK__BLOCK);
+      if ((sd->curr + 1)->stype == SSTACK__GROUP && sd->curr->t1.type == TOKEN_TERNARY) {
+        // ... but not "? ... :"
+        has_value = 0;
+      } else if (sd->curr->stype == SSTACK__DICT) {
+        // ... but not in the left side of a dict
+        has_value = 0;
       }
 
       if (sd->tok.type != TOKEN_EOF) {
         // noisy for EOF, where we don't care /shrug
-        printf("popped stack (%ld) in op? has_value=%d\n", sd->curr - sd->stack, has_value);
+        printf("popped stack (%ld) in op? has_value=%d (stype=%d)\n", sd->curr - sd->stack, has_value, sd->curr->stype);
       }
       return skip_walk(sd, has_value);
 

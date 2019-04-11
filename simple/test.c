@@ -180,7 +180,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
     TOKEN_ARROW,     // =>
-    TOKEN_KEYWORD,   // async
+    TOKEN_LIT,       // async
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
     TOKEN_ARROW,     // =>
@@ -191,6 +191,7 @@ int main() {
     TOKEN_OP,        // /
     TOKEN_NUMBER,    // 1
     TOKEN_OP,        // /
+    TOKEN_SEMICOLON, // ASI ;
   );
 
   _test("class statement", "x = class Foo extends {} { if(x) {} } /123/",
@@ -224,6 +225,21 @@ int main() {
 
   _test("yield is symbol", "yield",
     TOKEN_SYMBOL,    // yield
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
+  _test("dict keyword-ness", "void {async * get get() {}}",
+    TOKEN_OP,        // void
+    TOKEN_BRACE,     // {
+    TOKEN_KEYWORD,   // async
+    TOKEN_OP,        // *
+    TOKEN_KEYWORD,   // get
+    TOKEN_SYMBOL,    // get
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
     TOKEN_SEMICOLON, // ASI ;
   );
 
