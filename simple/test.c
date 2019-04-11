@@ -293,5 +293,13 @@ int main() {
     TOKEN_CLOSE,     // )
   );
 
+  _test("strict mode await", "'use strict'; await x;",
+    TOKEN_STRING,    // 'use strict';
+    TOKEN_SEMICOLON, // ;
+    TOKEN_KEYWORD,   // await
+    TOKEN_SYMBOL,    // x
+    TOKEN_SEMICOLON, // ;
+  );
+
   return ok;
 }

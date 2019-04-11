@@ -78,7 +78,8 @@ static int record_walk(simpledef *sd, int has_value) {
 static int context_is_optional_keyword(uint8_t context, token *t) {
   if (t->type != TOKEN_LIT) {
     // do nothing
-  } else if (context & CONTEXT__ASYNC && token_string(t, "await", 5)) {
+  } else if (context & (CONTEXT__ASYNC | CONTEXT__STRICT) && token_string(t, "await", 5)) {
+    // await is a keyword in strict mode, but it's invalid without async
     return 1;
   } else if (context & CONTEXT__GENERATOR && token_string(t, "yield", 5)) {
     return 1;
