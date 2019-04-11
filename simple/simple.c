@@ -203,6 +203,61 @@ static void yield_valid_asi(simpledef *sd) {
 static int simple_consume(simpledef *sd) {
 restart:
 
+  // dict state (left)
+  if (sd->curr->stype == SSTACK__DICT) {
+    uint8_t context = 0;
+
+    // search for function
+    // ... look for 'async' without following '('
+    if (sd->tok.type == TOKEN_LIT &&
+        sd->td->next.type != TOKEN_PAREN &&
+        token_string(&(sd->tok), "async", 5)) {
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+      context |= CONTEXT__ASYNC;
+    }
+
+    // ... look for '*'
+    if (sd->tok.type == TOKEN_OP && token_string(&(sd->tok), "*", 1)) {
+      context |= CONTEXT__GENERATOR;
+      record_walk(sd, 0);
+    }
+
+    // ... look for get/set (without following lit)
+    if (sd->tok.type == TOKEN_LIT &&
+        sd->td->next.type != TOKEN_PAREN &&
+        is_getset(sd->tok.p, sd->tok.len)) {
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+    }
+
+    // ... consumed all valid parts, this must be a symbol in dict
+    if (sd->tok.type == TOKEN_LIT) {
+      sd->tok.type = TOKEN_SYMBOL;
+      record_walk(sd, 0);
+    }
+
+    switch (sd->tok.type) {
+      case TOKEN_PAREN:
+        // ... don't need to consume
+        stack_inc(sd, SSTACK__FUNC);
+        sd->curr->context = context;
+        return 0;
+
+      case TOKEN_COMMA:  // valid
+      default:           // invalid, but whatever
+        return record_walk(sd, 0);
+
+      case TOKEN_CLOSE:
+        record_walk(sd, 0);
+        --sd->curr;
+        return 0;
+
+      case TOKEN_COLON:
+        return ERROR__TODO;
+    }
+  }
+
   // function state, allow () or {}
   if (sd->curr->stype == SSTACK__FUNC) {
     if (sd->tok.type == TOKEN_PAREN) {
@@ -350,10 +405,6 @@ restart:
 regular_bail:
     // ... or start a regular statement
     stack_inc(sd, 0);
-  }
-
-  if (sd->curr->stype == SSTACK__DICT) {
-    return ERROR__TODO;
   }
 
   // match statements
