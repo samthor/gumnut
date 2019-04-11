@@ -17,9 +17,9 @@
 #include <string.h>
 
 static const char always_keyword[] =
-    " break case catch class const continue debugger default delete do else enum export extends"
-    " finally for function if import new return static switch throw try typeof var void while"
-    " with ";
+    " async break case catch class const continue debugger default delete do else enum export"
+    " extends finally for function if import new return static switch throw try typeof var void"
+    " while with ";
 
 static const char always_strict_keyword[] =
     " implements package protected interface private public ";
