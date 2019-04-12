@@ -418,7 +418,7 @@ restart:
           token_string(&(sd->tok), "await", 5)) {
         // even outside strict/async mode, this is valid, but an error
         sd->tok.type = TOKEN_KEYWORD;
-        record_walk(sd, 0);
+        skip_walk(sd, 0);  // ... we don't record it
       }
 
       // if we need a paren, consume without putting into statement
@@ -633,16 +633,27 @@ regular_bail:
     // ... otherwise, it's just a symbol
   }
 
-  // match curious case of decl inside "for ()"
+  // match curious cases inside "for (" (nb. we eat "for async" => "for", for convenience)
   sstack *up = (sd->curr - 1);
   if (sd->curr->stype == SSTACK__GROUP &&
-      sd->curr->t1.type == TOKEN_EOF &&
       up->t1.type == TOKEN_PAREN &&
       up->t2.type == TOKEN_KEYWORD &&
       token_string(&(up->t2), "for", 3)) {
-    if (match_decl(sd) >= 0) {
-      goto restart;
+
+    // start of "for (", look for decl (var/let/etc)
+    if (sd->curr->t1.type == TOKEN_EOF) {
+      if (match_decl(sd) >= 0) {
+        goto restart;
+      }
     }
+
+    // FIXME: "for (var x of" or "for ({foo} of ..."
+    // if (sd->curr->t1.type != TOKEN_KEYWORD) {
+    //   if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "of", 2)) {
+    //     sd->tok.type = TOKEN_KEYWORD;
+    //     return record_walk(sd, 0);
+    //   }
+    // }
   }
 
   // look for async arrow function
@@ -663,8 +674,7 @@ regular_bail:
       --sd->curr;
       goto restart;
     }
-
-    // ... otherwise, it's an invalid keyword
+    // ... otherwise, it's an invalid keyword (although `for (var;;x)` is valid, checked above)
     // ... exception: `for (var x;;)` is valid
     sd->tok.type = TOKEN_KEYWORD;
     return record_walk(sd, 0);

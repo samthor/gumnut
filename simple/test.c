@@ -293,6 +293,25 @@ int main() {
     TOKEN_CLOSE,     // )
   );
 
+  _test("for await() matches keyword", "for await(let x)",
+    TOKEN_KEYWORD,   // for
+    TOKEN_KEYWORD,   // await
+    TOKEN_PAREN,     // (
+    TOKEN_KEYWORD,   // let
+    TOKEN_SYMBOL,    // x
+    TOKEN_CLOSE,     // )
+  );
+
+  _test("for(blah of foo) matches keyword", "for(const x of bar)",
+    TOKEN_KEYWORD,   // for
+    TOKEN_PAREN,     // (
+    TOKEN_KEYWORD,   // const
+    TOKEN_SYMBOL,    // x
+    TOKEN_KEYWORD,   // of
+    TOKEN_SYMBOL,    // bar
+    TOKEN_CLOSE,     // )
+  );
+
   _test("strict mode await", "'use strict'; await x;",
     TOKEN_STRING,    // 'use strict';
     TOKEN_SEMICOLON, // ;
