@@ -8,10 +8,13 @@
 #define SSTACK__FUNC   3  // expects upcoming "() {}"
 #define SSTACK__DICT   4  // within regular dict "{}"
 #define SSTACK__IMPORT 5  // between "import ... from" or "import 'foo'"
+#define SSTACK__CLASS  6  // expects "extends X"? "{}"
 
 // TODO: missing SSTACK__DO_WHILE ?
 
-#define SPECIAL__FOR    1
+#define SPECIAL__FOR        1
+#define SPECIAL__FREE_VALUE 2  // for e.g. "class extends {} {}", left is value
+#define SPECIAL__DONE_CLASS 3
 
 
 typedef struct {
@@ -19,7 +22,7 @@ typedef struct {
   token t2;
   uint8_t stype : 3;
   uint8_t context : 3;
-  uint8_t special : 1;
+  uint8_t special : 2;
 } sstack;
 
 
@@ -150,6 +153,36 @@ static int match_function(simpledef *sd) {
 }
 
 
+static int match_class(simpledef *sd) {
+  if (!token_string(&(sd->tok), "class", 5)) {
+    return -1;
+  }
+  sd->tok.type = TOKEN_KEYWORD;
+  record_walk(sd, 0);
+
+  int special = SPECIAL__FREE_VALUE;
+
+  // optionally consume class name
+  if (sd->tok.type == TOKEN_LIT) {
+    if (token_string(&(sd->tok), "extends", 7)) {
+      special = SPECIAL__FREE_VALUE;
+    } else {
+      sd->tok.type = TOKEN_SYMBOL;
+      skip_walk(sd, 0);  // consume name
+    }
+  }
+
+  // consume extends
+  if (special || (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "extends", 7))) {
+    sd->tok.type = TOKEN_KEYWORD;
+    skip_walk(sd, 0);  // consume "extends" keyword
+    special = SPECIAL__FREE_VALUE;
+  }
+
+  return special;
+}
+
+
 // matches var/const/let, optional let based on context
 static int match_decl(simpledef *sd) {
   if (!is_decl_keyword(sd->tok.p, sd->tok.len)) {
@@ -226,6 +259,15 @@ static int is_token_valuelike(token *t) {
     return !is_op_keyword(t->p, t->len);
   }
   return t->type == TOKEN_SYMBOL || t->type == TOKEN_NUMBER || t->type == TOKEN_STRING || t->type == TOKEN_BRACE;
+}
+
+
+// is the next token valuelike following a keyword? (e.g. "extends []")
+static int is_token_valuelike_keyword(token *t) {
+  if (is_token_valuelike(t)) {
+    return 1;
+  }
+  return t->type == TOKEN_PAREN || t->type == TOKEN_ARRAY;
 }
 
 
@@ -335,6 +377,23 @@ dict_symbol_only:
     --sd->curr;
   }
 
+  // class state, just insert group (for extends) or bail
+  if (sd->curr->stype == SSTACK__CLASS) {
+    if (sd->curr->special == SPECIAL__DONE_CLASS || !is_token_valuelike_keyword(&(sd->tok))) {
+      // invalid or done
+      --sd->curr;
+    } else {
+      // found a valuelike, go ahead and consume it!
+      if (sd->curr->special == SPECIAL__FREE_VALUE) {
+        // consuming 'extends ...'
+        sd->curr->special = 0;
+      } else if (!sd->curr->special) {
+        // consuming actual class def
+        sd->curr->special = SPECIAL__DONE_CLASS;
+      }
+    }
+  }
+
   // zero state, determine what to push
   if (sd->curr->stype == SSTACK__BLOCK) {
 
@@ -374,12 +433,19 @@ dict_symbol_only:
       return 0;
     }
 
+    // match hoisted class
+    int special = match_class(sd);
+    if (special >= 0) {
+      printf("found hoisted class: %d\n", special);
+      stack_inc(sd, SSTACK__CLASS);
+      sd->curr->special = special;
+      return 0;
+    }
+
     // match label keyword (e.g. "break foo;")
     if (match_label_keyword(sd) >= 0) {
       return 0;
     }
-
-    // TODO: match hoisted class
 
     // match single-only
     if (token_string(&(sd->tok), "debugger", 8)) {
@@ -519,7 +585,7 @@ regular_bail:
 
     case TOKEN_EOF:
     case TOKEN_CLOSE:
-      // are we on the right side of a dictionary?
+      // are we on the right side of a dictionary, closing the dict?
       if (sd->curr->stype == SSTACK__GROUP &&
           (sd->curr - 1)->t1.type == TOKEN_COLON) {
         --sd->curr;
@@ -548,6 +614,9 @@ regular_bail:
         has_value = 0;
       } else if (sd->curr->stype == SSTACK__DICT) {
         // ... but not in the left side of a dict
+        has_value = 0;
+      } else if (sd->curr->stype == SSTACK__FUNC && !sd->curr->stype) {
+        // ... but not a hoisted function
         has_value = 0;
       }
 
@@ -635,11 +704,20 @@ regular_bail:
 
   }
 
+  // match non-hoisted function
   int context = match_function(sd);
   if (context >= 0) {
     // non-hoisted function
     stack_inc(sd, SSTACK__FUNC);
     sd->curr->context = context;
+    return 0;
+  }
+
+  // match non-hoisted class
+  int special = match_class(sd);
+  if (special >= 0) {
+    stack_inc(sd, SSTACK__CLASS);
+    sd->curr->special = special;
     return 0;
   }
 
