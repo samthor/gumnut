@@ -3,12 +3,15 @@
 #include "simple.h"
 #include "../utils.h"
 
-#define SSTACK__BLOCK 1  // block execution context
-#define SSTACK__GROUP 2  // group execution context "()" or "[]"
-#define SSTACK__FUNC  3  // expects upcoming "() {}"
-#define SSTACK__DICT  4  // within regular dict "{}"
+#define SSTACK__BLOCK  1  // block execution context
+#define SSTACK__GROUP  2  // group execution context "()" or "[]"
+#define SSTACK__FUNC   3  // expects upcoming "() {}"
+#define SSTACK__DICT   4  // within regular dict "{}"
+#define SSTACK__IMPORT 5  // between "import ... from" or "import 'foo'"
 
 // TODO: missing SSTACK__DO_WHILE ?
+
+#define SPECIAL__FOR    1
 
 
 typedef struct {
@@ -16,6 +19,7 @@ typedef struct {
   token t2;
   uint8_t stype : 3;
   uint8_t context : 3;
+  uint8_t special : 1;
 } sstack;
 
 
@@ -232,6 +236,23 @@ restart:
   if (sd->curr->stype == SSTACK__DICT) {
     uint8_t context = 0;
 
+    // look for simplified options first
+    if (sd->tok.type == TOKEN_LIT) {
+      // "foo," or "foo}"
+      if (sd->next->type == TOKEN_COMMA || sd->next->type == TOKEN_CLOSE) {
+        goto dict_symbol_only;
+      }
+
+      // catch "foo as bar", needed inside import dict (but invalid in regular dicts, so whatever)
+      if (sd->next->type == TOKEN_LIT && token_string(sd->next, "as", 2)) {
+        sd->tok.type = TOKEN_SYMBOL;
+        record_walk(sd, 0);  // consume symbol
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);  // consume "as"
+        goto dict_symbol_only;
+      }
+    }
+
     // search for function
     // ... look for 'async' without '(' next
     if (sd->tok.type == TOKEN_LIT &&
@@ -256,6 +277,7 @@ restart:
       record_walk(sd, 0);
     }
 
+dict_symbol_only:
     // ... consumed all valid parts, this must be a symbol in dict
     if (sd->tok.type == TOKEN_LIT) {
       sd->tok.type = TOKEN_SYMBOL;
@@ -385,12 +407,17 @@ restart:
       goto regular_bail;  // e.g. "return ..." must be a statement
     }
 
-    // match "import" which starts a statement
-    // (we can refer back to pre-statement token to allow "from", "as" etc)
+    // match "import" which starts a sstack special
     if (token_string(&(sd->tok), "import", 6)) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
-      goto regular_bail;  // starts statement
+
+      if (sd->tok.type == TOKEN_STRING && sd->tok.p[0] != '`') {
+        goto regular_bail;
+      }
+
+      stack_inc(sd, SSTACK__IMPORT);
+      return ERROR__TODO;
     }
 
     // match "export" which is sort of a no-op, resets to default state
@@ -416,23 +443,23 @@ restart:
 
     // match e.g., "if", "catch"
     if (is_control_keyword(sd->tok.p, sd->tok.len)) {
+      int special = (sd->tok.p[0] == 'f' ? SPECIAL__FOR : 0);
       int maybe_paren = is_control_paren(sd->tok.p, sd->tok.len);
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
 
       // match "for await"
-      if (sd->tok.type == TOKEN_LIT &&
-          token_string(&(sd->curr->t1), "for", 3) &&
-          token_string(&(sd->tok), "await", 5)) {
+      if (sd->tok.type == TOKEN_LIT && special && token_string(&(sd->tok), "await", 5)) {
         // even outside strict/async mode, this is valid, but an error
         sd->tok.type = TOKEN_KEYWORD;
-        skip_walk(sd, 0);  // ... we don't record it
+        record_walk(sd, 0);
       }
 
       // if we need a paren, consume without putting into statement
       if (maybe_paren && sd->tok.type == TOKEN_PAREN) {
         record_walk(sd, 0);
         stack_inc(sd, SSTACK__GROUP);
+        sd->curr->special = special;
       }
 
       return 0;
@@ -641,10 +668,7 @@ regular_bail:
 
   // match curious cases inside "for (" (nb. we eat "for async" => "for", for convenience)
   sstack *up = (sd->curr - 1);
-  if (sd->curr->stype == SSTACK__GROUP &&
-      up->t1.type == TOKEN_PAREN &&
-      up->t2.type == TOKEN_KEYWORD &&
-      token_string(&(up->t2), "for", 3)) {
+  if (sd->curr->stype == SSTACK__GROUP && sd->curr->special == SPECIAL__FOR) {
 
     // start of "for (", look for decl (var/let/etc)
     if (sd->curr->t1.type == TOKEN_EOF) {
@@ -686,15 +710,7 @@ regular_bail:
     return record_walk(sd, 0);
   }
 
-  // TODO(samthor): really fragile
-  if (token_string(&(sd->tok), "as", 2)) {
-    token *cand = &((sd->curr - 1)->t1);
-    if (cand->type == TOKEN_KEYWORD && token_string(cand, "import", 6)) {
-      sd->tok.type = TOKEN_KEYWORD;
-      return record_walk(sd, 1);
-    }
-  }
-
+  // if nothing else known, treat as symbol
   if (sd->tok.type == TOKEN_LIT) {
     sd->tok.type = TOKEN_SYMBOL;
   }
