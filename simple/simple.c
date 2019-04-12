@@ -3,17 +3,23 @@
 #include "simple.h"
 #include "../utils.h"
 
-#define SSTACK__BLOCK  1  // block execution context
-#define SSTACK__GROUP  2  // group execution context "()" or "[]"
-#define SSTACK__FUNC   3  // expects upcoming "() {}"
-#define SSTACK__DICT   4  // within regular dict "{}"
-#define SSTACK__IMPORT 5  // between "import ... from" or "import 'foo'"
-#define SSTACK__CLASS  6  // expects "extends X"? "{}"
+#define SSTACK__STMT   0  // within regular statement (not a hoist)
+#define SSTACK__GROUP  1  // group execution context "()" or "[]"
+#define SSTACK__BLOCK  2  // block execution context
+#define SSTACK__DICT   3  // within regular dict "{}"
+#define SSTACK__FUNC   4  // expects upcoming "() {}"
+#define SSTACK__CLASS  5  // expects "extends X"? "{}"
 
 // TODO: missing SSTACK__DO_WHILE ?
 
+// SSTACK__STMT
+#define SPECIAL__IMPORT     1
+
+// SSTACK__GROUP
 #define SPECIAL__FOR        1
-#define SPECIAL__FREE_VALUE 2  // for e.g. "class extends {} {}", left is value
+
+// SSTACK__CLASS
+#define SPECIAL__FREE_VALUE 1  // for e.g. "class extends {} {}", left is value
 
 
 typedef struct {
@@ -320,7 +326,7 @@ restart:
 
 dict_symbol_only:
     // ... consumed all valid parts, this must be a symbol in dict
-    if (sd->tok.type == TOKEN_LIT) {
+    while (sd->tok.type == TOKEN_LIT) {
       sd->tok.type = TOKEN_SYMBOL;
       record_walk(sd, 0);
     }
@@ -480,13 +486,9 @@ dict_symbol_only:
     if (token_string(&(sd->tok), "import", 6)) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
-
-      if (sd->tok.type == TOKEN_STRING && sd->tok.p[0] != '`') {
-        goto regular_bail;
-      }
-
-      stack_inc(sd, SSTACK__IMPORT);
-      return ERROR__TODO;
+      stack_inc(sd, 0);
+      sd->curr->special = SPECIAL__IMPORT;
+      goto restart;
     }
 
     // match "export" which is sort of a no-op, resets to default state
@@ -788,6 +790,40 @@ regular_bail:
     // ... exception: `for (var x;;)` is valid
     sd->tok.type = TOKEN_KEYWORD;
     return record_walk(sd, 0);
+  }
+
+  // look for import special-cases
+  if (!sd->curr->stype && sd->curr->special == SPECIAL__IMPORT) {
+
+    // FIXME: change "*" to SYMBOL?
+    int after_value = sd->curr->t1.type == TOKEN_SYMBOL ||
+        (sd->curr->t1.type == TOKEN_OP && token_string(&(sd->curr->t1), "*", 1));
+
+    // find "as" between two symbols (star on left is OK)
+    if (after_value &&
+        sd->next->type == TOKEN_LIT &&
+        sd->tok.type == TOKEN_LIT &&
+        token_string(&(sd->tok), "as", 2)) {
+      sd->tok.type = TOKEN_KEYWORD;
+      return record_walk(sd, 0);
+    }
+
+    // find "from" after value-like or import starter
+    if (sd->curr->t1.type == TOKEN_SYMBOL ||
+        sd->curr->t1.type == TOKEN_BRACE ||
+        (sd->curr->t1.type == TOKEN_KEYWORD &&
+        token_string(&(sd->curr->t1), "import", 6))) {
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+
+      if (sd->tok.type == TOKEN_STRING && sd->tok.p[0] != '`') {
+        // TODO: mark as special, this is import target
+        printf("found import target: %.*s\n", sd->tok.len, sd->tok.p);
+        record_walk(sd, 0);
+      }
+
+      return 0;
+    }
   }
 
   // if nothing else known, treat as symbol

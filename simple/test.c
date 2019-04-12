@@ -326,7 +326,21 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
     TOKEN_STRING,    // 'zing'
     TOKEN_SEMICOLON, // ASI ;
-  )
+  );
+
+  _test("check import", "import foo, {zing as what} from 'blah'",
+    TOKEN_KEYWORD,   // import
+    TOKEN_SYMBOL,    // foo
+    TOKEN_COMMA,     // ,
+    TOKEN_BRACE,     // {
+    TOKEN_SYMBOL,    // zing
+    TOKEN_KEYWORD,   // as
+    TOKEN_SYMBOL,    // what
+    TOKEN_CLOSE,     // }
+    TOKEN_KEYWORD,   // from
+    TOKEN_STRING,    // 'blah'
+    TOKEN_SEMICOLON, // ASI ;
+  );
 
   return ok;
 }
