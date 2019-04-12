@@ -213,6 +213,7 @@ int main() {
     TOKEN_OP,        // /
     TOKEN_NUMBER,    // 123
     TOKEN_OP,        // /
+    TOKEN_SEMICOLON, // ASI ;
   );
 
   _test("ASI for PostfixExpression", "a\n++\nb",

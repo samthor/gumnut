@@ -14,7 +14,6 @@
 
 #define SPECIAL__FOR        1
 #define SPECIAL__FREE_VALUE 2  // for e.g. "class extends {} {}", left is value
-#define SPECIAL__DONE_CLASS 3
 
 
 typedef struct {
@@ -160,7 +159,7 @@ static int match_class(simpledef *sd) {
   sd->tok.type = TOKEN_KEYWORD;
   record_walk(sd, 0);
 
-  int special = SPECIAL__FREE_VALUE;
+  int special = 0;
 
   // optionally consume class name
   if (sd->tok.type == TOKEN_LIT) {
@@ -267,7 +266,7 @@ static int is_token_valuelike_keyword(token *t) {
   if (is_token_valuelike(t)) {
     return 1;
   }
-  return t->type == TOKEN_PAREN || t->type == TOKEN_ARRAY;
+  return t->type == TOKEN_PAREN || t->type == TOKEN_ARRAY || t->type == TOKEN_BRACE;
 }
 
 
@@ -345,7 +344,8 @@ dict_symbol_only:
         return record_walk(sd, 0);
 
       case TOKEN_CLOSE:
-        record_walk(sd, 0);
+        // we appear as direct child of block in hoisted `class {}` only
+        record_walk(sd, (sd->curr - 1)->stype != SSTACK__BLOCK);
         --sd->curr;
         return 0;
 
@@ -379,18 +379,21 @@ dict_symbol_only:
 
   // class state, just insert group (for extends) or bail
   if (sd->curr->stype == SSTACK__CLASS) {
-    if (sd->curr->special == SPECIAL__DONE_CLASS || !is_token_valuelike_keyword(&(sd->tok))) {
-      // invalid or done
+    if (!is_token_valuelike_keyword(&(sd->tok))) {
+      // invalid, not a valuelike for either extends or main class def
+      --sd->curr;
+    } else if (sd->curr->special == SPECIAL__FREE_VALUE) {
+      // found extendable value, just parse it below
+      sd->curr->special = 0;
+    } else if (sd->tok.type != TOKEN_BRACE) {
+      // invalid, not a brace for main class def
       --sd->curr;
     } else {
-      // found a valuelike, go ahead and consume it!
-      if (sd->curr->special == SPECIAL__FREE_VALUE) {
-        // consuming 'extends ...'
-        sd->curr->special = 0;
-      } else if (!sd->curr->special) {
-        // consuming actual class def
-        sd->curr->special = SPECIAL__DONE_CLASS;
-      }
+      // terminal state of class definition, pop and insert dict
+      --sd->curr;
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__DICT);
+      return 0;
     }
   }
 
@@ -592,6 +595,7 @@ regular_bail:
         if (sd->curr->stype != SSTACK__DICT) {
           return ERROR__INTERNAL;
         }
+        printf("closing a dict\n");
         goto restart;  // let dict handle this one (as if it was back on left)
       }
 
@@ -613,10 +617,7 @@ regular_bail:
         // ... but not "? ... :"
         has_value = 0;
       } else if (sd->curr->stype == SSTACK__DICT) {
-        // ... but not in the left side of a dict
-        has_value = 0;
-      } else if (sd->curr->stype == SSTACK__FUNC && !sd->curr->stype) {
-        // ... but not a hoisted function
+        // ... but not in the left side of a dict (although it's probably moot)
         has_value = 0;
       }
 
