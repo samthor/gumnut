@@ -225,7 +225,7 @@ static int is_token_valuelike(token *t) {
   if (t->type == TOKEN_LIT) {
     return !is_op_keyword(t->p, t->len);
   }
-  return t->type == TOKEN_NUMBER || t->type == TOKEN_STRING || t->type == TOKEN_BRACE;
+  return t->type == TOKEN_SYMBOL || t->type == TOKEN_NUMBER || t->type == TOKEN_STRING || t->type == TOKEN_BRACE;
 }
 
 
@@ -677,13 +677,14 @@ regular_bail:
       }
     }
 
-    // FIXME: "for (var x of" or "for ({foo} of ..."
-    // if (sd->curr->t1.type != TOKEN_KEYWORD) {
-    //   if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "of", 2)) {
-    //     sd->tok.type = TOKEN_KEYWORD;
-    //     return record_walk(sd, 0);
-    //   }
-    // }
+    // find "of" between two value-like things
+    if (sd->tok.type == TOKEN_LIT &&
+        token_string(&(sd->tok), "of", 2) &&
+        is_token_valuelike(&(sd->curr->t1)) &&
+        is_token_valuelike(sd->next)) {
+      sd->tok.type = TOKEN_OP;
+      return record_walk(sd, 0);
+    }
   }
 
   // look for async arrow function

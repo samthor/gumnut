@@ -307,7 +307,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_KEYWORD,   // const
     TOKEN_SYMBOL,    // x
-    TOKEN_KEYWORD,   // of
+    TOKEN_OP,        // of
     TOKEN_SYMBOL,    // bar
     TOKEN_CLOSE,     // )
   );
