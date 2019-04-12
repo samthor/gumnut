@@ -320,5 +320,12 @@ int main() {
     TOKEN_SEMICOLON, // ;
   );
 
+  _test("asi for number", "123\n'zing'",
+    TOKEN_NUMBER,    // 123
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_STRING,    // 'zing'
+    TOKEN_SEMICOLON, // ASI ;
+  )
+
   return ok;
 }

@@ -217,6 +217,14 @@ static void yield_valid_asi(simpledef *sd) {
 }
 
 
+static int is_token_valuelike(token *t) {
+  if (t->type == TOKEN_LIT) {
+    return !is_op_keyword(t->p, t->len);
+  }
+  return t->type == TOKEN_NUMBER || t->type == TOKEN_STRING || t->type == TOKEN_BRACE;
+}
+
+
 static int simple_consume(simpledef *sd) {
 restart:
 
@@ -526,6 +534,7 @@ regular_bail:
       if (sd->tok_has_value && !sd->curr->stype) {
         // found an invalid brace, restart as block
         if (sd->tok.line_no != sd->curr->t1.line_no) {
+          // ... with optional ASI
           yield_valid_asi(sd);
         }
         --sd->curr;
@@ -544,12 +553,30 @@ regular_bail:
       return 0;
 
     case TOKEN_LIT:
-      if (!is_op_keyword(sd->tok.p, sd->tok.len)) {
-        // nb. we catch "await", "delete", "new" etc below
-        break;
+      if (is_op_keyword(sd->tok.p, sd->tok.len)) {
+        sd->tok.type = TOKEN_OP;
+        return record_walk(sd, 0);
       }
-      sd->tok.type = TOKEN_OP;
-      return record_walk(sd, 0);
+      // nb. we catch "await", "delete", "new" etc below
+      // fall-through
+
+    case TOKEN_STRING:
+    case TOKEN_REGEXP:
+    case TOKEN_NUMBER:
+      // basic ASI detection inside statement: value on a new line than before, with value
+      if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
+        sd->tok_has_value = 0;
+        yield_valid_asi(sd);
+        if (!sd->curr->stype) {
+          --sd->curr;
+        }
+        goto restart;
+      }
+
+      if (sd->tok.type == TOKEN_LIT) {
+        break;  // special lit handling
+      }
+      return record_walk(sd, 1);  // otherwise, just a regular value
 
     case TOKEN_DOT:
     case TOKEN_SPREAD:
@@ -571,11 +598,6 @@ regular_bail:
       return record_walk(sd, has_value);
     }
 
-    case TOKEN_STRING:
-    case TOKEN_REGEXP:
-    case TOKEN_NUMBER:
-      return record_walk(sd, 1);
-
     default:
       printf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
       // fall-through
@@ -584,16 +606,6 @@ regular_bail:
       // always invalid here
       return record_walk(sd, 0);
 
-  }
-
-  // basic ASI detection: lit on a new line than before, with value
-  if (sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
-    sd->tok_has_value = 0;
-    yield_valid_asi(sd);
-    if (!sd->curr->stype) {
-      --sd->curr;
-    }
-    goto restart;
   }
 
   int context = match_function(sd);
@@ -620,17 +632,11 @@ regular_bail:
   }
 
   // match non-async await: this is valid iff it _looks_ like unary op use (e.g. await value).
-  // FIXME: move to helper, we should generate ASI like this (i.e., by looking at next) for many things
-  // FIXME: does this include all the closes?
-  if (token_string(&(sd->tok), "await", 5)) {
-    if ((sd->next->type == TOKEN_LIT && !is_op_keyword(sd->next->p, sd->next->len)) ||
-        sd->next->type == TOKEN_NUMBER ||
-        sd->next->type == TOKEN_STRING ||
-        sd->next->type == TOKEN_BRACE) {
-      sd->tok.type = TOKEN_KEYWORD;
-      return record_walk(sd, 0);
-    }
-    // ... otherwise, it's just a symbol
+  // this is a lookahead for value, rather than what we normally do
+  if (token_string(&(sd->tok), "await", 5) && is_token_valuelike(sd->next)) {
+    // ... to be clear, this is an error, but it IS parsed as a keyword
+    sd->tok.type = TOKEN_KEYWORD;
+    return record_walk(sd, 0);
   }
 
   // match curious cases inside "for (" (nb. we eat "for async" => "for", for convenience)
