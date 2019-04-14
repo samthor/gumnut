@@ -660,6 +660,13 @@ regular_bail:
       // fall-through
 
     case TOKEN_STRING:
+      if (sd->curr->t1.type == TOKEN_T_BRACE) {
+        // if we're a string following ${}, this is part a of a template literal and doesn't have
+        // special ASI casing (e.g. '${\n\n}' isn't really causing a newline)
+        return record_walk(sd, 1);
+      }
+      // fall-through
+
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
       // basic ASI detection inside statement: value on a new line than before, with value
