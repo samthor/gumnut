@@ -3,14 +3,13 @@
 #include "simple.h"
 #include "../utils.h"
 
-#define SSTACK__STMT   0  // within regular statement (not a hoist)
-#define SSTACK__GROUP  1  // group execution context "()" or "[]"
-#define SSTACK__BLOCK  2  // block execution context
-#define SSTACK__DICT   3  // within regular dict "{}"
-#define SSTACK__FUNC   4  // expects upcoming "() {}"
-#define SSTACK__CLASS  5  // expects "extends X"? "{}"
-
-// TODO: missing SSTACK__DO_WHILE ?
+#define SSTACK__STMT     0  // within regular statement (not a hoist)
+#define SSTACK__GROUP    1  // group execution context "()" or "[]"
+#define SSTACK__BLOCK    2  // block execution context
+#define SSTACK__DICT     3  // within regular dict "{}"
+#define SSTACK__FUNC     4  // expects upcoming "() {}"
+#define SSTACK__CLASS    5  // expects "extends X"? "{}"
+#define SSTACK__DO_WHILE 6  // statement within "do ... while"
 
 // SSTACK__STMT
 #define SPECIAL__IMPORT     1
@@ -19,7 +18,8 @@
 #define SPECIAL__FOR        1
 
 // SSTACK__CLASS
-#define SPECIAL__FREE_VALUE 1  // for e.g. "class extends {} {}", left is value
+// for e.g. "class extends {} {}", left is value (just one single token, or e.g. "(foo)")
+#define SPECIAL__FREE_VALUE 1
 
 
 typedef struct {
@@ -250,12 +250,25 @@ static sstack *stack_inc(simpledef *sd, uint8_t stype) {
 }
 
 
-static void yield_valid_asi(simpledef *sd) {
-  if ((!sd->curr->stype || sd->curr->stype == SSTACK__BLOCK) && sd->curr->t1.type) {
-    // if parent is __BLOCK, just pretend a statement happened anyway
-    yield_virt(sd, TOKEN_SEMICOLON);
+static int yield_valid_asi(simpledef *sd) {
+  if (!sd->curr->stype) {
+    if (sd->curr->t1.type) {
+      yield_virt(sd, TOKEN_SEMICOLON);
+    }
+    --sd->curr;
+    printf("added ASI to zero stype, now: %d\n", sd->curr->stype);
+    return 1;
   }
+
+  if (sd->curr->stype == SSTACK__BLOCK && sd->curr->t1.type) {
+    // if parent is __BLOCK, just pretend a statement happened anyway
+    printf("added weird direct-descendant-of-block ASI\n");
+    yield_virt(sd, TOKEN_SEMICOLON);
+    return 1;
+  }
+
   // can't emit here (but JS probably invalid?)
+  return 0;
 }
 
 
@@ -361,6 +374,13 @@ dict_symbol_only:
         return 0;
     }
   }
+
+  // do-while state, allow "while (value);"
+  if (sd->curr->stype == SSTACK__DO_WHILE) {
+    // if (sd->curr->t1)
+    return ERROR__TODO;
+  }
+
 
   // function state, allow () or {}
   if (sd->curr->stype == SSTACK__FUNC) {
@@ -514,7 +534,9 @@ dict_symbol_only:
 
     // match e.g., "if", "catch"
     if (is_control_keyword(sd->tok.p, sd->tok.len)) {
-      int special = (sd->tok.p[0] == 'f' ? SPECIAL__FOR : 0);
+      char start = sd->tok.p[0];
+      int special = (start == 'f' ? SPECIAL__FOR : 0);
+
       int maybe_paren = is_control_paren(sd->tok.p, sd->tok.len);
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
@@ -524,6 +546,12 @@ dict_symbol_only:
         // even outside strict/async mode, this is valid, but an error
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
+      }
+
+      // match "do"
+      if (start == 'd') {
+        stack_inc(sd, SSTACK__DO_WHILE);
+        return 0;
       }
 
       // if we need a paren, consume without putting into statement
@@ -589,6 +617,12 @@ regular_bail:
       return 0;
 
     case TOKEN_EOF:
+      if (!sd->curr->stype) {
+        yield_valid_asi(sd);
+      }
+      record_walk(sd, 0);
+      return 0;
+
     case TOKEN_CLOSE:
       // are we on the right side of a dictionary, closing the dict?
       if (sd->curr->stype == SSTACK__GROUP &&
@@ -603,12 +637,12 @@ regular_bail:
 
       if (!sd->curr->stype) {
         // closing a statement inside brace, yield ASI
-        yield_valid_asi(sd);
-        --sd->curr;  // finish pending value
+        yield_valid_asi(sd);  // decrements from statement
       }
 
       // should be normal block or group, no other cases handled
       if (sd->curr->stype != SSTACK__BLOCK && sd->curr->stype != SSTACK__GROUP) {
+        printf("can't handle type: %d\n", sd->curr->stype);
         return ERROR__INTERNAL;
       }
       --sd->curr;
@@ -635,8 +669,9 @@ regular_bail:
         if (sd->tok.line_no != sd->curr->t1.line_no) {
           // ... with optional ASI
           yield_valid_asi(sd);
+        } else {
+          --sd->curr;  // yield_valid_asi does this otherwise
         }
-        --sd->curr;
         goto restart;
       }
       record_walk(sd, 0);
@@ -673,9 +708,6 @@ regular_bail:
       if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
         sd->tok_has_value = 0;
         yield_valid_asi(sd);
-        if (!sd->curr->stype) {
-          --sd->curr;
-        }
         goto restart;
       }
 
@@ -692,14 +724,13 @@ regular_bail:
         // if we had value, but are on new line, insert an ASI: this is a PostfixExpression that
         // disallows LineTerminator
         if (sd->tok_has_value && sd->tok.line_no != sd->curr->t1.line_no) {
+          sd->tok_has_value = 0;
           yield_valid_asi(sd);
-          if (!sd->curr->stype) {
-            --sd->curr;
-          }
-        } else {
-          // ++ or -- don't change value-ness
-          has_value = sd->tok_has_value;
+          goto restart;
         }
+
+        // ++ or -- don't change value-ness
+        has_value = sd->tok_has_value;
       }
       return record_walk(sd, has_value);
     }
@@ -739,9 +770,6 @@ regular_bail:
     if (!sd->curr->stype && sd->curr->t1.p[0] == 'y' && sd->curr->t1.line_no != sd->tok.line_no) {
       // yield is a restricted keyword
       yield_valid_asi(sd);
-      if (!sd->curr->stype) {
-        --sd->curr;
-      }
     }
     return 0;
   }
@@ -790,7 +818,6 @@ regular_bail:
     if (!sd->curr->stype && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
       // if a keyword on a new line would make an invalid statement, restart with it
       yield_valid_asi(sd);
-      --sd->curr;
       goto restart;
     }
     // ... otherwise, it's an invalid keyword (although `for (var;;x)` is valid, checked above)
@@ -855,16 +882,15 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
 
   int ret = 0;
   for (;;) {
+    int eof = !sd.tok.type;
     char *prev = sd.tok.p;
     ret = simple_consume(&sd);
 
-    if (ret) {
+    if (ret || eof) {
       // regular failure case
     } else if (prev == sd.tok.p) {
       printf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
       ret = ERROR__TODO;
-    } else if (sd.tok.type == TOKEN_EOF) {
-      ret = simple_consume(&sd);  // last run, run EOF to close statements
     } else {
       continue;
     }
@@ -876,8 +902,8 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
     return ret;
   } else if (sd.tok.type != TOKEN_EOF) {
     return ERROR__CLOSE;
-  } else if (sd.curr != sd.stack) {
-    printf("stack is %ld too high\n", sd.curr - sd.stack);
+  } else if (sd.curr != sd.stack + 1) {
+    printf("stack is %ld too high\n", sd.curr - sd.stack + 1);
     return ERROR__STACK;
   }
 

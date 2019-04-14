@@ -92,6 +92,11 @@ int main() {
 
   _test("zero", "\n");
 
+  _test("single symbol", "foo",
+    TOKEN_SYMBOL,    // foo
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("simple", "var x = 1;",
     TOKEN_KEYWORD,    // var
     TOKEN_SYMBOL,    // x
@@ -339,6 +344,17 @@ int main() {
     TOKEN_CLOSE,     // }
     TOKEN_KEYWORD,   // from
     TOKEN_STRING,    // 'blah'
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
+  _test("do-while weird", "do foo\nwhile(0)",
+    TOKEN_KEYWORD,   // do
+    TOKEN_SYMBOL,    // foo
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_KEYWORD,   // while
+    TOKEN_PAREN,     // (
+    TOKEN_NUMBER,    // 0
+    TOKEN_CLOSE,     // )
     TOKEN_SEMICOLON, // ASI ;
   );
 
