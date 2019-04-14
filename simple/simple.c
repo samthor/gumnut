@@ -9,7 +9,7 @@
 #define SSTACK__DICT     3  // within regular dict "{}"
 #define SSTACK__FUNC     4  // expects upcoming "() {}"
 #define SSTACK__CLASS    5  // expects "extends X"? "{}"
-#define SSTACK__DO_WHILE 6  // statement within "do ... while"
+#define SSTACK__DO_WHILE 6
 
 // SSTACK__STMT
 #define SPECIAL__IMPORT     1
@@ -27,7 +27,7 @@ typedef struct {
   token t2;
   uint8_t stype : 3;
   uint8_t context : 3;
-  uint8_t special : 2;
+  uint8_t special : 1;
 } sstack;
 
 
@@ -243,7 +243,7 @@ static int is_use_strict(token *t) {
 static sstack *stack_inc(simpledef *sd, uint8_t stype) {
   // TODO: check bounds
   ++sd->curr;
-  bzero(sd->curr, sizeof(sstack));
+  bzero(sd->curr, sizeof(sstack) * 2);  // also bzero next stack
   sd->curr->stype = stype;
   sd->curr->context = (sd->curr - 1)->context;  // copy context
   return sd->curr;
@@ -252,10 +252,10 @@ static sstack *stack_inc(simpledef *sd, uint8_t stype) {
 
 static int yield_valid_asi(simpledef *sd) {
   if (!sd->curr->stype) {
-    if (sd->curr->t1.type) {
+    --sd->curr;
+    if ((sd->curr + 1)->t1.type) {
       yield_virt(sd, TOKEN_SEMICOLON);
     }
-    --sd->curr;
     printf("added ASI to zero stype, now: %d\n", sd->curr->stype);
     return 1;
   }
@@ -375,13 +375,6 @@ dict_symbol_only:
     }
   }
 
-  // do-while state, allow "while (value);"
-  if (sd->curr->stype == SSTACK__DO_WHILE) {
-    // if (sd->curr->t1)
-    return ERROR__TODO;
-  }
-
-
   // function state, allow () or {}
   if (sd->curr->stype == SSTACK__FUNC) {
     if (sd->tok.type == TOKEN_PAREN) {
@@ -423,8 +416,48 @@ dict_symbol_only:
     }
   }
 
+  // do...while state
+  if (sd->curr->stype == SSTACK__DO_WHILE) {
+    if (sd->curr->t1.type) {
+      // this is end of valid group, emit ASI if there's not one
+      // occurs regardless of newline, e.g. "do ; while (0) foo;" is valid, ASI after close paren
+      if (sd->tok.type == TOKEN_SEMICOLON) {
+        skip_walk(sd, 0);
+      } else {
+        yield_virt(sd, TOKEN_SEMICOLON);
+      }
+      --sd->curr;
+      goto restart;
+    }
+
+    // start of do...while, just push block
+    stack_inc(sd, SSTACK__BLOCK);
+  }
+
   // zero state, determine what to push
   if (sd->curr->stype == SSTACK__BLOCK) {
+    int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_BRACE);
+
+    // check incase at least one statement has occured in DO_WHILE > BLOCK
+    if ((sd->curr - 1)->stype == SSTACK__DO_WHILE && has_statement) {
+      --sd->curr;  // pop to DO_WHILE
+
+      // look for following "while (", fail if not
+      if (sd->next->type == TOKEN_PAREN &&
+          sd->tok.type == TOKEN_LIT &&
+          token_string(&(sd->tok), "while", 5)) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);  // consume while
+        record_walk(sd, 0);  // consume paren
+        stack_inc(sd, SSTACK__GROUP);
+        return 0;
+      }
+
+      // couldn't find suffix "while(", retry
+      // FIXME: error case
+      --sd->curr;
+      goto restart;
+    }
 
     // match anonymous block
     if (sd->tok.type == TOKEN_BRACE) {
@@ -575,7 +608,8 @@ regular_bail:
       if (!sd->curr->stype) {
         --sd->curr;
       }
-      return record_walk(sd, 0);
+      record_walk(sd, 0);  // semi goes in block
+      return 0;
 
     case TOKEN_COMMA:
       // relevant in "async () => blah, foo", reset from parent
@@ -645,7 +679,7 @@ regular_bail:
 
       // anything but ending up in naked block has value
       int has_value = (sd->curr->stype != SSTACK__BLOCK);
-      if ((sd->curr + 1)->stype == SSTACK__GROUP && sd->curr->t1.type == TOKEN_TERNARY) {
+      if (sd->curr->t1.type == TOKEN_TERNARY) {
         // ... but not "? ... :"
         has_value = 0;
       } else if (sd->curr->stype == SSTACK__DICT) {
@@ -839,10 +873,12 @@ regular_bail:
     }
 
     // find "from" after value-like or import starter
-    if (sd->curr->t1.type == TOKEN_SYMBOL ||
+    // FIXME: this conditional is gross
+    if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "from", 4) && (
+        sd->curr->t1.type == TOKEN_SYMBOL ||
         sd->curr->t1.type == TOKEN_BRACE ||
         (sd->curr->t1.type == TOKEN_KEYWORD &&
-        token_string(&(sd->curr->t1), "import", 6))) {
+        token_string(&(sd->curr->t1), "import", 6)))) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
 

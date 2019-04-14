@@ -347,7 +347,26 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
-  _test("do-while weird", "do foo\nwhile(0)",
+  _test("do-while while sanity check", "do while(2) x\nwhile(1) while(0)",
+    TOKEN_KEYWORD,   // do
+    TOKEN_KEYWORD,   // while
+    TOKEN_PAREN,     // (
+    TOKEN_NUMBER,    // 2
+    TOKEN_CLOSE,     // )
+    TOKEN_SYMBOL,    // x
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_KEYWORD,   // while
+    TOKEN_PAREN,     // (
+    TOKEN_NUMBER,    // 1
+    TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_KEYWORD,   // while
+    TOKEN_PAREN,     // (
+    TOKEN_NUMBER,    // 0
+    TOKEN_CLOSE,     // )
+  );
+
+  _test("do-while ASIs", "do foo\nwhile(0)",
     TOKEN_KEYWORD,   // do
     TOKEN_SYMBOL,    // foo
     TOKEN_SEMICOLON, // ASI ;
