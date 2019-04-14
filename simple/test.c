@@ -53,7 +53,7 @@ int run_testdef(testdef *def) {
 
   printf(">> %s\n", def->name);
 
-  int out = prsr_simple(&td, testdef_step, &active);
+  int out = prsr_simple(&td, 0, testdef_step, &active);
   while (active.at + 1 < active.len) {
     token fake;
     fake.type = -1;
@@ -375,6 +375,12 @@ int main() {
     TOKEN_NUMBER,    // 0
     TOKEN_CLOSE,     // )
     TOKEN_SEMICOLON, // ASI ;
+  );
+
+  _test("strict", "'use strict'; let",
+    TOKEN_STRING,    // 'blah'
+    TOKEN_SEMICOLON, // ;
+    TOKEN_KEYWORD,   // let
   );
 
   return ok;

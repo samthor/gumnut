@@ -92,7 +92,8 @@ static int context_is_optional_keyword(uint8_t context, token *t) {
     // do nothing
   } else if (context & CONTEXT__ASYNC && token_string(t, "await", 5)) {
     return 1;
-  } else if (context & CONTEXT__GENERATOR && token_string(t, "yield", 5)) {
+  } else if (context & (CONTEXT__GENERATOR | CONTEXT__STRICT) && token_string(t, "yield", 5)) {
+    // yield is invalid outside a generator in strict mode, but it's a keyword
     return 1;
   }
   return 0;
@@ -194,10 +195,13 @@ static int match_decl(simpledef *sd) {
     return -1;
   }
 
-  if (sd->tok.p[0] != 'l' || sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY) {
-    // OK: const, var or e.g. "let[..]" or "let{..}", destructuring
-  } else if (sd->next->type != TOKEN_LIT || is_op_keyword(sd->next->p, sd->next->len)) {
-    return -1;  // no following literal (e.g. "let = 1", "instanceof" counts as op)
+  // in strict mode, 'let' is always a keyword (well, reserved)
+  if (!(sd->curr->context & CONTEXT__STRICT)) {
+    if (sd->tok.p[0] != 'l' || sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY) {
+      // OK: const, var or e.g. "let[..]" or "let{..}", destructuring
+    } else if (sd->next->type != TOKEN_LIT || is_op_keyword(sd->next->p, sd->next->len)) {
+      return -1;  // no following literal (e.g. "let = 1", "instanceof" counts as op)
+    }
   }
 
   sd->tok.type = TOKEN_KEYWORD;
@@ -252,8 +256,9 @@ static sstack *stack_inc(simpledef *sd, uint8_t stype) {
 
 static int yield_valid_asi(simpledef *sd) {
   if (!sd->curr->stype) {
+    sstack *up = sd->curr;
     --sd->curr;
-    if ((sd->curr + 1)->t1.type) {
+    if (up->t1.type) {
       yield_virt(sd, TOKEN_SEMICOLON);
     }
     printf("added ASI to zero stype, now: %d\n", sd->curr->stype);
@@ -438,6 +443,15 @@ dict_symbol_only:
   if (sd->curr->stype == SSTACK__BLOCK) {
     int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_BRACE);
 
+    // look for 'use strict' of single statement
+    if (sd->curr->t1.type == TOKEN_SEMICOLON && !sd->curr->t2.type) {
+      sstack *up = (sd->curr + 1);
+      if (!up->t2.type && is_use_strict(&(up->t1))) {
+        sd->curr->context |= CONTEXT__STRICT;
+        printf("got use strict in single statement\n");
+      }
+    }
+
     // check incase at least one statement has occured in DO_WHILE > BLOCK
     if ((sd->curr - 1)->stype == SSTACK__DO_WHILE && has_statement) {
       --sd->curr;  // pop to DO_WHILE
@@ -480,13 +494,6 @@ dict_symbol_only:
       return 0;
     }
 
-    // match 'use strict';
-    if (!sd->curr->t1.type && is_use_strict(&(sd->tok))) {
-      // FIXME: can't be e.g. `'use strict'.length`, must be single value
-      // ... could peek or check when statement is 'done'
-      sd->curr->context |= CONTEXT__STRICT;
-    }
-
     // match hoisted function (don't insert a regular statement first)
     int context = match_function(sd);
     if (context >= 0) {
@@ -498,7 +505,6 @@ dict_symbol_only:
     // match hoisted class
     int special = match_class(sd);
     if (special >= 0) {
-      printf("found hoisted class: %d\n", special);
       stack_inc(sd, SSTACK__CLASS);
       sd->curr->special = special;
       return 0;
@@ -652,7 +658,7 @@ regular_bail:
 
     case TOKEN_EOF:
       yield_valid_asi(sd);
-      record_walk(sd, 0);
+      // don't walk over EOF, caller deals with it
       return 0;
 
     case TOKEN_CLOSE:
@@ -806,6 +812,7 @@ regular_bail:
 
   // match non-async await: this is valid iff it _looks_ like unary op use (e.g. await value).
   // this is a lookahead for value, rather than what we normally do
+  // FIXME: valuelike is a bit dangerous, should rather be "not oplike" + "no closers" (and 'await' only operates on right)
   if (token_string(&(sd->tok), "await", 5) && is_token_valuelike(sd->next)) {
     // ... to be clear, this is an error, but it IS parsed as a keyword
     sd->tok.type = TOKEN_KEYWORD;
@@ -900,10 +907,11 @@ regular_bail:
 }
 
 
-int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
+int prsr_simple(tokendef *td, uint8_t context, prsr_callback cb, void *arg) {
   simpledef sd;
   bzero(&sd, sizeof(simpledef));
-  sd.curr = sd.stack + 1;
+  sd.curr = sd.stack;
+  sd.curr->context = context;
   sd.td = td;
   sd.next = &(td->next);
   sd.cb = cb;
@@ -918,7 +926,9 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
     char *prev = sd.tok.p;
     ret = simple_consume(&sd);
 
-    if (ret || eof) {
+    if (eof) {
+      skip_walk(&sd, 0);
+    } else if (ret) {
       // regular failure case
     } else if (prev == sd.tok.p) {
       printf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
@@ -934,8 +944,8 @@ int prsr_simple(tokendef *td, prsr_callback cb, void *arg) {
     return ret;
   } else if (sd.tok.type != TOKEN_EOF) {
     return ERROR__CLOSE;
-  } else if (sd.curr != sd.stack + 1) {
-    printf("stack is %ld too high\n", sd.curr - sd.stack + 1);
+  } else if (sd.curr != sd.stack) {
+    printf("stack is %ld too high\n", sd.curr - sd.stack);
     return ERROR__STACK;
   }
 
