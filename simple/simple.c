@@ -617,9 +617,7 @@ regular_bail:
       return 0;
 
     case TOKEN_EOF:
-      if (!sd->curr->stype) {
-        yield_valid_asi(sd);
-      }
+      yield_valid_asi(sd);
       record_walk(sd, 0);
       return 0;
 
@@ -635,10 +633,8 @@ regular_bail:
         goto restart;  // let dict handle this one (as if it was back on left)
       }
 
-      if (!sd->curr->stype) {
-        // closing a statement inside brace, yield ASI
-        yield_valid_asi(sd);  // decrements from statement
-      }
+      // closing a statement inside brace, yield ASI (will decrement !stype)
+      yield_valid_asi(sd);
 
       // should be normal block or group, no other cases handled
       if (sd->curr->stype != SSTACK__BLOCK && sd->curr->stype != SSTACK__GROUP) {
