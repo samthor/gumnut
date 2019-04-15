@@ -1,4 +1,5 @@
 .DS_Store
 demo
 dist
-/*.js
+.vscode
+*.js
