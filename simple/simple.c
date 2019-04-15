@@ -9,7 +9,7 @@
 #define SSTACK__DICT     3  // within regular dict "{}"
 #define SSTACK__FUNC     4  // expects upcoming "() {}"
 #define SSTACK__CLASS    5  // expects "extends X"? "{}"
-#define SSTACK__DO_WHILE 6
+#define SSTACK__DO_WHILE 6  // state machine for "do ... while"
 
 // SSTACK__STMT
 #define SPECIAL__IMPORT     1
@@ -22,10 +22,18 @@
 #define SPECIAL__FREE_VALUE 1
 
 
+#ifdef __EMSCRIPTEN__
+#define debugf (void)sizeof
+#else
+#include <stdio.h>
+#define debugf printf
+#endif
+
+
 typedef struct {
   token t1;
   token t2;
-  uint8_t stype : 3;
+  uint8_t stype : 4;
   uint8_t context : 3;
   uint8_t special : 1;
 } sstack;
@@ -261,13 +269,13 @@ static int yield_valid_asi(simpledef *sd) {
     if (up->t1.type) {
       yield_virt(sd, TOKEN_SEMICOLON);
     }
-    printf("added ASI to zero stype, now: %d\n", sd->curr->stype);
+    debugf("added ASI to zero stype, now: %d\n", sd->curr->stype);
     return 1;
   }
 
   if (sd->curr->stype == SSTACK__BLOCK && sd->curr->t1.type) {
     // if parent is __BLOCK, just pretend a statement happened anyway
-    printf("added weird direct-descendant-of-block ASI\n");
+    debugf("added weird direct-descendant-of-block ASI\n");
     yield_virt(sd, TOKEN_SEMICOLON);
     return 1;
   }
@@ -448,7 +456,7 @@ dict_symbol_only:
       sstack *up = (sd->curr + 1);
       if (!up->t2.type && is_use_strict(&(up->t1))) {
         sd->curr->context |= CONTEXT__STRICT;
-        printf("got use strict in single statement\n");
+        debugf("got use strict in single statement\n");
       }
     }
 
@@ -475,7 +483,7 @@ dict_symbol_only:
 
     // match anonymous block
     if (sd->tok.type == TOKEN_BRACE) {
-      printf("got anon block\n");
+      debugf("got anon block\n");
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__BLOCK);
       return 0;
@@ -638,7 +646,7 @@ regular_bail:
         if (type == TOKEN_LIT) {
           // nb. we can now be confident this _was_async, announce
           sd->curr->t2.type = TOKEN_KEYWORD;
-          printf("we now know that prior `async` is keyword\n");
+          debugf("we now know that prior `async` is keyword\n");
           // FIXME: allow testing/other to deal with out-of-order
           // sd->cb(sd->arg, &(sd->curr->t2));
         }
@@ -669,7 +677,7 @@ regular_bail:
         if (sd->curr->stype != SSTACK__DICT) {
           return ERROR__INTERNAL;
         }
-        printf("closing a dict\n");
+        debugf("closing a dict\n");
         goto restart;  // let dict handle this one (as if it was back on left)
       }
 
@@ -678,7 +686,7 @@ regular_bail:
 
       // should be normal block or group, no other cases handled
       if (sd->curr->stype != SSTACK__BLOCK && sd->curr->stype != SSTACK__GROUP) {
-        printf("can't handle type: %d\n", sd->curr->stype);
+        debugf("can't handle type: %d\n", sd->curr->stype);
         return ERROR__INTERNAL;
       }
       --sd->curr;
@@ -695,7 +703,7 @@ regular_bail:
 
       if (sd->tok.type != TOKEN_EOF) {
         // noisy for EOF, where we don't care /shrug
-        printf("popped stack (%ld) in op? has_value=%d (stype=%d)\n", sd->curr - sd->stack, has_value, sd->curr->stype);
+        debugf("popped stack (%ld) in op? has_value=%d (stype=%d)\n", sd->curr - sd->stack, has_value, sd->curr->stype);
       }
       return skip_walk(sd, has_value);
 
@@ -772,7 +780,7 @@ regular_bail:
     }
 
     default:
-      printf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
+      debugf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
       // fall-through
 
     case TOKEN_COLON:
@@ -891,7 +899,7 @@ regular_bail:
 
       if (sd->tok.type == TOKEN_STRING && sd->tok.p[0] != '`') {
         // TODO: mark as special, this is import target
-        printf("found import target: %.*s\n", sd->tok.len, sd->tok.p);
+        debugf("found import target: %.*s\n", sd->tok.len, sd->tok.p);
         record_walk(sd, 0);
       }
 
@@ -931,7 +939,7 @@ int prsr_simple(tokendef *td, uint8_t context, prsr_callback cb, void *arg) {
     } else if (ret) {
       // regular failure case
     } else if (prev == sd.tok.p) {
-      printf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
+      debugf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
       ret = ERROR__TODO;
     } else {
       continue;
@@ -945,7 +953,7 @@ int prsr_simple(tokendef *td, uint8_t context, prsr_callback cb, void *arg) {
   } else if (sd.tok.type != TOKEN_EOF) {
     return ERROR__CLOSE;
   } else if (sd.curr != sd.stack) {
-    printf("stack is %ld too high\n", sd.curr - sd.stack);
+    debugf("stack is %ld too high\n", sd.curr - sd.stack);
     return ERROR__STACK;
   }
 

@@ -3,19 +3,35 @@
 <head>
 <script src="utils.js"></script>
 <script>
-  
+
+let globalCallback;
+
 const importObject = (function() {
   const memory = new WebAssembly.Memory({initial: 256, maximum: 256});
+
+  const stackTop = 2048 + 1024;  // from ignored harness
   const env = {
-    'abortStackOverflow': () => { throw new Error('abortStackOverflow'); },
-    'table': new WebAssembly.Table({initial: 0, maximum: 0, element: 'anyfunc'}),
-    'tableBase': 0,
-    'memory': memory,
-    'memoryBase': 1024,
-    'STACKTOP': 0,
-    'STACK_MAX': memory.buffer.byteLength,
-    'DYNAMICTOP_PTR': 0,
+    memory: memory,
+    table: new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'}),
+    __table_base: 0,
+    DYNAMICTOP_PTR: stackTop,
+    STACKTOP: stackTop + 16,
+    STACK_MAX: 1024 * 1024 * 5,
+    abort() { throw new Error('abort'); },
+    abortOnCannotGrowMemory() { throw new Error('abortOnCannotGrowMemory'); },
+    enlargeMemory() { throw new Error('enlargeMemory'); },
+    getTotalMemory() { return memory.buffer.byteLength; },
+    ___setErrNo(v) { throw new Error('errno'); },
+    _emscripten_memcpy_big(dst, src, num) {
+      view.set(view.subarray(src, src + num), dst);
+      return dst;
+    },
+    _token_callback(p, len, line_no, type) {
+      console.info('got token callback', line_no, type);
+      globalCallback(p, len, line_no, type);
+    },
   };
+
   return {env};
 }());
 
@@ -33,20 +49,24 @@ const TOKENS = {
   OP: 5,
   ARROW: 6,
   COLON: 7,
-  TERNARY: 8,
-  BRACE: 9,
-  ARRAY: 10,
-  PAREN: 11,
+  BRACE: 8,
+  ARRAY: 9,
+  PAREN: 10,
+  T_BRACE: 11,
+  TERNARY: 12,
+  CLOSE: 13,
 
-  COMMENT: 12,
-  STRING: 13,
-  REGEXP: 14,
-  NUMBER: 15,
-  SYMBOL: 16,
-  KEYWORD: 17,
-  LABEL: 18,
+  COMMENT: 14,
+  STRING: 15,
+  REGEXP: 16,
+  NUMBER: 17,
+  SYMBOL: 18,
+  KEYWORD: 19,
+  LABEL: 20,
 
-  LIT: 19,
+  LIT: 29,
+  SLASH: 30,
+  INTERNAL: 31,
 };
 
 const REVERSE = (function() {
@@ -65,6 +85,7 @@ window.addEventListener('load', (ev) => {
       node.title = type.toLowerCase();
     }
     node.className = type.toLowerCase();
+    node.title = type;
     output.appendChild(document.createTextNode(' '));
     output.appendChild(node);
     return node;
@@ -117,24 +138,20 @@ window.addEventListener('load', (ev) => {
 
       const tokens = [];
       const start = performance.now();
-      for (;;) {
-        const next = exports._prsr_run();
-        if (next !== 0) {
-          console.warn('got err at', next);
-          break;
-        }
-        const token = {
-          type: exports._prsr_get_type(),
-          at: exports._prsr_get_at(),
-          len: exports._prsr_get_len(),
-          lineNo: exports._prsr_get_line_no(),
-          invalid: exports._prsr_get_invalid(),
-        };
-        if (token.type === 0) {
-          break;  // don't include EOF
-        }
+
+      globalCallback = (at, len, lineNo, type) => {
+        const token = {at, len, lineNo, type, invalid: false};
         tokens.push(token);
+      };
+      for (;;) {
+        const out = exports._prsr_run(0);
+        if (out) {
+          console.info('got err', out);
+        }
+        // TODO: call many times if valid
+        break;
       }
+
       const took = performance.now() - start;
       stats.textContent = took.toLocaleString({minimumSignificantDigits: 8}) + 'ms';
 
@@ -209,6 +226,9 @@ document.addEventListener('drop', (ev) => {
   pre span.string,
   pre span.regexp {
     color: red;
+  }
+  pre span.op {
+    color: purple;
   }
   pre span.label {
     color: brown;

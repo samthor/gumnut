@@ -1,44 +1,30 @@
 #include <string.h>
 #include "../token.h"
-#include "../parser.h"
+#include "../simple/simple.h"
 
 #include <emscripten.h>
 
-static parserdef shared_parser;
-static token out;
+extern void token_callback(int p, int len, int line_no, int type);
+
+void internal_callback(void *arg, token *out) {
+  // arg is our shared_td
+  tokendef *td = (tokendef *) arg;
+  int p = out->p - td->buf;
+  token_callback(p, out->len, out->line_no, out->type);
+}
+
+static tokendef shared_td;
 
 EMSCRIPTEN_KEEPALIVE
 int prsr_setup(char *buf) {
-  prsr_parser_init(&shared_parser, buf);
+  shared_td = prsr_init_token(buf);
   return 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
-int prsr_run() {
-  return prsr_next(&shared_parser, &out);
-}
+int prsr_run(int strict) {
+  int context = (strict ? CONTEXT__STRICT : 0);
 
-EMSCRIPTEN_KEEPALIVE
-int prsr_get_at() {
-  return out.p - shared_parser.td.buf;
-}
-
-EMSCRIPTEN_KEEPALIVE
-int prsr_get_len() {
-  return out.len;
-}
-
-EMSCRIPTEN_KEEPALIVE
-int prsr_get_invalid() {
-  return out.invalid;
-}
-
-EMSCRIPTEN_KEEPALIVE
-int prsr_get_line_no() {
-  return out.line_no;
-}
-
-EMSCRIPTEN_KEEPALIVE
-int prsr_get_type() {
-  return out.type;
+  // TODO: make this yield a few tokens at a time
+  return prsr_simple(&shared_td, 0, internal_callback, &shared_td);
 }
