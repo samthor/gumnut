@@ -10,9 +10,7 @@
 #define SSTACK__FUNC     4  // expects upcoming "name () {}"
 #define SSTACK__CLASS    5  // expects "extends X"? "{}"
 #define SSTACK__DO_WHILE 6  // state machine for "do ... while"
-
-// SSTACK__STMT
-#define SPECIAL__IMPORT     1
+#define SSTACK__MODULE   7  // state machine for import/export defs
 
 // SSTACK__GROUP
 #define SPECIAL__FOR        1
@@ -312,6 +310,19 @@ static int is_token_valuelike_keyword(token *t) {
 static int simple_consume(simpledef *sd) {
 restart:
 
+  // import state
+  if (sd->curr->stype == SSTACK__MODULE) {
+
+    // match:
+    //   a as b from [stmt]
+    //   a as b, a from [stmt]
+    //   z, {a as b}
+
+
+
+    return ERROR__TODO;
+  }
+
   // dict state (left)
   if (sd->curr->stype == SSTACK__DICT) {
     uint8_t context = 0;
@@ -568,9 +579,15 @@ restart:
     if (token_string(&(sd->tok), "import", 6)) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
-      stack_inc(sd, 0);
-      sd->curr->special = SPECIAL__IMPORT;
-      goto restart;
+
+      // short-circuit for "import 'foo'"
+      if (sd->tok.type == TOKEN_STRING) {
+        sd->tok.mark = MARK_IMPORT;
+        goto regular_bail;
+      }
+
+      stack_inc(sd, SSTACK__MODULE);
+      return 0;
     }
 
     // match "export" which is sort of a no-op, resets to default state
@@ -895,42 +912,6 @@ regular_bail:
     // ... exception: `for (var x;;)` is valid
     sd->tok.type = TOKEN_KEYWORD;
     return record_walk(sd, 0);
-  }
-
-  // look for import special-cases
-  if (!sd->curr->stype && sd->curr->special == SPECIAL__IMPORT) {
-
-    // FIXME: change "*" to SYMBOL?
-    int after_value = sd->curr->t1.type == TOKEN_SYMBOL ||
-        (sd->curr->t1.type == TOKEN_OP && token_string(&(sd->curr->t1), "*", 1));
-
-    // find "as" between two symbols (star on left is OK)
-    if (after_value &&
-        sd->next->type == TOKEN_LIT &&
-        sd->tok.type == TOKEN_LIT &&
-        token_string(&(sd->tok), "as", 2)) {
-      sd->tok.type = TOKEN_KEYWORD;
-      return record_walk(sd, 0);
-    }
-
-    // find "from" after value-like or import starter
-    // FIXME: this conditional is gross
-    if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "from", 4) && (
-        sd->curr->t1.type == TOKEN_SYMBOL ||
-        sd->curr->t1.type == TOKEN_BRACE ||
-        (sd->curr->t1.type == TOKEN_KEYWORD &&
-        token_string(&(sd->curr->t1), "import", 6)))) {
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
-
-      if (sd->tok.type == TOKEN_STRING && sd->tok.p[0] != '`') {
-        // TODO: mark as special, this is import target
-        debugf("found import target: %.*s\n", sd->tok.len, sd->tok.p);
-        record_walk(sd, 0);
-      }
-
-      return 0;
-    }
   }
 
   // if nothing else known, treat as symbol

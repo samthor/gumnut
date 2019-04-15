@@ -30,6 +30,14 @@ const ready = utils.createWebAssembly('runner.wasm', importObject)
     .catch((err) => console.warn('err loading wasm', err));
 const exports = ready.then((wa) => wa.instance.exports);
 
+function reverseDict(dict) {
+  const m = new Map();
+  Object.keys(dict).forEach((key) => {
+    m.set(dict[key], key.toLowerCase());
+  });
+  return (number) => m.get(number) || null;
+};
+
 const TOKENS = {
   EOF: 0,
   SEMICOLON: 1,
@@ -59,14 +67,13 @@ const TOKENS = {
   SLASH: 30,
   INTERNAL: 31,
 };
+const TOKEN_LOOKUP = reverseDict(TOKENS);
 
-const REVERSE = (function() {
-  const m = new Map();
-  Object.keys(TOKENS).forEach((key) => {
-    m.set(TOKENS[key], key);
-  });
-  return m;
-}());
+const MARKS = {
+  IMPORT: 1,
+};
+const MARK_LOOKUP = reverseDict(MARKS);
+
 
 window.addEventListener('load', (ev) => {
   const append = (text, type='') => {
@@ -98,10 +105,14 @@ window.addEventListener('load', (ev) => {
       }
 
       const s = view.read(token.at, token.len);
-      const node = append(s, REVERSE.get(token.type));
+      const node = append(s, TOKEN_LOOKUP(token.type));
 
       if (token.invalid) {
-        node.classList.add('_invalid');
+        node.classList.add('__invalid');
+      }
+      const mark = MARK_LOOKUP(token.mark);
+      if (mark) {
+        node.classList.add('_' + mark);
       }
 
       switch (token.type) {
@@ -133,7 +144,7 @@ window.addEventListener('load', (ev) => {
       let err = 0;
       try {
         globalCallback = (at, len, lineNo, type, mark) => {
-          const token = {at, len, lineNo, type, invalid: false};
+          const token = {at, len, lineNo, type, mark, invalid: false};
 
           // if we have find LIT, it's probably an ambiguous "async () =>", so save it for later
           if (token.type == TOKENS.LIT) {
@@ -247,8 +258,11 @@ document.addEventListener('drop', (ev) => {
     background: red;
     color: white;
   }
-  pre span._invalid {
+  pre span.__invalid {
     text-decoration: underline;
+  }
+  pre span._import {
+    font-style: italic;
   }
   #stats {
     white-space: pre;

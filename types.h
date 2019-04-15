@@ -66,5 +66,8 @@ typedef struct {
 #define TOKEN_LIT       29  // symbol, keyword or label
 #define TOKEN_SLASH     30  // ambigous slash that is op or regexp
 
+// special marks
+#define MARK_IMPORT     1   // this is the name inside static import
+
 #endif//_TYPES_H
 
