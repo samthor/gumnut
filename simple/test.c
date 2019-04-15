@@ -383,5 +383,29 @@ int main() {
     TOKEN_KEYWORD,   // let
   );
 
+  _test("arrow ASI bug", "{_ => {}}",
+    TOKEN_BRACE,     // {
+    TOKEN_SYMBOL,    // _
+    TOKEN_ARROW,     // =>
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // }
+  );
+
+  _test("arrow value bug", "{_ => {}/123/g;}",
+    TOKEN_BRACE,     // {
+    TOKEN_SYMBOL,    // _
+    TOKEN_ARROW,     // =>
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_OP,        // /
+    TOKEN_NUMBER,    // 123
+    TOKEN_OP,        // /
+    TOKEN_SYMBOL,    // g
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // }
+  );
+
   return ok;
 }

@@ -655,7 +655,8 @@ regular_bail:
       if (sd->td->next.type == TOKEN_BRACE) {
         // the sensible arrow function case, with a proper body
         // e.g. "() => { statements }"
-        record_walk(sd, -1);
+        record_walk(sd, -1);  // consume =>
+        record_walk(sd, -1);  // consume {
         stack_inc(sd, SSTACK__BLOCK);
       } else {
         // just change statement's context (e.g. () => async () => () => ...)
