@@ -27,7 +27,7 @@
 #define debugf (void)sizeof
 #else
 #include <stdio.h>
-#define debugf printf
+#define debugf(...) fprintf(stderr, __VA_ARGS__)
 #endif
 
 
@@ -986,16 +986,6 @@ regular_bail:
     }
   }
 
-  // look for async arrow function
-  if (token_string(&(sd->tok), "async", 5)) {
-    if (sd->next->type == TOKEN_LIT) {
-      sd->tok.type = TOKEN_KEYWORD;
-    } else if (sd->next->type == TOKEN_PAREN) {
-      // otherwise, actually ambiguous: leave as TOKEN_LIT
-      return record_walk(sd, 0);
-    }
-  }
-
   // aggressive keyword match inside statement
   if (is_always_keyword(sd->tok.p, sd->tok.len, sd->curr->context & CONTEXT__STRICT)) {
     if (!sd->curr->stype && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
@@ -1003,10 +993,22 @@ regular_bail:
       yield_valid_asi(sd);
       goto restart;
     }
-    // ... otherwise, it's an invalid keyword (although `for (var;;x)` is valid, checked above)
+    // ... otherwise, it's an invalid keyword
     // ... exception: `for (var x;;)` is valid
     sd->tok.type = TOKEN_KEYWORD;
     return record_walk(sd, 0);
+  }
+
+  // look for async arrow function
+  if (token_string(&(sd->tok), "async", 5)) {
+    if (sd->curr->t1.type == TOKEN_DOT) {
+      sd->tok.type = TOKEN_SYMBOL;
+    } else if (sd->next->type == TOKEN_LIT) {
+      sd->tok.type = TOKEN_KEYWORD;
+    } else if (sd->next->type == TOKEN_PAREN) {
+      // otherwise, actually ambiguous: leave as TOKEN_LIT
+      return record_walk(sd, 0);
+    }
   }
 
   // if nothing else known, treat as symbol

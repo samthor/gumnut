@@ -52,7 +52,7 @@ void render_callback(void *arg, token *out) {
 }
 
 int main() {
-  printf("sizeof(tokendef)=%lu\n", sizeof(tokendef));
+  fprintf(stderr, "sizeof(tokendef)=%lu\n", sizeof(tokendef));
 
   char *buf;
   if (read_stdin(&buf) < 0) {
@@ -62,7 +62,7 @@ int main() {
   tokendef td = prsr_init_token(buf);
   int out = prsr_simple(&td, 1, render_callback, NULL);
   if (out) {
-    printf("ret=%d\n", out);
+    fprintf(stderr, "ret=%d\n", out);
   }
   return out;
 }

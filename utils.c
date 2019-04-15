@@ -19,9 +19,8 @@
 #define MAX_LENGTH 10
 
 static const char always_keyword[] =
-    " async break case catch class const continue debugger default delete do else enum export"
-    " extends finally for function if import new return static switch throw try typeof var void"
-    " while with ";
+    " break case catch class const continue debugger default delete do else enum export extends"
+    " finally for function if import new return static switch throw try typeof var void while with";
 
 static const char always_strict_keyword[] =
     " implements package protected interface private public ";
@@ -45,7 +44,7 @@ int in_space_string(const char *big, char *s, int len) {
   if (len <= 0 || len > MAX_LENGTH) {
     return 0;
   }
-  char cand[MAX_LENGTH + 2];
+  char cand[MAX_LENGTH + 3];  // space before, space after, null terminate
   memcpy(cand+1, s, len);
   cand[0] = ' ';
   cand[len+1] = ' ';
