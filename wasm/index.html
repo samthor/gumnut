@@ -27,7 +27,6 @@ const importObject = (function() {
       return dst;
     },
     _token_callback(p, len, line_no, type) {
-      console.info('got token callback', line_no, type);
       globalCallback(p, len, line_no, type);
     },
   };
@@ -143,18 +142,18 @@ window.addEventListener('load', (ev) => {
         const token = {at, len, lineNo, type, invalid: false};
         tokens.push(token);
       };
+      let err = 0;
       for (;;) {
-        const out = exports._prsr_run(0);
-        if (out) {
-          console.info('got err', out);
-        }
+        err = exports._prsr_run(0);
         // TODO: call many times if valid
         break;
       }
 
       const took = performance.now() - start;
-      stats.textContent = took.toLocaleString({minimumSignificantDigits: 8}) + 'ms';
-
+      stats.textContent = `${took.toLocaleString({minimumSignificantDigits: 8})}ms`;
+      if (err) {
+        stats.textContent += ` err=${err}`;
+      }
       render(tokens, raw);
     };
 
