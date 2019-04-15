@@ -16,6 +16,8 @@
 
 #include <string.h>
 
+#define MAX_LENGTH 10
+
 static const char always_keyword[] =
     " async break case catch class const continue debugger default delete do else enum export"
     " extends finally for function if import new return static switch throw try typeof var void"
@@ -25,7 +27,7 @@ static const char always_strict_keyword[] =
     " implements package protected interface private public ";
 
 static int could_be_keyword(char *s, int len) {
-  if (len > 10 || len < 2) {
+  if (len > MAX_LENGTH || len < 2) {
     return 0;  // no statements <2 ('if' etc) or >10 ('implements')
   }
   for (int i = 0; i < len; ++i) {
@@ -40,10 +42,10 @@ static int could_be_keyword(char *s, int len) {
 int in_space_string(const char *big, char *s, int len) {
   // TODO: do something better? strstr is probably fast D:
   // search for: space + candidate + space
-  if (len > 14) {
+  if (len <= 0 || len > MAX_LENGTH) {
     return 0;
   }
-  char cand[16];
+  char cand[MAX_LENGTH + 2];
   memcpy(cand+1, s, len);
   cand[0] = ' ';
   cand[len+1] = ' ';
@@ -55,91 +57,22 @@ int in_space_string(const char *big, char *s, int len) {
 int is_always_keyword(char *s, int len, int strict) {
   if (!could_be_keyword(s, len)) {
     return 0;
+  } else if (strict && in_space_string(always_strict_keyword, s, len)) {
+    return 1;
+  } else {
+    // does not contain 'in' or 'instanceof', as they are ops
+    // does not contain 'super' or 'this', treated as symbol
+    return in_space_string(always_keyword, s, len);
   }
-  // FIXME: strict mode reserved "implements package protected interface private public"
-  // nb. reserved "enum"
-  // nb. does not contain 'in' or 'instanceof', as they are ops
-  // does not contain 'super' or 'this', treated as symbol
-  return in_space_string(always_keyword, s, len);
 }
 
 // nb. this is "is label safe"
 int is_reserved_word(char *s, int len, int strict) {
-  if (!could_be_keyword(s, len)) {
-    return 0;
-  }
-  if (strict && in_space_string(always_strict_keyword, s, len)) {
+  if (is_always_keyword(s, len, strict)) {
     return 1;
   }
   static const char v[] = " const false in instanceof null super this true var ";
-  return in_space_string(always_keyword, s, len) || in_space_string(v, s, len);
-}
-
-int is_restrict_keyword(char *s, int len) {
-  if (len > 8 || len < 5) {
-    return 0;  // no restrict <5 ('yield' etc) or >8 ('continue' etc)
-  }
-  static const char v[] = " break continue debugger return throw yield ";
   return in_space_string(v, s, len);
-}
-
-// keywords that may cause declarations (function is hoisted, class _technically_ isn't)
-int is_hoist_keyword(char *s, int len) {
-  return (len == 5 && !memcmp(s, "class", 5)) || (len == 8 && !memcmp(s, "function", 8));
-}
-
-// keywords that operate on something and return a value
-//   e.g. 'void 1' returns undefined
-//   yield is weird, it doesn't work as "yield + 1": needs "(yield) + 1"
-int is_expr_keyword(char *s, int len) {
-  if (len < 3 || len > 6) {
-    return 0;
-  }
-  static const char v[] = " await delete new typeof void yield ";
-  return in_space_string(v, s, len);
-}
-
-int is_labellike_keyword(char *s, int len) {
-  return (len == 4 && !memcmp(s, "case", 4)) || (len == 7 && !memcmp(s, "default", 7));
-}
-
-int is_decl_keyword(char *s, int len) {
-  if (len < 3 || len > 5) {
-    return 0;
-  }
-  static const char v[] = " var let const ";
-  return in_space_string(v, s, len);
-}
-
-int is_begin_expr_keyword(char *s, int len) {
-  if (len < 3 || len > 6) {
-    return 0;
-  }
-  static const char v[] = " var let const return throw ";
-  return in_space_string(v, s, len);
-}
-
-int is_op_keyword(char *s, int len) {
-  return (len == 2 || len == 10) &&
-      !memcmp(s, "in", 2) && (len == 2 || !memcmp(s+2, "stanceof", 8));
-}
-
-// keywords that may optionally have a label (and only a label) following them
-int is_label_keyword(char *s, int len) {
-  return (len == 5 && !memcmp(s, "break", 5)) || (len == 8 && !memcmp(s, "continue", 8));
-}
-
-int is_isolated_keyword(char *s, int len) {
-  return (len == 8 && !memcmp(s, "debugger", 8));
-}
-
-// is ++ or --
-int is_double_addsub(char *s, int len) {
-  return len == 2 && (s[0] == '+' || s[0] == '-') && s[0] == s[1];
-}
-
-int is_getset(char *s, int len) {
-  return len == 3 && (s[0] == 'g' || s[0] == 's') && !memcmp(s+1, "et", 2);
 }
 
 // whether this is a control keyword
@@ -158,27 +91,30 @@ int is_control_paren(char *s, int len) {
   return in_space_string(v, s, len);
 }
 
-// keywords that operate on objects
-int is_always_operates(char *s, int len) {
-  // * some of these are syntax errors, and some _missing_ are syntax errors
-  // * does NOT include `let` as it can be used as a keyword
-  // * does NOT include `await` or `yield` as they are optional
-  static const char v[] =
-    " break case const continue default delete do else export extends finally"
-    " new return throw try typeof var void ";
+int is_decl_keyword(char *s, int len) {
+  if (len < 3 || len > 5) {
+    return 0;
+  }
+  static const char v[] = " var let const ";
   return in_space_string(v, s, len);
 }
 
-int is_dict_after(char *s, int len) {
-  // * does NOT include `await` or `yield` as they are optional
-  static const char v[] = " case delete extends in instanceof new return throw typeof void ";
-  return in_space_string(v, s, len);
+int is_op_keyword(char *s, int len) {
+  return (len == 2 || len == 10) &&
+      !memcmp(s, "in", 2) && (len == 2 || !memcmp(s+2, "stanceof", 8));
 }
 
-int is_async(char *s, int len) {
-  return len == 5 && !memcmp(s, "async", 5);
+// keywords that may optionally have a label (and only a label) following them
+int is_label_keyword(char *s, int len) {
+  return (len == 5 && !memcmp(s, "break", 5)) || (len == 8 && !memcmp(s, "continue", 8));
 }
 
-int is_case(char *s, int len) {
-  return len == 4 && !memcmp(s, "case", 4);
+// is ++ or --
+int is_double_addsub(char *s, int len) {
+  return len == 2 && (s[0] == '+' || s[0] == '-') && s[0] == s[1];
 }
+
+int is_getset(char *s, int len) {
+  return len == 3 && (s[0] == 'g' || s[0] == 's') && !memcmp(s+1, "et", 2);
+}
+
