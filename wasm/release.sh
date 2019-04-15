@@ -2,7 +2,7 @@
 
 set -eu
 
-./wasm.sh
+./wasm.sh release
 
 mkdir -p ../dist
 cp runner.wasm index.html utils.js ../dist
