@@ -105,11 +105,13 @@ int main() {
     TOKEN_SEMICOLON, // ;
   );
 
-  _test("ternary", "a ? : :",
+  _test("ternary", "a ? : :\n?:",
     TOKEN_SYMBOL,    // a
     TOKEN_TERNARY,   // ?
     TOKEN_CLOSE,     // :
     TOKEN_COLON,     // :
+    TOKEN_TERNARY,   // ?
+    TOKEN_CLOSE,     // :
     TOKEN_SEMICOLON, // ASI ;
   );
 
