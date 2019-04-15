@@ -14,17 +14,17 @@ void internal_callback(void *arg, token *out) {
 }
 
 static tokendef shared_td;
+static int shared_is_module = 0;
 
 EMSCRIPTEN_KEEPALIVE
-int prsr_setup(char *buf) {
+int prsr_setup(char *buf, int is_module) {
   shared_td = prsr_init_token(buf);
+  shared_is_module = is_module;
   return 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
-int prsr_run(int strict) {
-  int context = (strict ? CONTEXT__STRICT : 0);
-
+int prsr_run() {
   // TODO: make this yield a few tokens at a time
-  return prsr_simple(&shared_td, 0, internal_callback, &shared_td);
+  return prsr_simple(&shared_td, shared_is_module, internal_callback, &shared_td);
 }

@@ -135,7 +135,7 @@ window.addEventListener('load', (ev) => {
     const update = () => {
       const raw = input.value;
       const view = new utils.CodeView(memory, raw);
-      exports._prsr_setup(view.at);
+      exports._prsr_setup(view.at, module.checked ? 1 : 0);
 
       const futureLitResolve = new Map();
       const tokens = [];
@@ -194,6 +194,7 @@ window.addEventListener('load', (ev) => {
       });
     };
     input.oninput = dedup;
+    module.onchange = dedup;
     dedup();
   });
 });
@@ -275,6 +276,12 @@ document.addEventListener('drop', (ev) => {
   <a href="https://github.com/samthor/prsr">GitHub</a>
 </div>
 
+<div>
+  <label>
+    <input type="checkbox" id="module" />
+    Module
+  </label>
+</div>
 <textarea id="input" rows="20" cols="100"></textarea>
 <script>
 window.addEventListener('hashchange', (ev) => {

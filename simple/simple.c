@@ -35,7 +35,7 @@ typedef struct {
   token t1;
   token t2;
   uint8_t stype : 4;
-  uint8_t context : 3;
+  uint8_t context : 4;
   uint8_t special : 1;
 } sstack;
 
@@ -45,6 +45,7 @@ typedef struct {
   token *next;  // convenience
   token tok;
   int tok_has_value;  // has_value current tok was read with
+  int is_module;
 
   prsr_callback cb;
   void *arg;
@@ -313,14 +314,96 @@ restart:
   // import state
   if (sd->curr->stype == SSTACK__MODULE) {
 
-    // match:
-    //   a as b from [stmt]
-    //   a as b, a from [stmt]
-    //   z, {a as b}
+    switch (sd->tok.type) {
+      case TOKEN_BRACE:
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__MODULE);
+        return 0;
 
+      // unexpected, but handle anyway
+      case TOKEN_T_BRACE:
+      case TOKEN_PAREN:
+      case TOKEN_ARRAY:
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__GROUP);
+        return 0;
 
+      case TOKEN_LIT:
+        break;
 
-    return ERROR__TODO;
+      case TOKEN_COMMA:
+        return record_walk(sd, 0);
+
+      case TOKEN_CLOSE:
+        if ((sd->curr - 1)->stype != SSTACK__MODULE) {
+          return ERROR__INTERNAL;  // impossible, we're at top-level
+        }
+        int line_no = sd->tok.line_no;
+        skip_walk(sd, 0);
+        --sd->curr;  // close inner
+
+        if ((sd->curr - 1)->stype == SSTACK__MODULE) {
+          return 0;  // invalid several descendant case
+        }
+        --sd->curr;  // close outer
+
+        if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "from", 4)) {
+          // ... inner {} must have trailer "from './path'"
+          sd->tok.type = TOKEN_KEYWORD;
+          record_walk(sd, 0);
+          if (sd->tok.type == TOKEN_STRING) {
+            sd->tok.mark = MARK_IMPORT;
+          }
+        } else if (sd->tok.type != TOKEN_SEMICOLON && sd->tok.line_no != line_no) {
+          // ... or just abandon, generating semi if needed (valid in export case)
+          yield_virt(sd, TOKEN_SEMICOLON);
+        }
+        return 0;
+
+      case TOKEN_OP:
+        if (token_string(&(sd->tok), "*", 1)) {
+          sd->tok.type = TOKEN_SYMBOL;  // pretend this is symbol
+          return record_walk(sd, 0);
+        }
+        // fall-through
+
+      default:
+        if ((sd->curr - 1)->stype != SSTACK__MODULE) {
+          debugf("abandoning module for reasons\n");
+          --sd->curr;
+          goto restart;  // not inside submodule, just give up
+        }
+        return record_walk(sd, 0);
+    }
+
+    // consume and bail out on "from" if it follows a symbol or close brace
+    if ((sd->curr - 1)->stype != SSTACK__MODULE &&
+        sd->curr->t1.type == TOKEN_SYMBOL &&
+        token_string(&(sd->tok), "from", 4)) {
+      --sd->curr;  // close outer
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+
+      // restart as regular statement, marking as import name
+      if (sd->tok.type == TOKEN_STRING) {
+        sd->tok.mark = MARK_IMPORT;
+      }
+      return 0;
+    }
+
+    // consume "as" as a keyword if it follows a symbol
+    if (sd->curr->t1.type == TOKEN_SYMBOL && token_string(&(sd->tok), "as", 2)) {
+      sd->tok.type = TOKEN_KEYWORD;
+      return record_walk(sd, 0);
+    }
+
+    // otherwise just mask as symbol or keyword
+    if (is_reserved_word(sd->tok.p, sd->tok.len, sd->curr->context & CONTEXT__STRICT)) {
+      sd->tok.type = TOKEN_KEYWORD;
+    } else {
+      sd->tok.type = TOKEN_SYMBOL;
+    }
+    return record_walk(sd, 0);
   }
 
   // dict state (left)
@@ -363,6 +446,7 @@ restart:
         sd->curr->context = context;
         goto restart;
 
+      case TOKEN_T_BRACE:  // incase someone puts `${foo}` on the left
       case TOKEN_COLON:
         record_walk(sd, 0);
         stack_inc(sd, SSTACK__GROUP);
@@ -575,35 +659,46 @@ restart:
       goto regular_bail;  // e.g. "return ..." must be a statement
     }
 
-    // match "import" which starts a sstack special
-    if (token_string(&(sd->tok), "import", 6)) {
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
+    // module valid cases
+    if (sd->curr == sd->stack && sd->is_module) {
 
-      // short-circuit for "import 'foo'"
-      if (sd->tok.type == TOKEN_STRING) {
-        sd->tok.mark = MARK_IMPORT;
-        goto regular_bail;
-      }
-
-      stack_inc(sd, SSTACK__MODULE);
-      return 0;
-    }
-
-    // match "export" which is sort of a no-op, resets to default state
-    if (token_string(&(sd->tok), "export", 6)) {
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
-
-      if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "default", 7)) {
+      // match "import" which starts a sstack special
+      if (token_string(&(sd->tok), "import", 6)) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
+
+        // short-circuit for "import 'foo'"
+        if (sd->tok.type == TOKEN_STRING) {
+          sd->tok.mark = MARK_IMPORT;
+          goto regular_bail;
+        }
+
+        stack_inc(sd, SSTACK__MODULE);
+        return 0;
       }
 
-      // interestingly: "export default function() {}" is valid and a decl
-      // so classic JS rules around decl must have names are ignored
-      // ... "export default if (..)" is invalid, so we don't care if you do wrong things after
-      return 0;
+      // match "export" which is sort of a no-op, resets to default state
+      if (token_string(&(sd->tok), "export", 6)) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+
+        if ((sd->tok.type == TOKEN_SYMBOL && token_string(&(sd->tok), "*", 1)) ||
+            sd->tok.type == TOKEN_BRACE) {
+          stack_inc(sd, SSTACK__MODULE);
+          return 0;
+        }
+
+        if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "default", 7)) {
+          sd->tok.type = TOKEN_KEYWORD;
+          record_walk(sd, 0);
+        }
+
+        // interestingly: "export default function() {}" is valid and a decl
+        // so classic JS rules around decl must have names are ignored
+        // ... "export default if (..)" is invalid, so we don't care if you do wrong things after
+        return 0;
+      }
+
     }
 
     // match "var", "let" and "const"
@@ -922,11 +1017,14 @@ regular_bail:
 }
 
 
-int prsr_simple(tokendef *td, uint8_t context, prsr_callback cb, void *arg) {
+int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
   simpledef sd;
   bzero(&sd, sizeof(simpledef));
   sd.curr = sd.stack;
-  sd.curr->context = context;
+  sd.is_module = is_module;
+  if (is_module) {
+    sd.curr->context = CONTEXT__STRICT;
+  }
   sd.td = td;
   sd.next = &(td->next);
   sd.cb = cb;

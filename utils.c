@@ -71,7 +71,7 @@ int is_reserved_word(char *s, int len, int strict) {
   if (is_always_keyword(s, len, strict)) {
     return 1;
   }
-  static const char v[] = " const false in instanceof null super this true var ";
+  static const char v[] = " false in instanceof null super this true ";
   return in_space_string(v, s, len);
 }
 
