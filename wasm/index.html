@@ -154,13 +154,15 @@ window.addEventListener('load', (ev) => {
 
       const took = performance.now() - start;
       stats.textContent = `${took.toLocaleString({minimumSignificantDigits: 8})}ms`;
-      if (err) {
-        stats.textContent += ` err=`;
-        const em = document.createElement('em');
-        em.textContent = err;
-        stats.appendChild(em);
-      }
+
+      const renderStart = performance.now();
       render(tokens, view);
+      const renderTook = performance.now() - start;
+      stats.textContent += `\n${renderTook.toLocaleString({minimumSignificantDigits: 8})}ms render`;
+
+      if (err) {
+        stats.textContent += `\nerr: ${err}`;
+      }
     };
 
     let rAF;
@@ -247,6 +249,9 @@ document.addEventListener('drop', (ev) => {
   }
   pre span._invalid {
     text-decoration: underline;
+  }
+  #stats {
+    white-space: pre;
   }
 </style>
 </head>
