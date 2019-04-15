@@ -407,5 +407,41 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("ASI in case", "switch { default: }",
+    TOKEN_KEYWORD,   // switch
+    TOKEN_BRACE,     // {
+    TOKEN_KEYWORD,   // default
+    TOKEN_COLON,     // :
+    TOKEN_CLOSE,     // }
+  );
+
+  _test("dict method after colon", "void {:,get x() {}}",
+    TOKEN_OP,        // void
+    TOKEN_BRACE,     // {
+    TOKEN_COLON,     // :
+    TOKEN_COMMA,     // ,
+    TOKEN_KEYWORD,   // get
+    TOKEN_SYMBOL,    // x
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
+  _test("dict method", "void {[] () {}}",
+    TOKEN_OP,        // void
+    TOKEN_BRACE,     // {
+    TOKEN_ARRAY,     // [
+    TOKEN_CLOSE,     // ]
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   return ok;
 }
