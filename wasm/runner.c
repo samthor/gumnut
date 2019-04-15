@@ -4,13 +4,13 @@
 
 #include <emscripten.h>
 
-extern void token_callback(int p, int len, int line_no, int type);
+extern void token_callback(int p, int len, int line_no, int type, int mark);
 
 void internal_callback(void *arg, token *out) {
   // arg is our shared_td
   tokendef *td = (tokendef *) arg;
   int p = out->p - td->buf;
-  token_callback(p, out->len, out->line_no, out->type);
+  token_callback(p, out->len, out->line_no, out->type, out->mark);
 }
 
 static tokendef shared_td;

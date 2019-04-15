@@ -35,7 +35,7 @@ typedef struct {
   int len;
   int line_no;
   uint8_t type : 5;
-  uint8_t flag : 3;
+  uint8_t mark : 3;
 } token;
 
 // empty: will not contain text

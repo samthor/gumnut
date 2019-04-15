@@ -8,28 +8,18 @@ import * as utils from './utils.js';
 let globalCallback;
 
 const importObject = (function() {
-  const memory = new WebAssembly.Memory({initial: 256, maximum: 256});
-  const table = new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'});
-
-  const DYNAMICTOP_PTR = 3040;
-
-  const stackTop = 2048 + 1024;  // from ignored harness
   const env = {
-    memory,
-    __memory_base: 1024,
-    table,
+    memory: new WebAssembly.Memory({initial: 256, maximum: 256}),
+    table: new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'}),
     __table_base: 0,
-    abort() {
-      throw new Error('abort');
-    },
-    _emscripten_memcpy_big(dst, src, num) {
-      view.set(view.subarray(src, src + num), dst);
-      return dst;
+
+    abort(arg) {
+      throw new Error(`abort: ${arg}`);
     },
 
     // callbacks here
-    _token_callback(p, len, line_no, type) {
-      globalCallback(p, len, line_no, type);
+    _token_callback(p, len, line_no, type, mark) {
+      globalCallback(p, len, line_no, type, mark);
     },
   };
 
@@ -38,7 +28,7 @@ const importObject = (function() {
 
 const ready = utils.createWebAssembly('runner.wasm', importObject)
     .catch((err) => console.warn('err loading wasm', err));
-const exports = ready.then(wa => wa.instance.exports);
+const exports = ready.then((wa) => wa.instance.exports);
 
 const TOKENS = {
   EOF: 0,
@@ -97,18 +87,17 @@ window.addEventListener('load', (ev) => {
     }
   };
 
-  const render = (tokens, raw) => {
+  const render = (tokens, view) => {
     let lineNo = undefined;
     output.textContent = '';
-    tokens.forEach(token => {
+    tokens.forEach((token) => {
       if (token.lineNo !== lineNo) {
         lineNo = token.lineNo;
         appendLine();
         append(token.lineNo, '_lineno');
       }
 
-      // TODO: this works because the input is all ASCII right now
-      const s = raw.substr(token.at, token.len);
+      const s = view.read(token.at, token.len);
       const node = append(s, REVERSE.get(token.type));
 
       if (token.invalid) {
@@ -134,16 +123,23 @@ window.addEventListener('load', (ev) => {
 
     const update = () => {
       const raw = input.value;
-      const pointer = utils.copyToMemory(memory, raw);
-      exports._prsr_setup(pointer);
+      const view = new utils.CodeView(memory, raw);
+      exports._prsr_setup(view.at);
 
+      const futureLitResolve = new Map();
       const tokens = [];
       const start = performance.now();
 
       let err = 0;
       try {
-        globalCallback = (at, len, lineNo, type) => {
+        globalCallback = (at, len, lineNo, type, mark) => {
           const token = {at, len, lineNo, type, invalid: false};
+
+          // if we have find LIT, it's probably an ambiguous "async () =>", so save it for later
+          if (token.type == TOKENS.LIT) {
+            futureLitResolve.set(token.at, token);
+          }
+
           tokens.push(token);
         };
         for (;;) {
@@ -164,7 +160,7 @@ window.addEventListener('load', (ev) => {
         em.textContent = err;
         stats.appendChild(em);
       }
-      render(tokens, raw);
+      render(tokens, view);
     };
 
     let rAF;
