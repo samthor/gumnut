@@ -86,7 +86,9 @@ static int consume_string(char *p, int *line_no, int *litflag) {
 
   for (;;) {
     char c = p[++len];
-    if (c == start) {
+    if (!c) {
+      break;
+    } else if (c == start) {
       ++len;
       break;
     } else if (start == '`' && c == '$' && p[len+1] == '{') {

@@ -40,6 +40,9 @@ static int could_be_keyword(char *s, int len) {
 int in_space_string(const char *big, char *s, int len) {
   // TODO: do something better? strstr is probably fast D:
   // search for: space + candidate + space
+  if (len > 14) {
+    return 0;
+  }
   char cand[16];
   memcpy(cand+1, s, len);
   cand[0] = ' ';
