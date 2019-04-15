@@ -4,27 +4,37 @@
 
 #include <emscripten.h>
 
-extern void token_callback(int p, int len, int line_no, int type, int mark);
+extern void token_callback(void *arg, char *p, int len, int line_no, int type, int mark);
 
 void internal_callback(void *arg, token *out) {
-  // arg is our shared_td
-  tokendef *td = (tokendef *) arg;
-  int p = out->p - td->buf;
-  token_callback(p, out->len, out->line_no, out->type, out->mark);
+  // arg is our runnerdef
+  token_callback(arg, out->p, out->len, out->line_no, out->type, out->mark);
 }
 
-static tokendef shared_td;
-static int shared_is_module = 0;
+typedef struct {
+  tokendef td;
+  int is_module;
+} runnerdef;
 
+// number of bytes wasm must give us to store parser state
 EMSCRIPTEN_KEEPALIVE
-int prsr_setup(char *buf, int is_module) {
-  shared_td = prsr_init_token(buf);
-  shared_is_module = is_module;
+int prsr_size() {
+  return sizeof(runnerdef);
+}
+
+// setup, assumed allocated prsr_size() bytes for us
+EMSCRIPTEN_KEEPALIVE
+int prsr_setup(void *at, char *buf, int is_module) {
+  runnerdef *rd = (runnerdef *) at;
+  rd->td = prsr_init_token(buf);
+  rd->is_module = is_module;
   return 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
-int prsr_run() {
+int prsr_run(void *at) {
+  runnerdef *rd = (runnerdef *) at;
+
   // TODO: make this yield a few tokens at a time
-  return prsr_simple(&shared_td, shared_is_module, internal_callback, &shared_td);
+  return prsr_simple(&(rd->td), rd->is_module, internal_callback, at);
 }

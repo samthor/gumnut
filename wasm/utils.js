@@ -10,7 +10,7 @@ export async function createWebAssembly(path, importObject) {
 }
 
 export class CodeView {
-  constructor(memory, s) {
+  constructor(memory, needed, s) {
     const array = new Uint8Array(memory.buffer);
 
     const bytes = encoder.encode(s);
@@ -21,7 +21,10 @@ export class CodeView {
     array[array.length - 1] = 0;  // EOF
 
     this._view = view;
-    this.at = startAt;
+
+    // FIXME: just pretend we own all this space
+    this.buf = startAt;
+    this.at = startAt - needed;
   }
 
   read(at, len) {

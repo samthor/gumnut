@@ -5,7 +5,7 @@
 
 import * as utils from './utils.js';
 
-let globalCallback;
+const globalHandlers = new Map();
 
 const importObject = (function() {
   const env = {
@@ -18,8 +18,12 @@ const importObject = (function() {
     },
 
     // callbacks here
-    _token_callback(p, len, line_no, type, mark) {
-      globalCallback(p, len, line_no, type, mark);
+    _token_callback(at, p, len, line_no, type, mark) {
+      const handler = globalHandlers.get(at);
+      if (!handler) {
+        throw new Error(`unregistered address: ${at}`);
+      }
+      handler(p, len, line_no, type, mark);
     },
   };
 
@@ -133,35 +137,38 @@ window.addEventListener('load', (ev) => {
     const memory = wa.importObject.env.memory;
 
     const update = () => {
-      const raw = input.value;
-      const view = new utils.CodeView(memory, raw);
-      exports._prsr_setup(view.at, module.checked ? 1 : 0);
+      const needed = exports._prsr_size();
+      const view = new utils.CodeView(memory, needed, input.value);
+      exports._prsr_setup(view.at, view.buf, module.checked ? 1 : 0);
 
       const futureLitResolve = new Map();
       const tokens = [];
       const start = performance.now();
 
+      const handler = (p, len, lineNo, type, mark) => {
+        const at = p - view.buf;
+        const token = {at, len, lineNo, type, mark, invalid: false};
+
+        if (mark == 2) {
+          const prev = futureLitResolve.get(token.at);
+          prev.type = type;
+          futureLitResolve.delete(token.at);
+          return;
+        }
+
+        // if we have find LIT, it's probably an ambiguous "async () =>", so save it for later
+        if (token.type == TOKENS.LIT) {
+          futureLitResolve.set(token.at, token);
+        }
+
+        tokens.push(token);
+      };
+      globalHandlers.set(view.at, handler);
+
       let err = 0;
       try {
-        globalCallback = (at, len, lineNo, type, mark) => {
-          const token = {at, len, lineNo, type, mark, invalid: false};
-
-          if (mark == 2) {
-            const prev = futureLitResolve.get(token.at);
-            prev.type = type;
-            futureLitResolve.delete(token.at);
-            return;
-          }
-
-          // if we have find LIT, it's probably an ambiguous "async () =>", so save it for later
-          if (token.type == TOKENS.LIT) {
-            futureLitResolve.set(token.at, token);
-          }
-
-          tokens.push(token);
-        };
         for (;;) {
-          err = exports._prsr_run(0);
+          err = exports._prsr_run(view.at);
           // TODO: call many times if valid
           break;
         }
@@ -169,6 +176,7 @@ window.addEventListener('load', (ev) => {
         console.error(thrown);
         err = thrown;
       }
+      globalHandlers.delete(view.at);
 
       const took = performance.now() - start;
       stats.textContent = `${took.toLocaleString({minimumSignificantDigits: 8})}ms`;
