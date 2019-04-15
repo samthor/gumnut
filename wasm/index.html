@@ -1,31 +1,33 @@
 <!DOCTYPE html>
 <html>
 <head>
-<script src="utils.js"></script>
-<script>
+<script type="module">
+
+import * as utils from './utils.js';
 
 let globalCallback;
 
 const importObject = (function() {
   const memory = new WebAssembly.Memory({initial: 256, maximum: 256});
+  const table = new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'});
+
+  const DYNAMICTOP_PTR = 3040;
 
   const stackTop = 2048 + 1024;  // from ignored harness
   const env = {
-    memory: memory,
-    table: new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'}),
+    memory,
+    __memory_base: 1024,
+    table,
     __table_base: 0,
-    DYNAMICTOP_PTR: stackTop,
-    STACKTOP: stackTop + 16,
-    STACK_MAX: 1024 * 1024 * 5,
-    abort() { throw new Error('abort'); },
-    abortOnCannotGrowMemory() { throw new Error('abortOnCannotGrowMemory'); },
-    enlargeMemory() { throw new Error('enlargeMemory'); },
-    getTotalMemory() { return memory.buffer.byteLength; },
-    ___setErrNo(v) { throw new Error('errno'); },
+    abort() {
+      throw new Error('abort');
+    },
     _emscripten_memcpy_big(dst, src, num) {
       view.set(view.subarray(src, src + num), dst);
       return dst;
     },
+
+    // callbacks here
     _token_callback(p, len, line_no, type) {
       globalCallback(p, len, line_no, type);
     },
@@ -34,8 +36,8 @@ const importObject = (function() {
   return {env};
 }());
 
-const ready = createWebAssembly('runner.wasm', importObject)
-    .catch(err => console.warn('err loading wasm', err));
+const ready = utils.createWebAssembly('runner.wasm', importObject)
+    .catch((err) => console.warn('err loading wasm', err));
 const exports = ready.then(wa => wa.instance.exports);
 
 const TOKENS = {
@@ -132,27 +134,35 @@ window.addEventListener('load', (ev) => {
 
     const update = () => {
       const raw = input.value;
-      const pointer = copyToMemory(memory, raw);
+      const pointer = utils.copyToMemory(memory, raw);
       exports._prsr_setup(pointer);
 
       const tokens = [];
       const start = performance.now();
 
-      globalCallback = (at, len, lineNo, type) => {
-        const token = {at, len, lineNo, type, invalid: false};
-        tokens.push(token);
-      };
       let err = 0;
-      for (;;) {
-        err = exports._prsr_run(0);
-        // TODO: call many times if valid
-        break;
+      try {
+        globalCallback = (at, len, lineNo, type) => {
+          const token = {at, len, lineNo, type, invalid: false};
+          tokens.push(token);
+        };
+        for (;;) {
+          err = exports._prsr_run(0);
+          // TODO: call many times if valid
+          break;
+        }
+      } catch (thrown) {
+        console.error(thrown);
+        err = thrown;
       }
 
       const took = performance.now() - start;
       stats.textContent = `${took.toLocaleString({minimumSignificantDigits: 8})}ms`;
       if (err) {
-        stats.textContent += ` err=${err}`;
+        stats.textContent += ` err=`;
+        const em = document.createElement('em');
+        em.textContent = err;
+        stats.appendChild(em);
       }
       render(tokens, raw);
     };

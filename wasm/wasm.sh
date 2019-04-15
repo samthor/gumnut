@@ -3,6 +3,7 @@
 set -eu
 
 emcc -O1 \
+  -g4 \  # generate sourcemap (at least for function names)
   -s WASM=1 \
   -s ONLY_MY_CODE=1 \
   -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
