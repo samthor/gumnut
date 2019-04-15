@@ -449,5 +449,18 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("static", "class X { static x() {} }",
+    TOKEN_KEYWORD,   // class
+    TOKEN_SYMBOL,    // X
+    TOKEN_BRACE,     // {
+    TOKEN_KEYWORD,   // static
+    TOKEN_SYMBOL,    // x
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
+  );
+
   return ok;
 }

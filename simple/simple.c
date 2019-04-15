@@ -411,6 +411,14 @@ restart:
     uint8_t context = 0;
 
     // search for function
+    // ... look for 'static' without '(' next
+    if (sd->tok.type == TOKEN_LIT &&
+        sd->td->next.type != TOKEN_PAREN &&
+        token_string(&(sd->tok), "static", 6)) {
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+    }
+
     // ... look for 'async' without '(' next
     if (sd->tok.type == TOKEN_LIT &&
         sd->td->next.type != TOKEN_PAREN &&
