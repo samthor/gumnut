@@ -7,6 +7,7 @@ typedef struct {
   const char *name;
   const char *input;
   int *expected;  // zero-terminated token types
+  int is_module;
 } testdef;
 
 typedef struct {
@@ -53,7 +54,7 @@ int run_testdef(testdef *def) {
 
   printf(">> %s\n", def->name);
 
-  int out = prsr_simple(&td, 0, testdef_step, &active);
+  int out = prsr_simple(&td, def->is_module, testdef_step, &active);
   while (active.at + 1 < active.len) {
     token fake;
     fake.type = -1;
@@ -81,6 +82,7 @@ int run_testdef(testdef *def) {
   testdef td; \
   td.name = _name; \
   td.input = _input; \
+  td.is_module = _name[0] == '^'; \
   int v[] = {__VA_ARGS__ TOKEN_EOF}; \
   td.expected = v; \
   ok |= run_testdef(&td); \
@@ -431,7 +433,7 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
-  _test("check import", "import foo, {zing as what} from 'blah'",
+  _test("^check import", "import foo, {zing as what} from 'blah'",
     TOKEN_KEYWORD,   // import
     TOKEN_SYMBOL,    // foo
     TOKEN_COMMA,     // ,
