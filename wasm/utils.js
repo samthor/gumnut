@@ -9,18 +9,6 @@ export async function createWebAssembly(path, importObject) {
   return object;
 }
 
-export function encodeToArray(s, array) {
-  let i = 0;
-  for (let si = 0; si < s.length; ++si) {
-    const c = s.charCodeAt(si);
-    if (c >= 128) {
-      throw new Error('non-ascii not yet supported: ' + c);
-    }
-    array[i++] = c;
-  }
-  array[i++] = 0;
-}
-
 export class CodeView {
   constructor(memory, s) {
     const array = new Uint8Array(memory.buffer);
