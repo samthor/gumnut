@@ -952,7 +952,8 @@ int prsr_simple(tokendef *td, uint8_t context, prsr_callback cb, void *arg) {
   if (ret) {
     return ret;
   } else if (sd.tok.type != TOKEN_EOF) {
-    return ERROR__CLOSE;
+    debugf("no EOF but valid response\n");
+    return ERROR__STACK;
   } else if (sd.curr != sd.stack) {
     debugf("stack is %ld too high\n", sd.curr - sd.stack);
     return ERROR__STACK;
