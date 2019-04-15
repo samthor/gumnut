@@ -3,10 +3,10 @@
 set -eu
 
 FLAGS="-O1 -g4"
-if [[ "$1" == "release" ]]; then
+if [[ "${1-}" == "release" ]]; then
   FLAGS="-O3"
   echo "Release mode (\"${FLAGS}\")" >&2
-elif [[ "$1" != "" ]]; then
+elif [[ "${1-}" != "" ]]; then
   echo "Unknown mode: $1" >&2
   exit 1
 fi

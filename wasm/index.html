@@ -146,6 +146,13 @@ window.addEventListener('load', (ev) => {
         globalCallback = (at, len, lineNo, type, mark) => {
           const token = {at, len, lineNo, type, mark, invalid: false};
 
+          if (mark == 2) {
+            const prev = futureLitResolve.get(token.at);
+            prev.type = type;
+            futureLitResolve.delete(token.at);
+            return;
+          }
+
           // if we have find LIT, it's probably an ambiguous "async () =>", so save it for later
           if (token.type == TOKENS.LIT) {
             futureLitResolve.set(token.at, token);
@@ -183,7 +190,8 @@ window.addEventListener('load', (ev) => {
         let v = null;
         if (input.value.length <= 4096) {
           // just give up if it's too large
-          v = window.encodeURIComponent(input.value);
+          const out = (module.checked ? String.fromCharCode(0) : '') + input.value;
+          v = window.encodeURIComponent(out);
         }
         if (v) {
           window.history.replaceState(null, null, '#' + v);
@@ -285,7 +293,12 @@ document.addEventListener('drop', (ev) => {
 <textarea id="input" rows="20" cols="100"></textarea>
 <script>
 window.addEventListener('hashchange', (ev) => {
-  input.value = window.decodeURIComponent(window.location.hash.substr(1));
+  let value = window.decodeURIComponent(window.location.hash.substr(1));
+  module.checked = !value.charCodeAt(0);
+  if (module.checked) {
+    value = value.substr(1);
+  }
+  input.value = value;
 });
 window.dispatchEvent(new CustomEvent('hashchange'));
 </script>
