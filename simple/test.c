@@ -179,6 +179,7 @@ int main() {
     TOKEN_LIT,       // async
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
+    TOKEN_KEYWORD,   // MARK async
     TOKEN_ARROW,     // =>
     TOKEN_OP,        // await
     TOKEN_REGEXP,    // /123/
@@ -192,6 +193,7 @@ int main() {
     TOKEN_LIT,       // async
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
+    TOKEN_KEYWORD,   // MARK async
     TOKEN_ARROW,     // =>
     TOKEN_OP,        // await
     TOKEN_REGEXP,    // /123/

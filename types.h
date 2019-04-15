@@ -68,6 +68,7 @@ typedef struct {
 
 // special marks
 #define MARK_IMPORT     1   // this is the name inside static import
+#define MARK_RESOLVE    2   // resolving a prior lit (always "async")
 
 #endif//_TYPES_H
 

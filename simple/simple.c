@@ -682,7 +682,7 @@ restart:
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
 
-        if ((sd->tok.type == TOKEN_SYMBOL && token_string(&(sd->tok), "*", 1)) ||
+        if ((sd->tok.type == TOKEN_OP && token_string(&(sd->tok), "*", 1)) ||
             sd->tok.type == TOKEN_BRACE) {
           stack_inc(sd, SSTACK__MODULE);
           return 0;
@@ -769,19 +769,8 @@ regular_bail:
       }
 
       uint8_t context = (sd->curr->context & CONTEXT__STRICT);
-      if (token_string(&(sd->curr->t2), "async", 5)) {
-        int type = sd->curr->t2.type;
-        if (type == TOKEN_LIT || type == TOKEN_KEYWORD) {
-          context |= CONTEXT__ASYNC;
-        }
-
-        if (type == TOKEN_LIT) {
-          // nb. we can now be confident this _was_async, announce
-          sd->curr->t2.type = TOKEN_KEYWORD;
-          debugf("we now know that prior `async` is keyword\n");
-          // FIXME: allow testing/other to deal with out-of-order
-          // sd->cb(sd->arg, &(sd->curr->t2));
-        }
+      if (sd->curr->t2.type == TOKEN_KEYWORD && token_string(&(sd->curr->t2), "async", 5)) {
+        context |= CONTEXT__ASYNC;
       }
 
       if (sd->td->next.type == TOKEN_BRACE) {
@@ -815,15 +804,30 @@ regular_bail:
         goto restart;  // let dict handle this one (as if it was back on left)
       }
 
-      // closing a statement inside brace, yield ASI (will decrement !stype)
-      yield_valid_asi(sd);
+      token *yield = NULL;
 
-      // should be normal block or group, no other cases handled
-      if (sd->curr->stype != SSTACK__BLOCK && sd->curr->stype != SSTACK__GROUP) {
+      if (sd->curr->stype == SSTACK__GROUP) {
+        // closing a group
+        --sd->curr;
+
+        // ... look if next token is =>, and resolve any pending "async"
+        yield = &(sd->curr->t2);
+        if (sd->curr->t1.type == TOKEN_PAREN && yield->type == TOKEN_LIT) {
+          yield->type = (sd->next->type == TOKEN_ARROW ? TOKEN_KEYWORD : TOKEN_SYMBOL);
+          yield->mark = MARK_RESOLVE;
+        } else {
+          yield = NULL;
+        }
+
+      } else if (sd->curr->stype == SSTACK__BLOCK || !sd->curr->stype) {
+        // closing a brace, yield ASI (will decrement !stype)
+        yield_valid_asi(sd);
+        --sd->curr;  // pop out of block though
+      } else {
+        // should be normal block or group, no other cases handled
         debugf("can't handle type: %d\n", sd->curr->stype);
         return ERROR__INTERNAL;
       }
-      --sd->curr;
 
       // anything but ending up in naked block has value
       int has_value = (sd->curr->stype != SSTACK__BLOCK);
@@ -839,7 +843,12 @@ regular_bail:
         // noisy for EOF, where we don't care /shrug
         debugf("popped stack (%ld) in op? has_value=%d (stype=%d)\n", sd->curr - sd->stack, has_value, sd->curr->stype);
       }
-      return skip_walk(sd, has_value);
+      skip_walk(sd, has_value);
+
+      if (yield) {
+        sd->cb(sd->arg, yield);
+      }
+      return 0;
 
     case TOKEN_BRACE:
       if (sd->tok_has_value && !sd->curr->stype) {
