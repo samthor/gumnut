@@ -7,7 +7,7 @@
 #define SSTACK__GROUP    1  // group execution context "()" or "[]"
 #define SSTACK__BLOCK    2  // block execution context
 #define SSTACK__DICT     3  // within regular dict "{}"
-#define SSTACK__FUNC     4  // expects upcoming "() {}"
+#define SSTACK__FUNC     4  // expects upcoming "name () {}"
 #define SSTACK__CLASS    5  // expects "extends X"? "{}"
 #define SSTACK__DO_WHILE 6  // state machine for "do ... while"
 
@@ -115,6 +115,15 @@ static int context_is_label(uint8_t context, token *t) {
 }
 
 
+static int context_is_function_name_keyword(uint8_t context, token *t, int hoist) {
+  if (t->type != TOKEN_LIT) {
+    return 0;
+  }
+  return is_reserved_word(t->p, t->len, context & CONTEXT__STRICT) ||
+      (hoist && context_is_optional_keyword(context, t));
+}
+
+
 static int context_is_unary(uint8_t context, token *t) {
   if (t->type != TOKEN_LIT) {
     return 0;
@@ -156,13 +165,7 @@ static int match_function(simpledef *sd) {
     context |= CONTEXT__GENERATOR;
   }
 
-  // optionally consume function name
-  if (sd->tok.type == TOKEN_LIT) {
-    // FIXME: disallow keywords here (or just mark as TOKEN_KEYWORD)
-    sd->tok.type = TOKEN_SYMBOL;
-    skip_walk(sd, 0);  // consume name
-  }
-
+  // nb. does NOT consume name
   return context;
 }
 
@@ -309,22 +312,22 @@ restart:
   if (sd->curr->stype == SSTACK__DICT) {
     uint8_t context = 0;
 
-    // look for simplified options first
-    if (sd->tok.type == TOKEN_LIT) {
-      // "foo," or "foo}"
-      if (sd->next->type == TOKEN_COMMA || sd->next->type == TOKEN_CLOSE) {
-        goto dict_symbol_only;
-      }
+    // // look for simplified options first
+    // if (sd->tok.type == TOKEN_LIT) {
+    //   // "foo," or "foo}"
+    //   if (sd->next->type == TOKEN_COMMA || sd->next->type == TOKEN_CLOSE) {
+    //     goto dict_symbol_only;
+    //   }
 
-      // catch "foo as bar", needed inside import dict (but invalid in regular dicts, so whatever)
-      if (sd->next->type == TOKEN_LIT && token_string(sd->next, "as", 2)) {
-        sd->tok.type = TOKEN_SYMBOL;
-        record_walk(sd, 0);  // consume symbol
-        sd->tok.type = TOKEN_KEYWORD;
-        record_walk(sd, 0);  // consume "as"
-        goto dict_symbol_only;
-      }
-    }
+    //   // catch "foo as bar", needed inside import dict (but invalid in regular dicts, so whatever)
+    //   if (sd->next->type == TOKEN_LIT && token_string(sd->next, "as", 2)) {
+    //     sd->tok.type = TOKEN_SYMBOL;
+    //     record_walk(sd, 0);  // consume symbol
+    //     sd->tok.type = TOKEN_KEYWORD;
+    //     record_walk(sd, 0);  // consume "as"
+    //     goto dict_symbol_only;
+    //   }
+    // }
 
     // search for function
     // ... look for 'async' without '(' next
@@ -350,53 +353,72 @@ restart:
       record_walk(sd, 0);
     }
 
-dict_symbol_only:
-    // ... consumed all valid parts, this must be a symbol in dict
-    while (sd->tok.type == TOKEN_LIT) {
-      sd->tok.type = TOKEN_SYMBOL;
-      record_walk(sd, 0);
-    }
-
+    // terminal state of left side
     switch (sd->tok.type) {
-      case TOKEN_ARRAY:
-        // e.g. "{[foo]: ...}"
-        // FIXME: we're throwing away context and treating right-side as brand new
-        record_walk(sd, 0);
-        stack_inc(sd, SSTACK__GROUP);
-        return 0;
-
+      // ... anything that looks like it could be a function, that way (and let stack fail)
+      case TOKEN_LIT:
       case TOKEN_PAREN:
-        // ... don't need to consume
+      case TOKEN_BRACE:
+      case TOKEN_ARRAY:
+        debugf("pretending to be function: %.*s\n", sd->tok.len, sd->tok.p);
         stack_inc(sd, SSTACK__FUNC);
         sd->curr->context = context;
-        return 0;
-
-      case TOKEN_COMMA:  // valid
-      default:           // invalid, but whatever
-        return record_walk(sd, 0);
-
-      case TOKEN_CLOSE:
-        // we appear as direct child of block in hoisted `class {}` only
-        record_walk(sd, (sd->curr - 1)->stype != SSTACK__BLOCK);
-        --sd->curr;
-        return 0;
+        goto restart;
 
       case TOKEN_COLON:
         record_walk(sd, 0);
         stack_inc(sd, SSTACK__GROUP);
+        debugf("pushing group for colon\n");
         return 0;
+
+      case TOKEN_CLOSE:
+        skip_walk(sd, 1);
+        --sd->curr;
+        goto restart;
+
+      case TOKEN_COMMA:  // valid
+      default:           // invalid, but whatever
+        return record_walk(sd, 0);
     }
   }
 
   // function state, allow () or {}
   if (sd->curr->stype == SSTACK__FUNC) {
+
+    if (sd->tok.type == TOKEN_ARRAY) {
+      // allow "function ['name']"
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__GROUP);
+
+      // ... but "{async [await 'name']..." doesn't take await from our context
+      sd->curr->context = (sd->curr - 2)->context;
+      return 0;
+    }
+
+    if (sd->tok.type == TOKEN_LIT) {
+      int context = (sd->curr - 1)->context;  // "async function await() {}" is valid :(
+      int parent = (sd->curr - 1)->stype;
+
+      // we're only maybe a keyword in non-dict modes (and more if hoisted since it is a var name)
+      if (parent != SSTACK__DICT &&
+          context_is_function_name_keyword(context, &(sd->tok), parent == SSTACK__BLOCK)) {
+        sd->tok.type = TOKEN_KEYWORD;
+      } else {
+        sd->tok.type = TOKEN_SYMBOL;
+      }
+      return record_walk(sd, 0);
+    }
+
     if (sd->tok.type == TOKEN_PAREN) {
       // allow "function ()"
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__GROUP);
       return 0;
-    } else if (sd->tok.type == TOKEN_BRACE) {
+    }
+
+    if (sd->tok.type == TOKEN_BRACE) {
       // terminal state of func, pop and insert normal block w/retained context
+      debugf("abandon function def: BRACE\n");
       uint8_t context = sd->curr->context;
       --sd->curr;
       record_walk(sd, 0);
@@ -407,6 +429,8 @@ dict_symbol_only:
 
     // invalid, abandon function def
     --sd->curr;
+    debugf("abandon function def: BAD (stype=%d)\n", sd->curr->stype);
+    goto restart;
   }
 
   // class state, just insert group (for extends) or bail
@@ -626,6 +650,11 @@ regular_bail:
       return 0;
 
     case TOKEN_COMMA:
+      if ((sd->curr - 1)->stype == SSTACK__DICT) {
+        --sd->curr;
+        goto restart;
+      }
+
       // relevant in "async () => blah, foo", reset from parent
       sd->curr->context = (sd->curr - 1)->context;
       return record_walk(sd, 0);
@@ -785,7 +814,11 @@ regular_bail:
       // fall-through
 
     case TOKEN_COLON:
-      // always invalid here
+      if (!sd->curr->stype) {
+        --sd->curr;  // this catches cases like "case {}:", pretend that was a statement
+      } else {
+        // always invalid here
+      }
       return record_walk(sd, 0);
 
   }
