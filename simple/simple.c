@@ -117,7 +117,7 @@ static int context_is_label(uint8_t context, token *t) {
 }
 
 
-static int context_is_function_name_keyword(uint8_t context, token *t, int hoist) {
+static int context_is_name_keyword(uint8_t context, token *t, int hoist) {
   if (t->type != TOKEN_LIT) {
     return 0;
   }
@@ -186,7 +186,13 @@ static int match_class(simpledef *sd) {
     if (token_string(&(sd->tok), "extends", 7)) {
       special = SPECIAL__FREE_VALUE;
     } else {
-      sd->tok.type = TOKEN_SYMBOL;
+      int hoist = (sd->curr - 1)->stype == SSTACK__BLOCK;
+      if (context_is_name_keyword(sd->curr->context, &(sd->tok), hoist)) {
+        // FIXME: "class yield" is invalid even if hoisted? same rule does not apply to function
+        sd->tok.type = TOKEN_KEYWORD;  // "class if" is invalid
+      } else {
+        sd->tok.type = TOKEN_SYMBOL;
+      }
       skip_walk(sd, 0);  // consume name
     }
   }
@@ -491,7 +497,7 @@ restart:
 
       // we're only maybe a keyword in non-dict modes (and more if hoisted since it is a var name)
       if (parent != SSTACK__DICT &&
-          context_is_function_name_keyword(context, &(sd->tok), parent == SSTACK__BLOCK)) {
+          context_is_name_keyword(context, &(sd->tok), parent == SSTACK__BLOCK)) {
         sd->tok.type = TOKEN_KEYWORD;
       } else {
         sd->tok.type = TOKEN_SYMBOL;
