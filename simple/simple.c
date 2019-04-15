@@ -17,6 +17,9 @@
 // SSTACK__GROUP
 #define SPECIAL__FOR        1
 
+// SSTACK__BLOCK
+#define SPECIAL__INIT       1
+
 // SSTACK__CLASS
 // for e.g. "class extends {} {}", left is value (just one single token, or e.g. "(foo)")
 #define SPECIAL__FREE_VALUE 1
@@ -278,7 +281,8 @@ static int yield_valid_asi(simpledef *sd) {
 
   if (sd->curr->stype == SSTACK__BLOCK && sd->curr->t1.type) {
     // if parent is __BLOCK, just pretend a statement happened anyway
-    debugf("added weird direct-descendant-of-block ASI\n");
+    stack_inc(sd, 0);
+    --sd->curr;
     yield_virt(sd, TOKEN_SEMICOLON);
     return 1;
   }
@@ -311,23 +315,6 @@ restart:
   // dict state (left)
   if (sd->curr->stype == SSTACK__DICT) {
     uint8_t context = 0;
-
-    // // look for simplified options first
-    // if (sd->tok.type == TOKEN_LIT) {
-    //   // "foo," or "foo}"
-    //   if (sd->next->type == TOKEN_COMMA || sd->next->type == TOKEN_CLOSE) {
-    //     goto dict_symbol_only;
-    //   }
-
-    //   // catch "foo as bar", needed inside import dict (but invalid in regular dicts, so whatever)
-    //   if (sd->next->type == TOKEN_LIT && token_string(sd->next, "as", 2)) {
-    //     sd->tok.type = TOKEN_SYMBOL;
-    //     record_walk(sd, 0);  // consume symbol
-    //     sd->tok.type = TOKEN_KEYWORD;
-    //     record_walk(sd, 0);  // consume "as"
-    //     goto dict_symbol_only;
-    //   }
-    // }
 
     // search for function
     // ... look for 'async' without '(' next
@@ -418,18 +405,17 @@ restart:
 
     if (sd->tok.type == TOKEN_BRACE) {
       // terminal state of func, pop and insert normal block w/retained context
-      debugf("abandon function def: BRACE\n");
       uint8_t context = sd->curr->context;
       --sd->curr;
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__BLOCK);
       sd->curr->context = context;
+      sd->curr->special = SPECIAL__INIT;
       return 0;
     }
 
     // invalid, abandon function def
     --sd->curr;
-    debugf("abandon function def: BAD (stype=%d)\n", sd->curr->stype);
     goto restart;
   }
 
@@ -473,18 +459,23 @@ restart:
 
   // zero state, determine what to push
   if (sd->curr->stype == SSTACK__BLOCK) {
-    int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_BRACE);
 
-    // look for 'use strict' of single statement
-    if (sd->curr->t1.type == TOKEN_SEMICOLON && !sd->curr->t2.type) {
-      sstack *up = (sd->curr + 1);
-      if (!up->t2.type && is_use_strict(&(up->t1))) {
-        sd->curr->context |= CONTEXT__STRICT;
-        debugf("got use strict in single statement\n");
+    // finished our first _anything_ clear initial bit
+    if (sd->curr->t1.type && sd->curr->special) {
+      sd->curr->special = 0;
+
+      // look for 'use strict' of single statement
+      if (sd->curr->t1.type == TOKEN_SEMICOLON) {
+        sstack *prev = (sd->curr + 1);  // this will be previous statement
+        if (!prev->t2.type && is_use_strict(&(prev->t1))) {
+          sd->curr->context |= CONTEXT__STRICT;
+          debugf("got use strict in single statement\n");
+        }
       }
     }
 
     // check incase at least one statement has occured in DO_WHILE > BLOCK
+    int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_BRACE);
     if ((sd->curr - 1)->stype == SSTACK__DO_WHILE && has_statement) {
       --sd->curr;  // pop to DO_WHILE
 
@@ -687,6 +678,7 @@ regular_bail:
         record_walk(sd, -1);  // consume =>
         record_walk(sd, -1);  // consume {
         stack_inc(sd, SSTACK__BLOCK);
+        sd->curr->special = SPECIAL__INIT;
       } else {
         // just change statement's context (e.g. () => async () => () => ...)
         record_walk(sd, 0);
@@ -960,6 +952,7 @@ int prsr_simple(tokendef *td, uint8_t context, prsr_callback cb, void *arg) {
   sd.arg = arg;
 
   sd.curr->stype = SSTACK__BLOCK;
+  sd.curr->special = SPECIAL__INIT;
   record_walk(&sd, 0);
 
   int ret = 0;
