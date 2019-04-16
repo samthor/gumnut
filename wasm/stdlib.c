@@ -1,29 +1,5 @@
 #include <string.h>  // just for types
 
-void bzero(void *s, size_t n) {
-  unsigned char *p = s;
-  while (n--) {
-    *p++ = (unsigned char) 0;
-  }
-}
-
-void *memset(void *s, int c, size_t n) {
-  unsigned char *p = s;
-  while (n--) {
-    *p++ = (unsigned char) c;
-  }
-  return s;
-}
-
-void *memcpy(void *__restrict dest, const void *__restrict src, size_t n) {
-  char *dp = dest;
-  const char *sp = src;
-  while (n--) {
-    *dp++ = *sp++;
-  }
-  return dest;
-}
-
 int isalpha(int c) {
   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }

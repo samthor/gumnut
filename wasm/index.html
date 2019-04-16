@@ -6,18 +6,25 @@
 import * as utils from './utils.js';
 
 const globalHandlers = new Map();
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
-const importObject = (function() {
-  const env = {
-    memory: new WebAssembly.Memory({initial: 256, maximum: 256}),
-    table: new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'}),
-    __table_base: 0,
-
-    abort(arg) {
-      throw new Error(`abort: ${arg}`);
+const ready = utils.initializeSideModule('runner.wasm', (view) => {
+  return {
+    _memset(s, c, n) {
+      view.fill(c, s, s + n);
+      return s;
     },
 
-    // callbacks here
+    _memcpy(dst, src, size) {
+      view.set(view.subarray(src, src + size), dst);
+      return dst;
+    },
+
+    abort(x) {
+      throw x;
+    },
+
     _token_callback(at, p, len, line_no, type, mark) {
       const handler = globalHandlers.get(at);
       if (!handler) {
@@ -26,13 +33,7 @@ const importObject = (function() {
       handler(p, len, line_no, type, mark);
     },
   };
-
-  return {env};
-}());
-
-const ready = utils.createWebAssembly('runner.wasm', importObject)
-    .catch((err) => console.warn('err loading wasm', err));
-const exports = ready.then((wa) => wa.instance.exports);
+});
 
 function reverseDict(dict) {
   const m = new Map();
@@ -108,7 +109,8 @@ window.addEventListener('load', (ev) => {
         append(token.lineNo, '_lineno');
       }
 
-      const s = view.read(token.at, token.len);
+      const backing = view.subarray(token.at, token.at + token.len);
+      const s = decoder.decode(backing);
       const node = append(s, TOKEN_LOOKUP(token.type));
 
       if (token.invalid) {
@@ -132,21 +134,27 @@ window.addEventListener('load', (ev) => {
     });
   };
 
-  ready.then((wa) => {
-    const exports = wa.instance.exports;
-    const memory = wa.importObject.env.memory;
+  ready.then(({instance, view}) => {
+    const exports = instance.exports;
 
     const update = () => {
+      const writeAt = 1024;
       const needed = exports._prsr_size();
-      const view = new utils.CodeView(memory, needed, input.value);
-      exports._prsr_setup(view.at, view.buf, module.checked ? 1 : 0);
+
+      const bytesAt = writeAt + needed;
+      const bytes = encoder.encode(input.value);
+      const sourceBuffer = view.subarray(bytesAt, bytesAt + bytes.length + 1);
+      sourceBuffer.set(bytes);
+      sourceBuffer[sourceBuffer.length - 1] = 0;  // NULL terminate
+
+      exports._prsr_setup(writeAt, writeAt + needed, module.checked ? 1 : 0);
 
       const futureLitResolve = new Map();
       const tokens = [];
       const start = performance.now();
 
       const handler = (p, len, lineNo, type, mark) => {
-        const at = p - view.buf;
+        const at = p - bytesAt;
         const token = {at, len, lineNo, type, mark, invalid: false};
 
         if (mark == 2) {
@@ -163,12 +171,15 @@ window.addEventListener('load', (ev) => {
 
         tokens.push(token);
       };
-      globalHandlers.set(view.at, handler);
+      if (globalHandlers.has(writeAt)) {
+        throw new Error('multiple jobs');
+      }
+      globalHandlers.set(writeAt, handler);
 
       let err = 0;
       try {
         for (;;) {
-          err = exports._prsr_run(view.at);
+          err = exports._prsr_run(writeAt);
           // TODO: call many times if valid
           break;
         }
@@ -176,13 +187,13 @@ window.addEventListener('load', (ev) => {
         console.error(thrown);
         err = thrown;
       }
-      globalHandlers.delete(view.at);
+      globalHandlers.delete(writeAt);
 
       const took = performance.now() - start;
       stats.textContent = `${took.toLocaleString({minimumSignificantDigits: 8})}ms`;
 
       const renderStart = performance.now();
-      render(tokens, view);
+      render(tokens, sourceBuffer);
       const renderTook = performance.now() - start;
       stats.textContent += `\n${renderTook.toLocaleString({minimumSignificantDigits: 8})}ms render`;
 
