@@ -4,24 +4,32 @@ const fs = require('fs');
 const now = new Date;
 
 const alwaysKeyword = 
-    " async break case catch class const continue debugger default delete do else enum export" +
-    " extends finally for function if import new return static switch throw try typeof var void" +
-    " while with ";
+    " break case catch class const continue debugger default do else enum export extends" +
+    " finally for function if return static switch throw try var while with ";
 
 const alwaysStrictKeyword =
-    " implements package protected interface private public ";
+    " implements let package protected interface private public yield ";
 
+// act like ops, but could be treated as keywords
+const opKeyword = 
+    " delete in instanceof new typeof void ";
+
+// act like symbols but internal
+// => 'import' can also start special statements
+// => "undefined" is NOT here, even in strict mode
 const neverLabel = 
-    " false in instanceof null super this true ";
+    " false import null super this true ";
 
+// these act like symbols in most cases, but hash so we can find them
 const optionalKeyword =
-    " as await from let yield ";
+    " as async await from ";
 
 // reserved until ES3
 const oldKeyword = 
     " abstract boolean byte char double final float goto int long native short synchronized" +
     " throws transient volatile ";
 
+// symbols/punctuation that should get hashed
 const extraDefines = {
   COMMA: ',',
   SPREAD: '...',
@@ -33,22 +41,46 @@ const extraDefines = {
   DOUBLE_SUB: '--',
 };
 
-
-const readNext = `*p++`;
-
+// ways of marking up hashes
+const special = {
+  KEYWORD: 1,
+  STRICT_KEYWORD: 2,
+  OPLIKE: 4,
+  MASQUERADE: 8,
+};
 
 const valueToHash = new Map();
 const hashToValue = new Map();
 
+process(alwaysKeyword, special.KEYWORD | special.STRICT_KEYWORD);
+process(alwaysStrictKeyword, special.STRICT_KEYWORD);
+process(opKeyword, special.KEYWORD | special.OPLIKE);
+process(neverLabel, special.MASQUERADE);
+process(optionalKeyword);
+const litOnly = Array.from(valueToHash.keys());
+
+// add other random punctuators _after_ saving litOnly
+process(Object.values(extraDefines));
+
+
+
+
 
 function generateHash(s, bits=0) {
-  let out = 0;
-  const size = Math.min(2, s.length);
-  for (let i = 0; i < size; ++i) {
-    out += (s.charCodeAt(i) << (i * 8));
+  // 0: bits
+  // 1: s[0]
+  // 2: s[1]
+  // 3: length
+  let out = Math.min(bits, 255);
+
+  if (s.length > 0) {
+    out += s.charCodeAt(0) << 8;
+    if (s.length > 1) {
+      out += s.charCodeAt(1) << 16;
+    }
   }
-  out += Math.min(s.length, 255) << 16;
-  out += Math.min(bits, 255) << 24;
+
+  out += Math.min(s.length, 255) << 24;
   return out;
 }
 
@@ -142,6 +174,8 @@ function renderChain(all, space='') {
 
 
 function renderChoice(all, space='', prefix='') {
+  const readNext = `*p++`;
+
   const {tail, rest, chars} = renderChain(all, space);
   if (chars.length) {
     let out = ``;
@@ -165,8 +199,8 @@ ${space}}\n`;
   }
 
   if (!tail.size) {
-    const hash = valueToHash.get(prefix);
-    return `${space}_done(${prefix.length}, ${hash});  // ${prefix}\n`;
+    const d = `lit_${prefix}`.toUpperCase();
+    return `${space}_done(${prefix.length}, ${d});\n`;
   }
 
   let out = `${space}switch (${readNext}) {\n`;
@@ -183,8 +217,8 @@ ${space}}\n`;
   out += `${space}}\n`;
 
   if (hasDefault) {
-    const hash = valueToHash.get(prefix);
-    out += `${space}_done(${prefix.length}, ${hash});  // ${prefix}\n`;
+    const d = `lit_${prefix}`.toUpperCase();
+    out += `${space}_done(${prefix.length}, ${d});\n`;
   } else {
     out += `${space}return ${prefix.length};  // ${prefix}...\n`
   }
@@ -193,19 +227,12 @@ ${space}}\n`;
 }
 
 
+function main() {
+  const helperOutput = `// Generated on ${now}
 
-process(alwaysKeyword, 1);
-process(alwaysStrictKeyword, 2);
-process(neverLabel, 4);
-process(optionalKeyword, 8);
-//process(oldKeyword);
-const litOnly = Array.from(valueToHash.keys());
+#include "lit.h"
+#include "helper.h"
 
-// now add other random punctuators
-process(Object.values(extraDefines));
-
-
-const helperOutput = `// Generated on ${now}
 // ${litOnly.length} candidates:
 //   ${litOnly.join(' ')}
 int consume_known_lit(char *p, uint32_t *out) {
@@ -215,12 +242,38 @@ ${renderChoice(litOnly, space='  ')}
 #undef _done
 }
 `;
-fs.writeFileSync('helper.c', helperOutput);
+  fs.writeFileSync('helper.c', helperOutput);
 
 
-const defineOutput = `// Generated on ${now}
-${renderDefines(litOnly, 'lit_')}
-${renderDefines(extraDefines, '_lit_')}
+  const helperHeaderOutput = `// Generated on ${now}
+
+#ifndef _HELPER_H
+#define _HELPER_H
+
+#include <stdint.h>
+
+int consume_known_lit(char *, uint32_t *);
+
+#endif//_HELPER_H
 `;
-fs.writeFileSync('helper.h', defineOutput);
+  fs.writeFileSync('helper.h', helperHeaderOutput);
 
+
+  const litOutput = `// Generated on ${now}
+
+#ifndef _LIT_H
+#define _LIT_H
+
+#define _MASK_KEYWORD        ${special.KEYWORD}
+#define _MASK_STRICT_KEYWORD ${special.STRICT_KEYWORD}
+#define _MASK_OPLIKE         ${special.OPLIKE}
+#define _MASK_MASQUERADE     ${special.MASQUERADE}
+
+${renderDefines(litOnly, 'lit_')}
+${renderDefines(extraDefines, 'op_')}
+#endif//_LIT_H
+`;
+  fs.writeFileSync('lit.h', litOutput);
+}
+
+main();
