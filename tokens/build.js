@@ -10,9 +10,15 @@ const alwaysKeyword =
 const alwaysStrictKeyword =
     " implements let package protected interface private public yield ";
 
-// act like ops, but could be treated as keywords
-const opKeyword = 
-    " delete in instanceof new typeof void ";
+// act like unary ops
+const unaryOp =
+    " delete new typeof void ";
+
+const optionalUnaryOp =
+    " await yield ";
+
+const relOp =
+    " in instanceof ";
 
 // act like symbols but internal
 // => 'import' can also start special statements
@@ -22,7 +28,19 @@ const neverLabel =
 
 // these act like symbols in most cases, but hash so we can find them
 const optionalKeyword =
-    " as async await from ";
+    " as async await from get of set ";
+
+// keywords that start a decl
+const declKeyword =
+    " var let const ";
+
+// keywords that start a brace or single statement
+const controlKeyword =
+    " catch do else if finally for switch try while with ";
+
+// control keywords that consume a ()
+const controlParenKeyword =
+    " catch if for switch while with ";
 
 // reserved until ES3
 const oldKeyword = 
@@ -37,34 +55,62 @@ const extraDefines = {
   COLON: ':',
   DOT: '.',
   STAR: '*',
-  DOUBLE_ADD: '++',
-  DOUBLE_SUB: '--',
+  INCDEC: '+-',  // nb. this cheats and we use hash of +-
 };
 
 // ways of marking up hashes
 const special = {
   KEYWORD: 1,
   STRICT_KEYWORD: 2,
-  OPLIKE: 4,
-  MASQUERADE: 8,
+  REL_OP: 4,
+  UNARY_OP: 8,
+  MASQUERADE: 16,
+  DECL: 32,
+  CONTROL: 64,
+  CONTROL_PAREN: 128,
 };
 
-const valueToHash = new Map();
-const hashToValue = new Map();
 
-process(alwaysKeyword, special.KEYWORD | special.STRICT_KEYWORD);
-process(alwaysStrictKeyword, special.STRICT_KEYWORD);
-process(opKeyword, special.KEYWORD | special.OPLIKE);
-process(neverLabel, special.MASQUERADE);
-process(optionalKeyword);
-const litOnly = Array.from(valueToHash.keys());
-litOnly.sort();
+const pendingNames = new Map();
+const queue = (all, bits=0) => {
+  if (typeof all === 'string') {
+    all = all.split(/\s+/).filter(Boolean);
+  }
+  for (const cand of all) {
+    const prev = pendingNames.get(cand) || 0;
+    pendingNames.set(cand, prev | bits)
+  }
+};
+
+
+const nameToHash = new Map();
+const hashToName = new Map();
+
+queue(alwaysKeyword, special.KEYWORD | special.STRICT_KEYWORD);
+queue(alwaysStrictKeyword, special.STRICT_KEYWORD);
+queue(unaryOp, special.KEYWORD | special.UNARY_OP);
+queue(optionalUnaryOp, special.UNARY_OP);
+queue(relOp, special.KEYWORD | special.REL_OP);
+queue(neverLabel, special.MASQUERADE);
+queue(optionalKeyword);
+queue(declKeyword, special.DECL);
+queue(controlKeyword, special.CONTROL);
+queue(controlParenKeyword, special.CONTROL_PAREN);
+const litOnly = Array.from(pendingNames.keys()).sort();
 
 // add other random punctuators _after_ saving litOnly
-process(Object.values(extraDefines));
+queue(Object.values(extraDefines));
 
 
-
+// now actually generate hashes
+pendingNames.forEach((bits, name) => {
+  const hash = generateHash(name, bits);
+  if (hashToName.has(hash)) {
+    throw new Error(`duplicate hash: ${name}=${hash}`);
+  }
+  hashToName.set(hash, name);
+  nameToHash.set(name, hash);
+});
 
 
 function generateHash(s, bits=0) {
@@ -92,7 +138,10 @@ function renderDefine(defn, value, prefix) {
     value = defn;
   }
   const name = (prefix + defn).toUpperCase().padEnd(16);
-  const hash = valueToHash.get(value);
+  const hash = nameToHash.get(value);
+  if (!hash) {
+    throw new Error(`unhashed name: ${value}`);
+  }
   let out = `#define ${name} ${hash}`;
 
   if (hadValue) {
@@ -113,23 +162,6 @@ function renderDefines(defines, prefix) {
 
   out.sort();
   return out.join('');
-}
-
-
-function process(all, bits=0) {
-  if (typeof all === 'string') {
-    all = all.split(/\s+/).filter(Boolean);
-  }
-
-  for (const keyword of all) {
-    const hash = generateHash(keyword, bits);
-    if (hashToValue.has(hash)) {
-      throw new Error(`duplicate hash: ${keyword}=${hash}`);
-    }
-
-    hashToValue.set(hash, keyword);
-    valueToHash.set(keyword, hash);
-  }
 }
 
 
@@ -228,6 +260,20 @@ ${space}}\n`;
 }
 
 
+function renderSpecial(special) {
+  const all = [];
+  for (const key in special) {
+    all.push([special[key], key]);
+  }
+  all.sort((a, b) => a[0] - b[0]);
+
+  const lines = all.map(([value, key]) => {
+    return `#define _MASK_${key.padEnd(16)} ${value}\n`
+  });
+  return lines.join('');
+}
+
+
 function main() {
   const helperOutput = `// Generated on ${now}
 
@@ -265,13 +311,9 @@ int consume_known_lit(char *, uint32_t *);
 #ifndef _LIT_H
 #define _LIT_H
 
-#define _MASK_KEYWORD        ${special.KEYWORD}
-#define _MASK_STRICT_KEYWORD ${special.STRICT_KEYWORD}
-#define _MASK_OPLIKE         ${special.OPLIKE}
-#define _MASK_MASQUERADE     ${special.MASQUERADE}
-
+${renderSpecial(special)}
 ${renderDefines(litOnly, 'lit_')}
-${renderDefines(extraDefines, 'op_')}
+${renderDefines(extraDefines, 'misc_')}
 #endif//_LIT_H
 `;
   fs.writeFileSync('lit.h', litOutput);

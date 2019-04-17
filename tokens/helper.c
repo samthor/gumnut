@@ -1,10 +1,10 @@
-// Generated on Wed Apr 17 2019 15:21:11 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Wed Apr 17 2019 17:05:27 GMT+1000 (Australian Eastern Standard Time)
 
 #include "lit.h"
 #include "helper.h"
 
-// 49 candidates:
-//   as async await break case catch class const continue debugger default delete do else enum export extends false finally for from function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield
+// 52 candidates:
+//   as async await break case catch class const continue debugger default delete do else enum export extends false finally for from function get if implements import in instanceof interface let new null of package private protected public return set static super switch this throw true try typeof var void while with yield
 int consume_known_lit(char *p, uint32_t *out) {
   char *start = p;
 #define _done(len, _out) {*out=_out;return len;}
@@ -175,6 +175,12 @@ int consume_known_lit(char *p, uint32_t *out) {
       _done(8, LIT_FUNCTION);
     }
     return 1;  // f...
+  case 103:  // 'g'
+    if (*p++ != 101 || *p++ != 116) {
+      // != "et"
+      return p - start - 1;
+    }
+    _done(3, LIT_GET);
   case 105:  // 'i'
     switch (*p++) {
     case 102:  // 'f'
@@ -239,6 +245,12 @@ int consume_known_lit(char *p, uint32_t *out) {
       _done(4, LIT_NULL);
     }
     return 1;  // n...
+  case 111:  // 'o'
+    if (*p++ != 102) {
+      // != "f"
+      return 1;
+    }
+    _done(2, LIT_OF);
   case 112:  // 'p'
     switch (*p++) {
     case 97:  // 'a'
@@ -279,6 +291,12 @@ int consume_known_lit(char *p, uint32_t *out) {
     _done(6, LIT_RETURN);
   case 115:  // 's'
     switch (*p++) {
+    case 101:  // 'e'
+      if (*p++ != 116) {
+        // != "t"
+        return 2;
+      }
+      _done(3, LIT_SET);
     case 116:  // 't'
       if (*p++ != 97 || *p++ != 116 || *p++ != 105 || *p++ != 99) {
         // != "atic"

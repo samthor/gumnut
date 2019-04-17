@@ -33,6 +33,7 @@ typedef struct {
   int line_no;
   uint8_t type : 5;
   uint8_t mark : 3;
+  uint32_t hash;
 } token;
 
 // empty: will not contain text

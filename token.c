@@ -16,6 +16,8 @@
 
 #include <ctype.h>
 #include <string.h>
+#include "tokens/lit.h"
+#include "tokens/helper.h"
 #include "token.h"
 
 #define FLAG__PENDING_T_BRACE 1
@@ -24,6 +26,7 @@
 typedef struct {
   int len;
   int type;
+  uint32_t hash;
 } eat_out;
 
 static int consume_slash_op(char *p) {
@@ -104,7 +107,8 @@ static int consume_string(char *p, int *line_no, int *litflag) {
 }
 
 static eat_out eat_token(char *p) {
-#define _ret(_len, _type) ((eat_out) {_len, _type});
+#define _ret(_len, _type) ((eat_out) {_len, _type, 0});
+#define _reth(_len, _type, _hash) ((eat_out) {_len, _type, _hash});
 
   // look for EOF
   const char start = p[0];
@@ -124,10 +128,10 @@ static eat_out eat_token(char *p) {
       return _ret(1, TOKEN_TERNARY);
 
     case ':':
-      return _ret(1, TOKEN_COLON);  // nb. might change to TOKEN_CLOSE in parent
+      return _reth(1, TOKEN_COLON, MISC_COLON);  // nb. might change to TOKEN_CLOSE in parent
 
     case ',':
-      return _ret(1, TOKEN_COMMA);
+      return _reth(1, TOKEN_COMMA, MISC_COMMA);
 
     case '(':
       return _ret(1, TOKEN_PAREN);
@@ -169,15 +173,20 @@ static eat_out eat_token(char *p) {
     }
 
     if (start == '=' && c == '>') {
-      return _ret(2, TOKEN_ARROW);  // arrow for arrow function
-    } else if (c == start && strchr("+-|&", start)) {
-      ++len;  // eat --, ++, || or &&: but no more
+      return _reth(2, TOKEN_ARROW, MISC_ARROW);  // arrow for arrow function
+    } else if (c == start && (c == '+' || c == '-')) {
+      // nb. we don't actaully care which one this is?
+      return _reth(2, TOKEN_OP, MISC_INCDEC);
+    } else if (c == start && (c == '|' || c == '&')) {
+      ++len;  // eat || or &&: but no more
     } else if (c == '=') {
       // consume a suffix '=' (or whole ===, !==)
       c = p[++len];
       if (c == '=' && (start == '=' || start == '!')) {
         ++len;
       }
+    } else if (start == '*' && len == 1) {
+      return _reth(1, TOKEN_OP, MISC_STAR);
     }
 
     return _ret(len, TOKEN_OP);
@@ -205,17 +214,19 @@ static eat_out eat_token(char *p) {
   // dot notation
   if (start == '.') {
     if (next == '.' && p[2] == '.') {
-      return _ret(3, TOKEN_SPREAD);  // '...' operator
+      return _reth(3, TOKEN_SPREAD, MISC_SPREAD);  // '...' operator
     }
-    return _ret(1, TOKEN_DOT);  // it's valid to say e.g., "foo . bar", so separate token
+    return _reth(1, TOKEN_DOT, MISC_DOT);  // it's valid to say e.g., "foo . bar", so separate token
   }
 
   // literals
-  int len = 0;
-  char c = start;
+  uint32_t hash = 0;
+  int len = consume_known_lit(p, &hash);
+  char c = p[len];
   do {
     // FIXME: escapes aren't valid in literals, but check whether this matches UTF-8
     if (c == '\\') {
+      hash = 0;
       ++len;  // don't care, eat whatever aferwards
       c = p[++len];
       if (c != '{') {
@@ -233,17 +244,19 @@ static eat_out eat_token(char *p) {
     if (!valid) {
       break;
     }
+    hash = 0;
     c = p[++len];
   } while (c);
 
   if (len) {
     // we don't care what this is, give to caller
-    return _ret(len, TOKEN_LIT);
+    return _reth(len, TOKEN_LIT, hash);
   }
 
   // found nothing :(
   return _ret(0, -1);
 #undef _ret
+#undef _reth
 }
 
 static int consume_comment(char *p, int *line_no) {
@@ -340,6 +353,7 @@ static void eat_next(tokendef *d) {
   // match real token
   eat_out eat = eat_token(p);
   d->next.type = eat.type;
+  d->next.hash = eat.hash;
   d->next.line_no = d->line_no;
   d->next.p = p;
   d->next.len = eat.len;

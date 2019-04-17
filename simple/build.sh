@@ -1,4 +1,4 @@
 #!/bin/bash
 
 set -eu
-clang -o simple simple.c demo.c ../{token,utils}.c
+clang -o simple simple.c demo.c ../tokens/helper.c ../token.c

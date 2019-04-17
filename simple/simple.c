@@ -1,7 +1,7 @@
 
 #include <string.h>
 #include "simple.h"
-#include "../utils.h"
+#include "../tokens/lit.h"
 
 #define SSTACK__STMT     0  // within regular statement (not a hoist)
 #define SSTACK__GROUP    1  // group execution context "()" or "[]"
@@ -55,11 +55,6 @@ typedef struct {
 } simpledef;
 
 
-static int token_string(token *t, char *s, int len) {
-  return t->len == len && !memcmp(t->p, s, len);
-}
-
-
 // stores a virtual token in the stream, and yields it before the current token
 static void yield_virt(simpledef *sd, int type) {
   token *t = &(sd->curr->t1);
@@ -97,12 +92,10 @@ static int record_walk(simpledef *sd, int has_value) {
 }
 
 
-static int context_is_optional_keyword(uint8_t context, token *t) {
-  if (t->type != TOKEN_LIT) {
-    // do nothing
-  } else if (context & CONTEXT__ASYNC && token_string(t, "await", 5)) {
+static int is_optional_keyword(uint32_t hash, uint8_t context) {
+  if (context & CONTEXT__ASYNC && hash == LIT_AWAIT) {
     return 1;
-  } else if (context & (CONTEXT__GENERATOR | CONTEXT__STRICT) && token_string(t, "yield", 5)) {
+  } else if (context & (CONTEXT__GENERATOR | CONTEXT__STRICT) && hash == LIT_YIELD) {
     // yield is invalid outside a generator in strict mode, but it's a keyword
     return 1;
   }
@@ -110,28 +103,30 @@ static int context_is_optional_keyword(uint8_t context, token *t) {
 }
 
 
-static int context_is_label(uint8_t context, token *t) {
-  return t->type == TOKEN_LIT &&
-      !is_reserved_word(t->p, t->len, context & CONTEXT__STRICT) &&
-      !context_is_optional_keyword(context, t);
+static int is_always_keyword(uint32_t hash, uint8_t context) {
+  return (hash & _MASK_KEYWORD) ||
+      ((context & CONTEXT__STRICT) && (hash & _MASK_STRICT_KEYWORD));
 }
 
 
-static int context_is_name_keyword(uint8_t context, token *t, int hoist) {
-  if (t->type != TOKEN_LIT) {
-    return 0;
-  }
-  return is_reserved_word(t->p, t->len, context & CONTEXT__STRICT) ||
-      (hoist && context_is_optional_keyword(context, t));
+static int is_label(uint32_t hash, uint8_t context) {
+  return !is_always_keyword(hash, context) && !is_optional_keyword(hash, context);
 }
 
 
-static int context_is_unary(uint8_t context, token *t) {
-  if (t->type != TOKEN_LIT) {
-    return 0;
+static int is_valid_name(uint32_t hash, uint8_t context, int hoist) {
+  uint32_t mask = _MASK_KEYWORD | _MASK_MASQUERADE;
+  if (context & CONTEXT__STRICT) {
+    mask |= _MASK_STRICT_KEYWORD;
   }
-  static const char always[] = " delete new typeof void ";
-  return in_space_string(always, t->p, t->len) || context_is_optional_keyword(context, t);
+  return !(hash & mask) && (!hoist || is_optional_keyword(hash, context));
+}
+
+
+static int is_unary(uint32_t hash, uint8_t context) {
+  // check if we're also a keyword, to avoid matching 'await' and 'yield' by default
+  uint32_t mask = _MASK_UNARY_OP | _MASK_KEYWORD;
+  return ((hash & mask) == mask) || is_optional_keyword(hash, context);
 }
 
 
@@ -139,10 +134,10 @@ static int context_is_unary(uint8_t context, token *t) {
 static int peek_function(simpledef *sd) {
   if (sd->tok.type != TOKEN_LIT) {
     return 0;
-  } else if (token_string(&(sd->tok), "async", 5)) { 
-    return sd->next->type == TOKEN_LIT && token_string(sd->next, "function", 8);
+  } else if (sd->tok.hash == LIT_ASYNC) { 
+    return sd->next->type == TOKEN_LIT && sd->next->hash == LIT_FUNCTION;
   }
-  return token_string(&(sd->tok), "function", 8);
+  return sd->tok.hash == LIT_FUNCTION;
 }
 
 
@@ -153,7 +148,7 @@ static int match_function(simpledef *sd) {
   }
 
   uint8_t context = (sd->curr->context & CONTEXT__STRICT);
-  if (sd->tok.p[0] == 'a') {
+  if (sd->tok.hash == LIT_ASYNC) {
     context |= CONTEXT__ASYNC;
     sd->tok.type = TOKEN_KEYWORD;
     skip_walk(sd, 0);  // consume "async"
@@ -162,7 +157,7 @@ static int match_function(simpledef *sd) {
   record_walk(sd, 0);  // consume "function"
 
   // optionally consume generator star
-  if (sd->tok.type == TOKEN_OP && token_string(&(sd->tok), "*", 1)) {
+  if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) {
     skip_walk(sd, 0);
     context |= CONTEXT__GENERATOR;
   }
@@ -173,7 +168,7 @@ static int match_function(simpledef *sd) {
 
 
 static int match_class(simpledef *sd) {
-  if (!token_string(&(sd->tok), "class", 5)) {
+  if (sd->tok.hash != LIT_CLASS) {
     return -1;
   }
   sd->tok.type = TOKEN_KEYWORD;
@@ -183,12 +178,12 @@ static int match_class(simpledef *sd) {
 
   // optionally consume class name
   if (sd->tok.type == TOKEN_LIT) {
-    if (token_string(&(sd->tok), "extends", 7)) {
+    if (sd->tok.hash == LIT_EXTENDS) {
       special = SPECIAL__FREE_VALUE;
     } else {
       int hoist = (sd->curr - 1)->stype == SSTACK__BLOCK;
-      if (context_is_name_keyword(sd->curr->context, &(sd->tok), hoist)) {
-        // FIXME: "class yield" is invalid even if hoisted? same rule does not apply to function
+      if (!is_valid_name(sd->tok.hash, sd->curr->context, hoist) || sd->tok.hash == LIT_YIELD) {
+        // nb. "class yield" is always a keyword, even if hoisted (doesn't apply to function)
         sd->tok.type = TOKEN_KEYWORD;  // "class if" is invalid
       } else {
         sd->tok.type = TOKEN_SYMBOL;
@@ -198,7 +193,7 @@ static int match_class(simpledef *sd) {
   }
 
   // consume extends
-  if (special || (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "extends", 7))) {
+  if (special || (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_EXTENDS)) {
     sd->tok.type = TOKEN_KEYWORD;
     skip_walk(sd, 0);  // consume "extends" keyword
     special = SPECIAL__FREE_VALUE;
@@ -210,7 +205,7 @@ static int match_class(simpledef *sd) {
 
 // matches var/const/let, optional let based on context
 static int match_decl(simpledef *sd) {
-  if (!is_decl_keyword(sd->tok.p, sd->tok.len)) {
+  if (!(sd->tok.hash & _MASK_DECL)) {
     return -1;
   }
 
@@ -218,7 +213,7 @@ static int match_decl(simpledef *sd) {
   if (!(sd->curr->context & CONTEXT__STRICT)) {
     if (sd->tok.p[0] != 'l' || sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY) {
       // OK: const, var or e.g. "let[..]" or "let{..}", destructuring
-    } else if (sd->next->type != TOKEN_LIT || is_op_keyword(sd->next->p, sd->next->len)) {
+    } else if (sd->next->type != TOKEN_LIT || (sd->next->hash & _MASK_REL_OP)) {
       return -1;  // no following literal (e.g. "let = 1", "instanceof" counts as op)
     }
   }
@@ -230,7 +225,7 @@ static int match_decl(simpledef *sd) {
 
 // matches a "break foo;" or "continue;", emits ASI if required
 static int match_label_keyword(simpledef *sd) {
-  if (sd->tok.type != TOKEN_LIT || !is_label_keyword(sd->tok.p, sd->tok.len)) {
+  if (sd->tok.hash != LIT_BREAK && sd->tok.hash != LIT_CONTINUE) {
     return -1;
   }
 
@@ -239,7 +234,7 @@ static int match_label_keyword(simpledef *sd) {
   sd->tok.type = TOKEN_KEYWORD;
   skip_walk(sd, 0);
 
-  if (sd->tok.line_no == line_no && context_is_label(sd->curr->context, &(sd->tok))) {
+  if (sd->tok.line_no == line_no && is_label(sd->tok.hash, sd->curr->context)) {
     sd->tok.type = TOKEN_LABEL;
     skip_walk(sd, 0);
   }
@@ -299,7 +294,7 @@ static int yield_valid_asi(simpledef *sd) {
 
 static int is_token_valuelike(token *t) {
   if (t->type == TOKEN_LIT) {
-    return !is_op_keyword(t->p, t->len);
+    return !(t->hash & _MASK_REL_OP);
   }
   return t->type == TOKEN_SYMBOL || t->type == TOKEN_NUMBER || t->type == TOKEN_STRING || t->type == TOKEN_BRACE;
 }
@@ -353,7 +348,7 @@ restart:
         }
         --sd->curr;  // close outer
 
-        if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "from", 4)) {
+        if (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_FROM) {
           // ... inner {} must have trailer "from './path'"
           sd->tok.type = TOKEN_KEYWORD;
           record_walk(sd, 0);
@@ -367,7 +362,7 @@ restart:
         return 0;
 
       case TOKEN_OP:
-        if (token_string(&(sd->tok), "*", 1)) {
+        if (sd->tok.hash == MISC_STAR) {
           sd->tok.type = TOKEN_SYMBOL;  // pretend this is symbol
           return record_walk(sd, 0);
         }
@@ -385,7 +380,7 @@ restart:
     // consume and bail out on "from" if it follows a symbol or close brace
     if ((sd->curr - 1)->stype != SSTACK__MODULE &&
         sd->curr->t1.type == TOKEN_SYMBOL &&
-        token_string(&(sd->tok), "from", 4)) {
+        sd->tok.hash == LIT_FROM) {
       --sd->curr;  // close outer
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
@@ -398,16 +393,17 @@ restart:
     }
 
     // consume "as" as a keyword if it follows a symbol
-    if (sd->curr->t1.type == TOKEN_SYMBOL && token_string(&(sd->tok), "as", 2)) {
+    if (sd->curr->t1.type == TOKEN_SYMBOL && sd->tok.hash == LIT_AS) {
       sd->tok.type = TOKEN_KEYWORD;
       return record_walk(sd, 0);
     }
 
     // otherwise just mask as symbol or keyword
-    if (is_reserved_word(sd->tok.p, sd->tok.len, sd->curr->context & CONTEXT__STRICT)) {
-      sd->tok.type = TOKEN_KEYWORD;
-    } else {
+    if (is_valid_name(sd->tok.hash, sd->curr->context, 0)) {
       sd->tok.type = TOKEN_SYMBOL;
+    } else {
+      // ... invalid, of course
+      sd->tok.type = TOKEN_KEYWORD;
     }
     return record_walk(sd, 0);
   }
@@ -420,7 +416,7 @@ restart:
     // ... look for 'static' without '(' next
     if (sd->tok.type == TOKEN_LIT &&
         sd->td->next.type != TOKEN_PAREN &&
-        token_string(&(sd->tok), "static", 6)) {
+        sd->tok.hash == LIT_STATIC) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
     }
@@ -428,14 +424,14 @@ restart:
     // ... look for 'async' without '(' next
     if (sd->tok.type == TOKEN_LIT &&
         sd->td->next.type != TOKEN_PAREN &&
-        token_string(&(sd->tok), "async", 5)) {
+        sd->tok.hash == LIT_ASYNC) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
       context |= CONTEXT__ASYNC;
     }
 
     // ... look for '*'
-    if (sd->tok.type == TOKEN_OP && token_string(&(sd->tok), "*", 1)) {
+    if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) {
       context |= CONTEXT__GENERATOR;
       record_walk(sd, 0);
     }
@@ -443,7 +439,7 @@ restart:
     // ... look for get/set without '(' next
     if (sd->tok.type == TOKEN_LIT &&
         sd->td->next.type != TOKEN_PAREN &&
-        is_getset(sd->tok.p, sd->tok.len)) {
+        (sd->tok.hash == LIT_GET || sd->tok.hash == LIT_SET)) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
     }
@@ -496,8 +492,7 @@ restart:
       int parent = (sd->curr - 1)->stype;
 
       // we're only maybe a keyword in non-dict modes (and more if hoisted since it is a var name)
-      if (parent != SSTACK__DICT &&
-          context_is_name_keyword(context, &(sd->tok), parent == SSTACK__BLOCK)) {
+      if (parent != SSTACK__DICT && is_valid_name(sd->tok.hash, context, parent == SSTACK__BLOCK)) {
         sd->tok.type = TOKEN_KEYWORD;
       } else {
         sd->tok.type = TOKEN_SYMBOL;
@@ -591,7 +586,7 @@ restart:
       // look for following "while (", fail if not
       if (sd->next->type == TOKEN_PAREN &&
           sd->tok.type == TOKEN_LIT &&
-          token_string(&(sd->tok), "while", 5)) {
+          sd->tok.hash == LIT_WHILE) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);  // consume while
         record_walk(sd, 0);  // consume paren
@@ -619,7 +614,7 @@ restart:
     }
 
     // match label
-    if (context_is_label(sd->curr->context, &(sd->tok)) && sd->next->type == TOKEN_COLON) {
+    if (is_label(sd->tok.hash, sd->curr->context) && sd->next->type == TOKEN_COLON) {
       sd->tok.type = TOKEN_LABEL;
       skip_walk(sd, -1);  // consume label
       skip_walk(sd, -1);  // consume colon
@@ -648,7 +643,7 @@ restart:
     }
 
     // match single-only
-    if (token_string(&(sd->tok), "debugger", 8)) {
+    if (sd->tok.hash == LIT_DEBUGGER) {
       int line_no = sd->tok.line_no;
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
@@ -660,7 +655,7 @@ restart:
     }
 
     // match restricted statement starters
-    if (token_string(&(sd->tok), "return", 6) || token_string(&(sd->tok), "throw", 5)) {
+    if (sd->tok.hash == LIT_RETURN || sd->tok.hash == LIT_THROW) {
       int line_no = sd->tok.line_no;
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
@@ -677,7 +672,7 @@ restart:
     if (sd->curr == sd->stack && sd->is_module) {
 
       // match "import" which starts a sstack special
-      if (token_string(&(sd->tok), "import", 6)) {
+      if (sd->tok.hash == LIT_IMPORT) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
 
@@ -692,17 +687,17 @@ restart:
       }
 
       // match "export" which is sort of a no-op, resets to default state
-      if (token_string(&(sd->tok), "export", 6)) {
+      if (sd->tok.hash == LIT_EXPORT) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
 
-        if ((sd->tok.type == TOKEN_OP && token_string(&(sd->tok), "*", 1)) ||
+        if ((sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) ||
             sd->tok.type == TOKEN_BRACE) {
           stack_inc(sd, SSTACK__MODULE);
           return 0;
         }
 
-        if (sd->tok.type == TOKEN_LIT && token_string(&(sd->tok), "default", 7)) {
+        if (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_DEFAULT) {
           sd->tok.type = TOKEN_KEYWORD;
           record_walk(sd, 0);
         }
@@ -721,32 +716,29 @@ restart:
     }
 
     // match e.g., "if", "catch"
-    if (is_control_keyword(sd->tok.p, sd->tok.len)) {
-      char start = sd->tok.p[0];
-      int special = (start == 'f' ? SPECIAL__FOR : 0);
-
-      int maybe_paren = is_control_paren(sd->tok.p, sd->tok.len);
+    if (sd->tok.hash & _MASK_CONTROL) {
+      uint32_t hash = sd->tok.hash;
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
 
       // match "for await"
-      if (sd->tok.type == TOKEN_LIT && special && token_string(&(sd->tok), "await", 5)) {
+      if (sd->tok.type == TOKEN_LIT && hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
         // even outside strict/async mode, this is valid, but an error
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
       }
 
       // match "do"
-      if (start == 'd') {
+      if (hash == LIT_DO) {
         stack_inc(sd, SSTACK__DO_WHILE);
         return 0;
       }
 
       // if we need a paren, consume without putting into statement
-      if (maybe_paren && sd->tok.type == TOKEN_PAREN) {
+      if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
         record_walk(sd, 0);
         stack_inc(sd, SSTACK__GROUP);
-        sd->curr->special = special;
+        sd->curr->special = (hash == LIT_FOR ? SPECIAL__FOR : 0);
       }
 
       return 0;
@@ -783,7 +775,7 @@ regular_bail:
       }
 
       uint8_t context = (sd->curr->context & CONTEXT__STRICT);
-      if (sd->curr->t2.type == TOKEN_KEYWORD && token_string(&(sd->curr->t2), "async", 5)) {
+      if (sd->curr->t2.type == TOKEN_KEYWORD && sd->curr->t2.hash == LIT_ASYNC) {
         context |= CONTEXT__ASYNC;
       }
 
@@ -888,7 +880,7 @@ regular_bail:
       return 0;
 
     case TOKEN_LIT:
-      if (is_op_keyword(sd->tok.p, sd->tok.len)) {
+      if (sd->tok.hash & _MASK_REL_OP) {
         sd->tok.type = TOKEN_OP;
         return record_walk(sd, 0);
       }
@@ -921,7 +913,7 @@ regular_bail:
     case TOKEN_SPREAD:
     case TOKEN_OP: {
       int has_value = 0;
-      if (sd->tok.type == TOKEN_OP && is_double_addsub(sd->tok.p, sd->tok.len)) {
+      if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_INCDEC) {
         // if we had value, but are on new line, insert an ASI: this is a PostfixExpression that
         // disallows LineTerminator
         if (sd->tok_has_value && sd->tok.line_no != sd->curr->t1.line_no) {
@@ -968,11 +960,11 @@ regular_bail:
   }
 
   // match valid unary ops
-  if (context_is_unary(sd->curr->context, &(sd->tok))) {
+  if (is_unary(sd->tok.hash, sd->curr->context)) {
     sd->tok.type = TOKEN_OP;
     record_walk(sd, 0);
 
-    if (!sd->curr->stype && sd->curr->t1.p[0] == 'y' && sd->curr->t1.line_no != sd->tok.line_no) {
+    if (!sd->curr->stype && sd->curr->t1.hash == LIT_YIELD && sd->curr->t1.line_no != sd->tok.line_no) {
       // yield is a restricted keyword
       yield_valid_asi(sd);
     }
@@ -982,7 +974,7 @@ regular_bail:
   // match non-async await: this is valid iff it _looks_ like unary op use (e.g. await value).
   // this is a lookahead for value, rather than what we normally do
   // FIXME: valuelike is a bit dangerous, should rather be "not oplike" + "no closers" (and 'await' only operates on right)
-  if (token_string(&(sd->tok), "await", 5) && is_token_valuelike(sd->next)) {
+  if (sd->tok.hash == LIT_AWAIT && is_token_valuelike(sd->next)) {
     // ... to be clear, this is an error, but it IS parsed as a keyword
     sd->tok.type = TOKEN_KEYWORD;
     return record_walk(sd, 0);
@@ -1001,7 +993,7 @@ regular_bail:
 
     // find "of" between two value-like things
     if (sd->tok.type == TOKEN_LIT &&
-        token_string(&(sd->tok), "of", 2) &&
+        sd->tok.hash == LIT_OF &&
         is_token_valuelike(&(sd->curr->t1)) &&
         is_token_valuelike(sd->next)) {
       sd->tok.type = TOKEN_OP;
@@ -1010,7 +1002,7 @@ regular_bail:
   }
 
   // aggressive keyword match inside statement
-  if (is_always_keyword(sd->tok.p, sd->tok.len, sd->curr->context & CONTEXT__STRICT)) {
+  if (is_always_keyword(sd->tok.hash, sd->curr->context)) {
     if (!sd->curr->stype && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
       // if a keyword on a new line would make an invalid statement, restart with it
       yield_valid_asi(sd);
@@ -1023,7 +1015,7 @@ regular_bail:
   }
 
   // look for async arrow function
-  if (token_string(&(sd->tok), "async", 5)) {
+  if (sd->tok.hash == LIT_ASYNC) {
     if (sd->curr->t1.type == TOKEN_DOT) {
       sd->tok.type = TOKEN_SYMBOL;
     } else if (sd->next->type == TOKEN_LIT) {

@@ -48,7 +48,7 @@ void render_callback(void *arg, token *out) {
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';  // this is an ASI
   }
-  printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
+  printf("%c%4d.%02d: %.*s (%d)\n", c, out->line_no, out->type, out->len, out->p, out->hash);
 }
 
 int main() {
@@ -60,7 +60,7 @@ int main() {
   }
 
   tokendef td = prsr_init_token(buf);
-  int out = prsr_simple(&td, 1, render_callback, NULL);
+  int out = prsr_simple(&td, 0, render_callback, NULL);
   if (out) {
     fprintf(stderr, "ret=%d\n", out);
   }
