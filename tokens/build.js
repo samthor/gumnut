@@ -58,6 +58,7 @@ process(opKeyword, special.KEYWORD | special.OPLIKE);
 process(neverLabel, special.MASQUERADE);
 process(optionalKeyword);
 const litOnly = Array.from(valueToHash.keys());
+litOnly.sort();
 
 // add other random punctuators _after_ saving litOnly
 process(Object.values(extraDefines));

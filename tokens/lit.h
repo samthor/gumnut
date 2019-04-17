@@ -1,4 +1,4 @@
-// Generated on Wed Apr 17 2019 15:17:42 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Wed Apr 17 2019 15:21:11 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -36,7 +36,7 @@
 #define LIT_IN           40790277
 #define LIT_INSTANCEOF   175008005
 #define LIT_INTERFACE    158230786
-#define LIT_LET          56978442
+#define LIT_LET          56978434
 #define LIT_NEW          56978949
 #define LIT_NULL         74804744
 #define LIT_PACKAGE      123826178
