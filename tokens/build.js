@@ -1,3 +1,7 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const now = new Date;
 
 const alwaysKeyword = 
     " async break case catch class const continue debugger default delete do else enum export" +
@@ -18,20 +22,64 @@ const oldKeyword =
     " abstract boolean byte char double final float goto int long native short synchronized" +
     " throws transient volatile ";
 
+const extraDefines = {
+  COMMA: ',',
+  SPREAD: '...',
+  ARROW: '=>',
+  COLON: ':',
+  DOT: '.',
+  STAR: '*',
+  DOUBLE_ADD: '++',
+  DOUBLE_SUB: '--',
+};
 
-const readNext = `*(++p)`;
+
+const readNext = `*p++`;
 
 
 const known = new Map();
 
 
+function renderDefine(defn, value=null, prefix='lit_') {
+  let hadValue = value;
+  if (value === null) {
+    value = defn;
+  }
+  const name = (prefix + defn).toUpperCase().padEnd(16);
+  const hash = generateHash(value);
+  let out = `#define ${name} ${hash}`;
+
+  if (hadValue) {
+    return out.padEnd(36) + `// ${hadValue}\n`;
+  }
+  return out + '\n';
+}
+
+
+function renderDefines() {
+  const all = Array.from(known.values()).map((value) => renderDefine(value));
+  all.sort();
+  return all.join('');
+}
+
+
+function renderExtraDefines(map, prefix='_lit_') {
+  const all = [];
+  for (const key in map) {
+    const value = map[key];
+    all.push(renderDefine(key, value, prefix));
+  }
+  return all.join('');
+}
+
+
 function generateHash(s) {
   let out = 0;
-  const size = Math.min(3, s.length);
+  const size = Math.min(2, s.length);
   for (let i = 0; i < size; ++i) {
     out += (s.charCodeAt(i) << (i * 8));
   }
-  out += Math.min(s.length, 255) << 24;
+  out += Math.min(s.length, 255) << 16;
   return out;
 }
 
@@ -59,37 +107,6 @@ function filterTo(prefix) {
   });
   out.sort();
   return out;
-}
-
-
-function group(list) {
-  // group by first letter, assume sorted
-  if (!list.length) {
-    return [];
-  }
-  list = list.slice();  // clone to sort
-  list.sort();
-  const result = [];
-
-  let focus = 0;
-  let low = list[focus].charCodeAt(0);  // first letter of ...
-  let high = low;
-
-  while (++focus < list.length) {
-    const cand = list[focus].charCodeAt(0);
-    if (cand === high || cand === high + 1) {
-      high = cand;
-      continue;  // great, same or just up one
-    }
-
-    // otherwise, allocate new group
-    result.push(low, high);
-    low = cand;
-    high = cand;
-  }
-
-  result.push(low, high);
-  return result;
 }
 
 
@@ -138,17 +155,19 @@ function renderChoice(all, space='', prefix='') {
   const {tail, rest, chars} = renderChain(all, space);
   if (chars.length) {
     let out = ``;
-    let len = `p - start`;  // safely consumed this many chars (based on conditional progress)
+    let len = `p - start - 1`;  // safely consumed this many chars (based on conditional progress)
 
     const conditional = chars.map((char) => {
-      return `${readNext} == ${char}`;
+      return `${readNext} != ${char}`;
     });
-    prefix += String.fromCharCode(...chars);
+    const check = String.fromCharCode(...chars)
+    prefix += check;
     if (chars.length === 1) {
       len = prefix.length - 1;  // we safely consumed this many chars (one cond, so no sub)
     }
 
-    out += `${space}if (!(${conditional.join(' && ')})) {
+    out += `${space}if (${conditional.join(' || ')}) {
+${space}  // != "${check}"
 ${space}  return ${len};
 ${space}}\n`;
     out += renderChoice(rest, space, prefix);
@@ -160,17 +179,24 @@ ${space}}\n`;
   }
 
   let out = `${space}switch (${readNext}) {\n`;
+  let hasDefault = false;
   tail.forEach((rest, char) => {
     if (char) {
-      out += `${space}case ${char}:\n`;
-      out += renderChoice(rest, space + '  ', prefix + String.fromCharCode(char));
+      const extra = String.fromCharCode(char);
+      out += `${space}case ${char}:  // '${extra}'\n`;
+      out += renderChoice(rest, space + '  ', prefix + extra);
     } else {
-      out += `${space}default:
-${space}  _done(${prefix.length}, ${generateHash(prefix)});  // ${prefix}
-`;
+      hasDefault = true;
     }
   });
   out += `${space}}\n`;
+
+  if (hasDefault) {
+    out += `${space}_done(${prefix.length}, ${generateHash(prefix)});  // ${prefix}\n`;
+  } else {
+    out += `${space}return ${prefix.length};  // ${prefix}...\n`
+  }
+
   return out;
 }
 
@@ -182,6 +208,24 @@ process(neverLabel);
 process(optionalKeyword);
 //process(oldKeyword);
 
-const all = filterTo('');
-console.info(`// Generated on ${new Date}`);
-console.info(renderChoice(all));
+
+const all = Array.from(known.values()).sort();
+const helperOutput = `// Generated on ${now}
+// ${all.length} candidates:
+//   ${all.join(' ')}
+int consume_known_lit(char *p, uint32_t *out) {
+  char *start = p;
+#define _done(len, _out) {*out=_out;return len;}
+${renderChoice(filterTo(''), space='  ')}
+#undef _done
+}
+`;
+fs.writeFileSync('helper.c', helperOutput);
+
+
+const defineOutput = `// Generated on ${now}
+${renderDefines()}
+${renderExtraDefines(extraDefines)}
+`;
+fs.writeFileSync('helper.h', defineOutput);
+
