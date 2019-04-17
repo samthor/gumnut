@@ -37,16 +37,29 @@ const extraDefines = {
 const readNext = `*p++`;
 
 
-const known = new Map();
+const valueToHash = new Map();
+const hashToValue = new Map();
 
 
-function renderDefine(defn, value=null, prefix='lit_') {
+function generateHash(s, bits=0) {
+  let out = 0;
+  const size = Math.min(2, s.length);
+  for (let i = 0; i < size; ++i) {
+    out += (s.charCodeAt(i) << (i * 8));
+  }
+  out += Math.min(s.length, 255) << 16;
+  out += Math.min(bits, 255) << 24;
+  return out;
+}
+
+
+function renderDefine(defn, value, prefix) {
   let hadValue = value;
   if (value === null) {
     value = defn;
   }
   const name = (prefix + defn).toUpperCase().padEnd(16);
-  const hash = generateHash(value);
+  const hash = valueToHash.get(value);
   let out = `#define ${name} ${hash}`;
 
   if (hadValue) {
@@ -56,57 +69,34 @@ function renderDefine(defn, value=null, prefix='lit_') {
 }
 
 
-function renderDefines() {
-  const all = Array.from(known.values()).map((value) => renderDefine(value));
-  all.sort();
-  return all.join('');
-}
+function renderDefines(defines, prefix) {
+  let out;
 
-
-function renderExtraDefines(map, prefix='_lit_') {
-  const all = [];
-  for (const key in map) {
-    const value = map[key];
-    all.push(renderDefine(key, value, prefix));
+  if (defines instanceof Array) {
+    out = defines.map((value) => renderDefine(value, null, prefix));
+  } else {
+    out = Object.keys(defines).map((defn) => renderDefine(defn, defines[defn], prefix));
   }
-  return all.join('');
+
+  out.sort();
+  return out.join('');
 }
 
 
-function generateHash(s) {
-  let out = 0;
-  const size = Math.min(2, s.length);
-  for (let i = 0; i < size; ++i) {
-    out += (s.charCodeAt(i) << (i * 8));
+function process(all, bits=0) {
+  if (typeof all === 'string') {
+    all = all.split(/\s+/).filter(Boolean);
   }
-  out += Math.min(s.length, 255) << 16;
-  return out;
-}
-
-
-function process(all) {
-  all = all.split(/\s+/).filter(Boolean);
 
   for (const keyword of all) {
-    const hash = generateHash(keyword);
-    if (known.has(hash)) {
+    const hash = generateHash(keyword, bits);
+    if (hashToValue.has(hash)) {
       throw new Error(`duplicate hash: ${keyword}=${hash}`);
     }
 
-    known.set(hash, keyword);
+    hashToValue.set(hash, keyword);
+    valueToHash.set(keyword, hash);
   }
-}
-
-
-function filterTo(prefix) {
-  const out = [];
-  known.forEach((keyword) => {
-    if (keyword.startsWith(prefix)) {
-      out.push(keyword.substr(prefix.length));
-    }
-  });
-  out.sort();
-  return out;
 }
 
 
@@ -175,7 +165,8 @@ ${space}}\n`;
   }
 
   if (!tail.size) {
-    return `${space}_done(${prefix.length}, ${generateHash(prefix)});  // ${prefix}\n`;
+    const hash = valueToHash.get(prefix);
+    return `${space}_done(${prefix.length}, ${hash});  // ${prefix}\n`;
   }
 
   let out = `${space}switch (${readNext}) {\n`;
@@ -192,7 +183,8 @@ ${space}}\n`;
   out += `${space}}\n`;
 
   if (hasDefault) {
-    out += `${space}_done(${prefix.length}, ${generateHash(prefix)});  // ${prefix}\n`;
+    const hash = valueToHash.get(prefix);
+    out += `${space}_done(${prefix.length}, ${hash});  // ${prefix}\n`;
   } else {
     out += `${space}return ${prefix.length};  // ${prefix}...\n`
   }
@@ -202,21 +194,24 @@ ${space}}\n`;
 
 
 
-process(alwaysKeyword);
-process(alwaysStrictKeyword);
-process(neverLabel);
-process(optionalKeyword);
+process(alwaysKeyword, 1);
+process(alwaysStrictKeyword, 2);
+process(neverLabel, 4);
+process(optionalKeyword, 8);
 //process(oldKeyword);
+const litOnly = Array.from(valueToHash.keys());
+
+// now add other random punctuators
+process(Object.values(extraDefines));
 
 
-const all = Array.from(known.values()).sort();
 const helperOutput = `// Generated on ${now}
-// ${all.length} candidates:
-//   ${all.join(' ')}
+// ${litOnly.length} candidates:
+//   ${litOnly.join(' ')}
 int consume_known_lit(char *p, uint32_t *out) {
   char *start = p;
 #define _done(len, _out) {*out=_out;return len;}
-${renderChoice(filterTo(''), space='  ')}
+${renderChoice(litOnly, space='  ')}
 #undef _done
 }
 `;
@@ -224,8 +219,8 @@ fs.writeFileSync('helper.c', helperOutput);
 
 
 const defineOutput = `// Generated on ${now}
-${renderDefines()}
-${renderExtraDefines(extraDefines)}
+${renderDefines(litOnly, 'lit_')}
+${renderDefines(extraDefines, '_lit_')}
 `;
 fs.writeFileSync('helper.h', defineOutput);
 
