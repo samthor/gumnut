@@ -210,10 +210,10 @@ static int match_decl(simpledef *sd) {
   }
 
   // in strict mode, 'let' is always a keyword (well, reserved)
-  if (!(sd->curr->context & CONTEXT__STRICT)) {
-    if (sd->tok.p[0] != 'l' || sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY) {
+  if (!(sd->curr->context & CONTEXT__STRICT) && sd->tok.hash == LIT_LET) {
+    if (sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY || !(sd->next->hash & _MASK_REL_OP)) {
       // OK: const, var or e.g. "let[..]" or "let{..}", destructuring
-    } else if (sd->next->type != TOKEN_LIT || (sd->next->hash & _MASK_REL_OP)) {
+    } else {
       return -1;  // no following literal (e.g. "let = 1", "instanceof" counts as op)
     }
   }
