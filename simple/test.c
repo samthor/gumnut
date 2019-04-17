@@ -462,5 +462,18 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("using await as name inside async", "async () => class await {}",
+    TOKEN_LIT,       // async
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_KEYWORD,   // MARK async
+    TOKEN_ARROW,     // =>
+    TOKEN_KEYWORD,   // class
+    TOKEN_KEYWORD,   // await
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   return ok;
 }

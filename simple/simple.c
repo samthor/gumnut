@@ -114,12 +114,23 @@ static int is_label(uint32_t hash, uint8_t context) {
 }
 
 
-static int is_valid_name(uint32_t hash, uint8_t context, int hoist) {
+static int is_valid_name(uint32_t hash, uint8_t context) {
   uint32_t mask = _MASK_KEYWORD | _MASK_MASQUERADE;
   if (context & CONTEXT__STRICT) {
     mask |= _MASK_STRICT_KEYWORD;
   }
-  return !(hash & mask) && (!hoist || is_optional_keyword(hash, context));
+
+  if ((context & CONTEXT__ASYNC) && hash == LIT_AWAIT) {
+    // await is a keyword inside async function
+    return 0;
+  }
+
+  if ((context & CONTEXT__GENERATOR) && hash == LIT_YIELD) {
+    // yield is a keyword inside generator function
+    return 0;
+  }
+
+  return !(hash & mask);
 }
 
 
@@ -182,8 +193,9 @@ static int match_class(simpledef *sd) {
       special = SPECIAL__FREE_VALUE;
     } else {
       int hoist = (sd->curr - 1)->stype == SSTACK__BLOCK;
-      if (!is_valid_name(sd->tok.hash, sd->curr->context, hoist) || sd->tok.hash == LIT_YIELD) {
-        // nb. "class yield" is always a keyword, even if hoisted (doesn't apply to function)
+      if (!is_valid_name(sd->tok.hash, sd->curr->context) || sd->tok.hash == LIT_YIELD || sd->tok.hash == LIT_LET) {
+        // nb. "yield" or "let" is always an invalid class name, even in non-strict (doesn't apply to function)
+        // ... this might actually be a V8 "feature", but it's the same in Firefox
         sd->tok.type = TOKEN_KEYWORD;  // "class if" is invalid
       } else {
         sd->tok.type = TOKEN_SYMBOL;
@@ -399,7 +411,7 @@ restart:
     }
 
     // otherwise just mask as symbol or keyword
-    if (is_valid_name(sd->tok.hash, sd->curr->context, 0)) {
+    if (is_valid_name(sd->tok.hash, sd->curr->context)) {
       sd->tok.type = TOKEN_SYMBOL;
     } else {
       // ... invalid, of course
@@ -491,8 +503,8 @@ restart:
       int context = (sd->curr - 1)->context;  // "async function await() {}" is valid :(
       int parent = (sd->curr - 1)->stype;
 
-      // we're only maybe a keyword in non-dict modes (and more if hoisted since it is a var name)
-      if (parent != SSTACK__DICT && is_valid_name(sd->tok.hash, context, parent == SSTACK__BLOCK)) {
+      // we're only maybe a keyword in non-dict modes
+      if (parent != SSTACK__DICT && !is_valid_name(sd->tok.hash, context)) {
         sd->tok.type = TOKEN_KEYWORD;
       } else {
         sd->tok.type = TOKEN_SYMBOL;
