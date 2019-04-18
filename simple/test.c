@@ -483,5 +483,10 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("escape string", "'foo\\'bar'",
+    TOKEN_STRING,    // 'foo\'bar'
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   return ok;
 }

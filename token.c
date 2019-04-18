@@ -89,17 +89,33 @@ static int consume_string(char *p, int *line_no, int *litflag) {
 
   for (;;) {
     char c = p[++len];
-    if (!c) {
-      break;
-    } else if (c == start) {
+    if (c == start) {
       ++len;
-      break;
-    } else if (start == '`' && c == '$' && p[len+1] == '{') {
-      *litflag = 1;
-      break;
-    } else if (c == '\n') {
-      // FIXME: only allowed in template literals
-      ++(*line_no);
+      return len;
+    }
+
+    switch (c) {
+      case 0:
+        return len;
+
+      case '$':
+        if (start == '`' && p[len+1] == '{') {
+          *litflag = 1;
+          return len;
+        }
+        break;
+
+      case '\\':
+        c = p[++len];
+        if (c != '\n') {
+          continue;  // just consume next char
+        }
+        // ... but record if it was a newline
+
+      case '\n':
+        // FIXME: only allowed in template literals
+        ++(*line_no);
+        break;
     }
   }
 
