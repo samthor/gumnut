@@ -573,7 +573,7 @@ static int simple_consume(simpledef *sd) {
     } else if (sd->tok.type != TOKEN_BRACE) {
       // invalid, not a brace for main class def
       --sd->curr;
-      printf("got invalid non-brace sd->curr=%d\n", sd->curr->stype);
+      debugf("got invalid non-brace sd->curr=%d\n", sd->curr->stype);
     } else {
       // terminal state of class definition, pop and insert dict
       --sd->curr;
