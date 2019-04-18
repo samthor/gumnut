@@ -52,8 +52,6 @@ void render_callback(void *arg, token *out) {
 }
 
 int main() {
-  fprintf(stderr, "sizeof(tokendef)=%lu\n", sizeof(tokendef));
-
   char *buf;
   if (read_stdin(&buf) < 0) {
     return -1;
