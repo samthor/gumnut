@@ -252,7 +252,7 @@ ${space}}\n`;
     const d = `lit_${prefix}`.toUpperCase();
     out += `${space}_done(${prefix.length}, ${d});\n`;
   } else {
-    out += `${space}return ${prefix.length};  // ${prefix}...\n`
+    out += `${space}return ${prefix.length};  // ${prefix}...\n`;
   }
 
   return out;
