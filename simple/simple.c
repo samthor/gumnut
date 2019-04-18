@@ -629,7 +629,7 @@ restart:
     if (is_label(sd->tok.hash, sd->curr->context) && sd->next->type == TOKEN_COLON) {
       sd->tok.type = TOKEN_LABEL;
       skip_walk(sd, -1);  // consume label
-      skip_walk(sd, -1);  // consume colon
+      skip_walk(sd, 0);  // consume colon
       return 0;
     }
 
@@ -795,7 +795,7 @@ regular_bail:
         // the sensible arrow function case, with a proper body
         // e.g. "() => { statements }"
         record_walk(sd, -1);  // consume =>
-        record_walk(sd, -1);  // consume {
+        record_walk(sd, 0);  // consume {
         stack_inc(sd, SSTACK__BLOCK);
         sd->curr->special = SPECIAL__INIT;
       } else {
@@ -938,10 +938,6 @@ regular_bail:
       return record_walk(sd, has_value);
     }
 
-    default:
-      debugf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
-      // fall-through
-
     case TOKEN_COLON:
       if (!sd->curr->stype) {
         --sd->curr;  // this catches cases like "case {}:", pretend that was a statement
@@ -949,6 +945,11 @@ regular_bail:
         // always invalid here
       }
       return record_walk(sd, 0);
+
+    default:
+      // nb. This is likely because we haven't resolved a TOKEN_SLASH somewhere.
+      debugf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
+      return ERROR__INTERNAL;
 
   }
 
@@ -1087,7 +1088,13 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     debugf("no EOF but valid response\n");
     return ERROR__STACK;
   } else if (sd.curr != sd.stack) {
+
     debugf("stack is %ld too high\n", sd.curr - sd.stack);
+    while (sd.curr != sd.stack) {
+      debugf("%ld: %d (t1=%d/%d line=%d, t2=%d/%d line=%d)\n", sd.curr - sd.stack, sd.curr->stype, sd.curr->t1.type, sd.curr->t1.hash, sd.curr->t1.line_no, sd.curr->t2.type, sd.curr->t2.hash, sd.curr->t2.line_no);
+      --sd.curr;
+    }
+
     return ERROR__STACK;
   }
 
