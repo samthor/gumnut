@@ -22,7 +22,6 @@
 #define ERROR__INTERNAL -1  // internal error
 #define ERROR__STACK    -2  // stack didn't balance
 #define ERROR__VALUE    -3  // ambiguous slash (internal error)
-#define ERROR__TODO     -4  // not done yet
 
 #define __STACK_SIZE      256  // stack size used by token
 #define __STACK_SIZE_BITS 8    // bits needed for __STACK_SIZE
