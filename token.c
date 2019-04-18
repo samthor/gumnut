@@ -331,6 +331,65 @@ static char *consume_space(char *p, int *line_no) {
   }
 }
 
+static char *eat_hashbang(tokendef *d) {
+  char *p = d->buf;
+  if (*p++ != '#' || *p++ != '!') {
+    return 0;
+  }
+
+  // consume until newline
+  int len;
+  char *newline = strchr(p, '\n');
+  if (!newline) {
+    // ... single line file?!
+    len = strlen(p + 2);
+  } else {
+    len = newline - d->buf;
+  }
+
+  d->pending.line_no = d->line_no;  // always 1
+  d->pending.p = d->buf;
+  d->pending.len = len;
+  d->line_after_pending = 1;
+
+  // consume whitespace before next token
+  return consume_space(d->buf + len, &d->line_no);
+}
+
+static void eat_next_internal(tokendef *d, char *p) {
+  // match real token
+  eat_out eat = eat_token(p);
+  d->next.type = eat.type;
+  d->next.hash = eat.hash;
+  d->next.line_no = d->line_no;
+  d->next.p = p;
+  d->next.len = eat.len;
+
+  // special-case token
+  switch (d->next.type) {
+    case TOKEN_EOF:
+      d->next.line_no = 0;  // always change line_no for EOF
+      break;
+
+    case TOKEN_STRING: {
+      // consume string (assume eat.len is zero)
+      int litflag = 0;
+      d->next.len = consume_string(p, &d->line_no, &litflag);
+      if (litflag) {
+        d->flag = FLAG__PENDING_T_BRACE;
+      }
+      break;
+    }
+
+    case TOKEN_COLON:
+      // inside ternary stack, close it
+      if (d->depth && d->stack[d->depth - 1] == TOKEN_TERNARY) {
+        d->next.type = TOKEN_CLOSE;
+      }
+      break;
+  }
+}
+
 static void eat_next(tokendef *d) {
   // consume from next, repeat(space, comment [first into pending]) and next token
   char *from = d->next.p + d->next.len;
@@ -366,37 +425,7 @@ static void eat_next(tokendef *d) {
     len = consume_comment(p, &d->line_no);
   }
 
-  // match real token
-  eat_out eat = eat_token(p);
-  d->next.type = eat.type;
-  d->next.hash = eat.hash;
-  d->next.line_no = d->line_no;
-  d->next.p = p;
-  d->next.len = eat.len;
-
-  // special-case token
-  switch (d->next.type) {
-    case TOKEN_EOF:
-      d->next.line_no = 0;  // always change line_no for EOF
-      break;
-
-    case TOKEN_STRING: {
-      // consume string (assume eat.len is zero)
-      int litflag = 0;
-      d->next.len = consume_string(p, &d->line_no, &litflag);
-      if (litflag) {
-        d->flag = FLAG__PENDING_T_BRACE;
-      }
-      break;
-    }
-
-    case TOKEN_COLON:
-      // inside ternary stack, close it
-      if (d->depth && d->stack[d->depth - 1] == TOKEN_TERNARY) {
-        d->next.type = TOKEN_CLOSE;
-      }
-      break;
-  }
+  eat_next_internal(d, p);
 }
 
 int prsr_next_token(tokendef *d, token *out, int has_value) {
@@ -475,7 +504,13 @@ tokendef prsr_init_token(char *p) {
   d.pending.type = TOKEN_COMMENT;
   d.next.p = p;  // place next cursor
 
-  // prsr state always points to next token
-  eat_next(&d);
+  // prsr state always points to next token, but read a hashbang as a comment if found
+  char *after = eat_hashbang(&d);
+  if (after) {
+    eat_next_internal(&d, after);
+  } else {
+    eat_next(&d);
+  }
+
   return d;
 }
