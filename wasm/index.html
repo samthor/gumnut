@@ -97,13 +97,21 @@ window.addEventListener('load', (ev) => {
   };
 
   const render = (tokens, view) => {
-    let lineNo = undefined;
+    const lineHolders = [];
+
+    let lineNo = 0;
     output.textContent = '';
     tokens.forEach((token) => {
       if (token.lineNo !== lineNo) {
-        lineNo = token.lineNo;
+        const valid = token.lineNo > lineNo;
         appendLine();
-        append(token.lineNo, '_lineno');
+        const node = append(token.lineNo, '_lineno');
+        lineHolders.push(node);
+        if (valid) {
+          lineNo = token.lineNo;
+        } else {
+          node.classList.add('__invalid');
+        }
       }
 
       const backing = view.subarray(token.at, token.at + token.len);
@@ -128,6 +136,11 @@ window.addEventListener('load', (ev) => {
       }
 
       node.tabIndex = 0;
+    });
+
+    const len = `${lineNo}`.length;
+    lineHolders.forEach((node) => {
+      node.textContent = node.textContent.padStart(len);
     });
   };
 
@@ -251,8 +264,11 @@ document.addEventListener('drop', (ev) => {
   }
   pre span._lineno {
     background: purple;
-    font-style: italic;
     color: white;
+  }
+  pre span._lineno.__invalid {
+    background: red;
+    text-decoration: none;
   }
   pre span._asi {
     background: green;
