@@ -272,7 +272,6 @@ function renderSpecial(special) {
   return lines.join('');
 }
 
-
 function main() {
   const helperOutput = `// Generated on ${now}
 

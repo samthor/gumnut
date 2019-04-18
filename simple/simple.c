@@ -49,27 +49,85 @@ typedef struct {
 
   prsr_callback cb;
   void *arg;
+  int prev_line_no;
 
   sstack *curr;
   sstack stack[256];
 } simpledef;
 
 
+static sstack *stack_inc(simpledef *sd, uint8_t stype) {
+  // TODO: check bounds
+  ++sd->curr;
+  bzero(sd->curr, sizeof(sstack));
+  sd->curr->stype = stype;
+  sd->curr->context = (sd->curr - 1)->context;  // copy context
+  return sd->curr;
+}
+
+
 // stores a virtual token in the stream, and yields it before the current token
-static void yield_virt(simpledef *sd, int type) {
+static void yield_asi(simpledef *sd) {
   token *t = &(sd->curr->t1);
   sd->curr->t2 = *t;  // move t1 => t2
   bzero(t, sizeof(token));
-  t->line_no = sd->curr->t2.line_no;  // ... on prev line
-  t->type = type;
+
+  t->line_no = sd->prev_line_no;
+  t->type = TOKEN_SEMICOLON;
 
   sd->cb(sd->arg, t);
+}
+
+
+// optionally yields ASI for restrict, assumes sd->curr->t1 is the restricted keyword
+static int yield_restrict_asi(simpledef *sd) {
+  sstack *c = sd->curr;
+  int line_no = sd->curr->t1.line_no;
+
+  if (line_no == sd->tok.line_no && sd->tok.type != TOKEN_CLOSE && sd->tok.type != TOKEN_EOF) {
+    return 0;  // not new line, not close token
+  }
+
+  if (c->stype == SSTACK__BLOCK) {
+    // ok
+  } else if (!c->stype) {
+    --sd->curr;
+  } else {
+    return 0;
+  }
+
+  yield_asi(sd);
+  return 1;
+}
+
+// there's been an invalid construction in grammar, yield an ASI before us
+static int yield_valid_asi(simpledef *sd) {
+  if (!sd->curr->stype) {
+    sstack *up = sd->curr;
+    --sd->curr;
+    if (up->t1.type) {
+      yield_asi(sd);
+    }
+    return 1;
+  }
+
+  if (sd->curr->stype == SSTACK__BLOCK && sd->curr->t1.type) {
+    // if parent is __BLOCK, just pretend a statement happened anyway
+    stack_inc(sd, 0);
+    --sd->curr;
+    yield_asi(sd);
+    return 1;
+  }
+
+  // can't emit here (but JS probably invalid?)
+  return 0;
 }
 
 
 // places the next useful token in sd->tok, yielding previous current
 static int skip_walk(simpledef *sd, int has_value) {
   if (sd->tok.p) {
+    sd->prev_line_no = sd->tok.line_no;
     sd->cb(sd->arg, &(sd->tok));
   }
   for (;;) {
@@ -247,22 +305,18 @@ static int match_label_keyword(simpledef *sd) {
   }
 
   int line_no = sd->tok.line_no;
-
   sd->tok.type = TOKEN_KEYWORD;
-  skip_walk(sd, 0);
+  record_walk(sd, 0);
 
   if (sd->tok.line_no == line_no && is_label(&(sd->tok), sd->curr->context)) {
     sd->tok.type = TOKEN_LABEL;
-    skip_walk(sd, 0);
+    skip_walk(sd, 0);  // don't consume, so yield_restrict_asi works
   }
 
   // e.g. "break\n" or "break foo\n"
-  if (sd->tok.line_no != line_no || sd->tok.type == TOKEN_CLOSE) {
-    yield_virt(sd, TOKEN_SEMICOLON);  // yield semi because line change or close brace
-  } else if (sd->tok.type == TOKEN_SEMICOLON) {
-    skip_walk(sd, 0);  // consume valid semi
+  if (!yield_restrict_asi(sd) && sd->tok.type == TOKEN_SEMICOLON) {
+    skip_walk(sd, 0);  // emit or consume valid semicolon
   }
-
   return 0;
 }
 
@@ -272,43 +326,6 @@ static int is_use_strict(token *t) {
     return 0;
   }
   return !memcmp(t->p, "'use strict'", 12) || !memcmp(t->p, "\"use strict\"", 12);
-}
-
-
-static sstack *stack_inc(simpledef *sd, uint8_t stype) {
-  // TODO: check bounds
-  if (sd->curr - sd->stack > 256) {
-    debugf("WARNING TOO HIGH STACK\n");
-  }
-  ++sd->curr;
-  bzero(sd->curr, sizeof(sstack));
-  sd->curr->stype = stype;
-  sd->curr->context = (sd->curr - 1)->context;  // copy context
-  return sd->curr;
-}
-
-
-static int yield_valid_asi(simpledef *sd) {
-  if (!sd->curr->stype) {
-    sstack *up = sd->curr;
-    --sd->curr;
-    if (up->t1.type) {
-      yield_virt(sd, TOKEN_SEMICOLON);
-    }
-    debugf("added ASI to zero stype, now: %d\n", sd->curr->stype);
-    return 1;
-  }
-
-  if (sd->curr->stype == SSTACK__BLOCK && sd->curr->t1.type) {
-    // if parent is __BLOCK, just pretend a statement happened anyway
-    stack_inc(sd, 0);
-    --sd->curr;
-    yield_virt(sd, TOKEN_SEMICOLON);
-    return 1;
-  }
-
-  // can't emit here (but JS probably invalid?)
-  return 0;
 }
 
 
@@ -377,7 +394,7 @@ restart:
           }
         } else if (sd->tok.type != TOKEN_SEMICOLON && sd->tok.line_no != line_no) {
           // ... or just abandon, generating semi if needed (valid in export case)
-          yield_virt(sd, TOKEN_SEMICOLON);
+          yield_asi(sd);
         }
         return 0;
 
@@ -571,7 +588,7 @@ restart:
       if (sd->tok.type == TOKEN_SEMICOLON) {
         skip_walk(sd, 0);
       } else {
-        yield_virt(sd, TOKEN_SEMICOLON);
+        yield_asi(sd);
       }
       --sd->curr;
       goto restart;
@@ -664,24 +681,20 @@ restart:
 
     // match single-only
     if (sd->tok.hash == LIT_DEBUGGER) {
-      int line_no = sd->tok.line_no;
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
-
-      if (sd->tok.line_no != line_no) {
-        yield_valid_asi(sd);
-      }
+      yield_restrict_asi(sd);
       return 0;
     }
 
     // match restricted statement starters
     if (sd->tok.hash == LIT_RETURN || sd->tok.hash == LIT_THROW) {
-      int line_no = sd->tok.line_no;
+      int hash = sd->tok.hash;
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
 
-      if (sd->tok.line_no != line_no) {
-        yield_valid_asi(sd);
+      // throw doesn't cause ASI, because it's invalid either way
+      if (hash == LIT_RETURN && yield_restrict_asi(sd)) {
         return 0;
       }
 
@@ -983,9 +996,9 @@ regular_bail:
     sd->tok.type = TOKEN_OP;
     record_walk(sd, 0);
 
-    if (!sd->curr->stype && sd->curr->t1.hash == LIT_YIELD && sd->curr->t1.line_no != sd->tok.line_no) {
-      // yield is a restricted keyword
-      yield_valid_asi(sd);
+    if (sd->curr->t1.hash == LIT_YIELD) {
+      // yield is a restricted keyword (this does nothing inside group, but is invalid)
+      yield_restrict_asi(sd);
     }
     return 0;
   }
