@@ -1,7 +1,7 @@
 
 #include <string.h>
-#include "simple.h"
-#include "../tokens/lit.h"
+#include "parser.h"
+#include "tokens/lit.h"
 
 #define SSTACK__STMT     0  // within regular statement (not a hoist)
 #define SSTACK__GROUP    1  // group execution context "()" or "[]"

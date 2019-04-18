@@ -1,5 +1,5 @@
 .DS_Store
-demo
-dist
 .vscode
 *.js
+*.mjs
+_*

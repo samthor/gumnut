@@ -1,6 +1,6 @@
 #include <string.h>
 #include "../token.h"
-#include "../simple/simple.h"
+#include "../parser.h"
 
 #include <emscripten.h>
 

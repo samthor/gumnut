@@ -29,6 +29,6 @@ emcc $FLAGS \
   -s TOTAL_MEMORY=65536 \
   -s TOTAL_STACK=65536 \
   -o runner.wasm \
-  *.c ../*.c ../tokens/helper.c ../simple/simple.c
+  *.c ../*.c
 
 echo "Ok! => runner.wasm"

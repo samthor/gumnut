@@ -1,5 +1,4 @@
-#include "../types.h"
-#include "../token.h"
+#include "token.h"
 
 // context are set on all statements
 #define CONTEXT__STRICT    1

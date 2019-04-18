@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../token.h"
-#include "simple.h"
+#include "../parser.h"
 
 // reads stdin into buf, reallocating as necessary. returns strlen(buf) or < 0 for error.
 int read_stdin(char **buf) {
@@ -44,18 +44,26 @@ int read_stdin(char **buf) {
 }
 
 void render_callback(void *arg, token *out) {
+#ifdef SPEED
+  // don't do anything, just show how fast this is?
+#else
   char c = ' ';
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';  // this is an ASI
   }
   printf("%c%4d.%02d: %.*s (%d)\n", c, out->line_no, out->type, out->len, out->p, out->hash);
+#endif
 }
 
 int main() {
   char *buf;
-  if (read_stdin(&buf) < 0) {
+  int len = read_stdin(&buf);
+  if (len < 0) {
     return -1;
   }
+#ifdef SPEED
+  fprintf(stderr, "read %d bytes\n", len);
+#endif
 
   tokendef td = prsr_init_token(buf);
   int out = prsr_simple(&td, 0, render_callback, NULL);
