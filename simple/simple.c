@@ -23,11 +23,11 @@
 #define SPECIAL__FREE_VALUE 1
 
 
-#ifdef __EMSCRIPTEN__
-#define debugf (void)sizeof
-#else
+#ifdef DEBUG
 #include <stdio.h>
 #define debugf(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define debugf (void)sizeof
 #endif
 
 
@@ -52,7 +52,7 @@ typedef struct {
   int prev_line_no;
 
   sstack *curr;
-  sstack stack[256];
+  sstack stack[__STACK_SIZE];
 } simpledef;
 
 
@@ -204,20 +204,11 @@ static int is_unary(uint32_t hash, uint8_t context) {
 }
 
 
-// whether the current position has a function decl/stmt
-static int peek_function(simpledef *sd) {
-  if (sd->tok.type != TOKEN_LIT) {
-    return 0;
-  } else if (sd->tok.hash == LIT_ASYNC) { 
-    return sd->next->type == TOKEN_LIT && sd->next->hash == LIT_FUNCTION;
-  }
-  return sd->tok.hash == LIT_FUNCTION;
-}
-
-
 // matches any current function decl/stmt
 static int match_function(simpledef *sd) {
-  if (!peek_function(sd)) {
+  if (sd->tok.hash == LIT_ASYNC && sd->next->hash != LIT_FUNCTION) {
+    return -1;
+  } else if (sd->tok.hash != LIT_FUNCTION) {
     return -1;
   }
 
@@ -231,7 +222,7 @@ static int match_function(simpledef *sd) {
   record_walk(sd, 0);  // consume "function"
 
   // optionally consume generator star
-  if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) {
+  if (sd->tok.hash == MISC_STAR) {
     skip_walk(sd, 0);
     context |= CONTEXT__GENERATOR;
   }
@@ -252,12 +243,14 @@ static int match_class(simpledef *sd) {
 
   // optionally consume class name
   if (sd->tok.type == TOKEN_LIT) {
-    if (sd->tok.hash == LIT_EXTENDS) {
+    uint32_t h = sd->tok.hash;
+    if (h == LIT_EXTENDS) {
+      // ... short-circuit if name is "extends"
       special = SPECIAL__FREE_VALUE;
     } else {
-      int hoist = (sd->curr - 1)->stype == SSTACK__BLOCK;
-      if (!is_valid_name(sd->tok.hash, sd->curr->context) || sd->tok.hash == LIT_YIELD || sd->tok.hash == LIT_LET) {
-        // nb. "yield" or "let" is always an invalid class name, even in non-strict (doesn't apply to function)
+      if (!is_valid_name(h, sd->curr->context) || h == LIT_YIELD || h == LIT_LET) {
+        // nb. "yield" or "let" is always an invalid class name, even in non-strict (but this
+        // doesn't apply to function)
         // ... this might actually be a V8 "feature", but it's the same in Firefox
         sd->tok.type = TOKEN_KEYWORD;  // "class if" is invalid
       } else {
@@ -268,33 +261,13 @@ static int match_class(simpledef *sd) {
   }
 
   // consume extends
-  if (special || (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_EXTENDS)) {
+  if (special || sd->tok.hash == LIT_EXTENDS) {
     sd->tok.type = TOKEN_KEYWORD;
     skip_walk(sd, 0);  // consume "extends" keyword
     special = SPECIAL__FREE_VALUE;
   }
 
   return special;
-}
-
-
-// matches var/const/let, optional let based on context
-static int match_decl(simpledef *sd) {
-  if (!(sd->tok.hash & _MASK_DECL)) {
-    return -1;
-  }
-
-  // in strict mode, 'let' is always a keyword (well, reserved)
-  if (!(sd->curr->context & CONTEXT__STRICT) && sd->tok.hash == LIT_LET) {
-    if (sd->next->type == TOKEN_BRACE || sd->next->type == TOKEN_ARRAY || !(sd->next->hash & _MASK_REL_OP)) {
-      // OK: const, var or e.g. "let[..]" or "let{..}", destructuring
-    } else {
-      return -1;  // no following literal (e.g. "let = 1", "instanceof" counts as op)
-    }
-  }
-
-  sd->tok.type = TOKEN_KEYWORD;
-  return record_walk(sd, 0);
 }
 
 
@@ -329,20 +302,50 @@ static int is_use_strict(token *t) {
 }
 
 
+// is the next token valuelike for a previous valuelike?
+// used directly only for "let" and "await" (at top-level), so doesn't include e.g. paren or array,
+// as these would be indexing or calling
 static int is_token_valuelike(token *t) {
   if (t->type == TOKEN_LIT) {
+    // _any_ lit is fine (even keywords, even if invalid) except "in" and "instanceof"
     return !(t->hash & _MASK_REL_OP);
   }
-  return t->type == TOKEN_SYMBOL || t->type == TOKEN_NUMBER || t->type == TOKEN_STRING || t->type == TOKEN_BRACE;
+  return t->type == TOKEN_SYMBOL ||
+      t->type == TOKEN_NUMBER ||
+      t->type == TOKEN_STRING ||
+      t->type == TOKEN_BRACE;
 }
 
 
-// is the next token valuelike following a keyword? (e.g. "extends []")
+// is theis token valuelike following (or before) a keyword? (e.g. "extends []")
 static int is_token_valuelike_keyword(token *t) {
   if (is_token_valuelike(t)) {
     return 1;
   }
-  return t->type == TOKEN_PAREN || t->type == TOKEN_ARRAY || t->type == TOKEN_BRACE;
+  return t->type == TOKEN_PAREN ||
+      t->type == TOKEN_ARRAY ||
+      t->type == TOKEN_BRACE ||
+      t->type == TOKEN_SLASH ||
+      t->type == TOKEN_REGEXP;
+}
+
+
+// matches var/const/let, optional let based on context
+static int match_decl(simpledef *sd) {
+  if (!(sd->tok.hash & _MASK_DECL)) {
+    return -1;
+  }
+
+  // in strict mode, 'let' is always a keyword (well, reserved)
+  if (!(sd->curr->context & CONTEXT__STRICT) && sd->tok.hash == LIT_LET) {
+    if (!is_token_valuelike(sd->next)) {
+      return -1;
+    }
+    // OK: destructuring "let[..]" or "let{..}", and not with "in" or "instanceof" following
+  }
+
+  sd->tok.type = TOKEN_KEYWORD;
+  return record_walk(sd, 0);
 }
 
 
@@ -570,6 +573,7 @@ static int simple_consume(simpledef *sd) {
     } else if (sd->tok.type != TOKEN_BRACE) {
       // invalid, not a brace for main class def
       --sd->curr;
+      printf("got invalid non-brace sd->curr=%d\n", sd->curr->stype);
     } else {
       // terminal state of class definition, pop and insert dict
       --sd->curr;
@@ -595,6 +599,7 @@ static int simple_consume(simpledef *sd) {
 
     // start of do...while, just push block
     stack_inc(sd, SSTACK__BLOCK);
+    return 0;
   }
 
   // zero state, determine what to push
@@ -780,6 +785,7 @@ static int simple_consume(simpledef *sd) {
 
     // ... or start a regular statement
     stack_inc(sd, 0);
+    // FIXME: we can't return here, otherwise we leave bad stack
   }
 
   // match statements
@@ -1005,7 +1011,6 @@ static int simple_consume(simpledef *sd) {
 
   // match non-async await: this is valid iff it _looks_ like unary op use (e.g. await value).
   // this is a lookahead for value, rather than what we normally do
-  // FIXME: valuelike is a bit dangerous, should rather be "not oplike" + "no closers" (and 'await' only operates on right)
   if (sd->tok.hash == LIT_AWAIT && is_token_valuelike(sd->next)) {
     // ... to be clear, this is an error, but it IS parsed as a keyword
     sd->tok.type = TOKEN_KEYWORD;
@@ -1026,8 +1031,8 @@ static int simple_consume(simpledef *sd) {
     // find "of" between two value-like things
     if (sd->tok.type == TOKEN_LIT &&
         sd->tok.hash == LIT_OF &&
-        is_token_valuelike(&(sd->curr->t1)) &&
-        is_token_valuelike(sd->next)) {
+        is_token_valuelike_keyword(&(sd->curr->t1)) &&
+        is_token_valuelike_keyword(sd->next)) {
       sd->tok.type = TOKEN_OP;
       return record_walk(sd, 0);
     }
@@ -1098,13 +1103,16 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     if (ret) {
       // regular failure case
     } else if (prev == sd.tok.p) {
-      if (!unchanged) {
-        // we give it one chance to change something
-        unchanged = 1;
+      if (unchanged < 4) {
+        // we give it two chances to change something to let the state machine work
+        unchanged++;
         continue;
       }
       debugf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
       ret = ERROR__INTERNAL;
+    } else if (sd.curr - sd.stack >= (__STACK_SIZE - 1)) {
+      debugf("outgrew stack\n");
+      ret = ERROR__STACK;
     } else {
       prev = sd.tok.p;
       unchanged = 0;
