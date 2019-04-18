@@ -2,6 +2,7 @@ A fast, permissive JavaScript tokenizer and parser in C.
 
 This is not a polished or documented product.
 It's intended to be used with Web Assembly.
+Check out a [live demo](https://t.co/jJuOG1lt7d)!
 
 ## Goals
 
@@ -10,9 +11,9 @@ It's ideal for a backend to a compiler or tool which might transform your code.
 
 ## Stages
 
-1. a raw JavaScript tokenizer, which understands UTF-8 bytes and generates simple tokens
+1. a raw JavaScript [tokenizer](token.c), which understands UTF-8 bytes and generates simple tokens
 
-2. a simple parser, which deals with JS' nuances and outputs marked up tokens
+2. a simple [parser](parser.c), which deals with JS' nuances and outputs marked up tokens
 
 ### Caveats
 
@@ -28,4 +29,7 @@ async(/*anything can go here*/) => {}
 ```
 
 This parser announces what `async` is once it encouters an arrow function (or not).
-Note that `async param => {}` is _not_ ambiguous, as it cannot be a function call.
+There are two exceptions:
+
+* single params canont be a function call, e.g., `async param => {}`
+* use of `async` following a dot is always an object property or method, e.g. `this.async(arg)`
