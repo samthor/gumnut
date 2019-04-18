@@ -602,6 +602,24 @@ static int simple_consume(simpledef *sd) {
     return 0;
   }
 
+  // hoists which are valid at block or other state
+
+  // ...match hoisted function (don't insert a regular statement first)
+  int context = match_function(sd);
+  if (context >= 0) {
+    stack_inc(sd, SSTACK__FUNC);
+    sd->curr->context = context;
+    return 0;
+  }
+
+  // ... match hoisted class
+  int special = match_class(sd);
+  if (special >= 0) {
+    stack_inc(sd, SSTACK__CLASS);
+    sd->curr->special = special;
+    return 0;
+  }
+
   // zero state, determine what to push
   if (sd->curr->stype == SSTACK__BLOCK) {
     do {
@@ -660,22 +678,6 @@ static int simple_consume(simpledef *sd) {
         sd->tok.type = TOKEN_LABEL;
         skip_walk(sd, -1);  // consume label
         skip_walk(sd, 0);  // consume colon
-        return 0;
-      }
-
-      // match hoisted function (don't insert a regular statement first)
-      int context = match_function(sd);
-      if (context >= 0) {
-        stack_inc(sd, SSTACK__FUNC);
-        sd->curr->context = context;
-        return 0;
-      }
-
-      // match hoisted class
-      int special = match_class(sd);
-      if (special >= 0) {
-        stack_inc(sd, SSTACK__CLASS);
-        sd->curr->special = special;
         return 0;
       }
 
@@ -980,23 +982,6 @@ static int simple_consume(simpledef *sd) {
 
   }
 
-  // match non-hoisted function
-  int context = match_function(sd);
-  if (context >= 0) {
-    // non-hoisted function
-    stack_inc(sd, SSTACK__FUNC);
-    sd->curr->context = context;
-    return 0;
-  }
-
-  // match non-hoisted class
-  int special = match_class(sd);
-  if (special >= 0) {
-    stack_inc(sd, SSTACK__CLASS);
-    sd->curr->special = special;
-    return 0;
-  }
-
   // match valid unary ops
   if (is_unary(sd->tok.hash, sd->curr->context)) {
     sd->tok.type = TOKEN_OP;
@@ -1103,7 +1088,7 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     if (ret) {
       // regular failure case
     } else if (prev == sd.tok.p) {
-      if (unchanged < 4) {
+      if (unchanged < 2) {
         // we give it two chances to change something to let the state machine work
         unchanged++;
         continue;
