@@ -488,5 +488,12 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("doesn't consume label", "{break}",
+    TOKEN_BRACE,     // {
+    TOKEN_KEYWORD,   // break
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // }
+  )
+
   return ok;
 }

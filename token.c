@@ -376,6 +376,10 @@ static void eat_next(tokendef *d) {
 
   // special-case token
   switch (d->next.type) {
+    case TOKEN_EOF:
+      d->next.line_no = 0;  // always change line_no for EOF
+      break;
+
     case TOKEN_STRING: {
       // consume string (assume eat.len is zero)
       int litflag = 0;

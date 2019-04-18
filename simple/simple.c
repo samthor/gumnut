@@ -109,8 +109,13 @@ static int is_always_keyword(uint32_t hash, uint8_t context) {
 }
 
 
-static int is_label(uint32_t hash, uint8_t context) {
-  return !is_always_keyword(hash, context) && !is_optional_keyword(hash, context);
+static int is_label(token *t, uint8_t context) {
+  if (t->type != TOKEN_LIT) {
+    return 0;
+  } else if (t->type == TOKEN_LABEL) {
+    return 1;
+  }
+  return !is_always_keyword(t->hash, context) && !is_optional_keyword(t->hash, context);
 }
 
 
@@ -246,14 +251,14 @@ static int match_label_keyword(simpledef *sd) {
   sd->tok.type = TOKEN_KEYWORD;
   skip_walk(sd, 0);
 
-  if (sd->tok.line_no == line_no && is_label(sd->tok.hash, sd->curr->context)) {
+  if (sd->tok.line_no == line_no && is_label(&(sd->tok), sd->curr->context)) {
     sd->tok.type = TOKEN_LABEL;
     skip_walk(sd, 0);
   }
 
   // e.g. "break\n" or "break foo\n"
-  if (sd->tok.line_no != line_no) {
-    yield_virt(sd, TOKEN_SEMICOLON);  // yield semi because line change
+  if (sd->tok.line_no != line_no || sd->tok.type == TOKEN_CLOSE) {
+    yield_virt(sd, TOKEN_SEMICOLON);  // yield semi because line change or close brace
   } else if (sd->tok.type == TOKEN_SEMICOLON) {
     skip_walk(sd, 0);  // consume valid semi
   }
@@ -272,8 +277,11 @@ static int is_use_strict(token *t) {
 
 static sstack *stack_inc(simpledef *sd, uint8_t stype) {
   // TODO: check bounds
+  if (sd->curr - sd->stack > 256) {
+    debugf("WARNING TOO HIGH STACK\n");
+  }
   ++sd->curr;
-  bzero(sd->curr, sizeof(sstack) * 2);  // also bzero next stack
+  bzero(sd->curr, sizeof(sstack));
   sd->curr->stype = stype;
   sd->curr->context = (sd->curr - 1)->context;  // copy context
   return sd->curr;
@@ -626,7 +634,7 @@ restart:
     }
 
     // match label
-    if (is_label(sd->tok.hash, sd->curr->context) && sd->next->type == TOKEN_COLON) {
+    if (is_label(&(sd->tok), sd->curr->context) && sd->next->type == TOKEN_COLON) {
       sd->tok.type = TOKEN_LABEL;
       skip_walk(sd, -1);  // consume label
       skip_walk(sd, 0);  // consume colon
