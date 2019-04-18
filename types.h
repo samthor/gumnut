@@ -42,30 +42,28 @@ typedef struct {
 // fixed: will always be the same, or in the same set
 #define TOKEN_SEMICOLON 1   // might be blank for ASI
 #define TOKEN_COMMA     2
-#define TOKEN_SPREAD    3
-#define TOKEN_DOT       4
-#define TOKEN_OP        5   // can include 'in', 'instanceof'
-#define TOKEN_ARROW     6
-#define TOKEN_COLON     7   // used in label
-#define TOKEN_BRACE     8   // block-like {
-#define TOKEN_ARRAY     9
-#define TOKEN_PAREN     10
-#define TOKEN_T_BRACE   11  // '${' within template literal
-#define TOKEN_TERNARY   12  // starts ternary block, ends with ':'
-#define TOKEN_CLOSE     13  // '}', ']', ')' or ':'
+#define TOKEN_OP        3   // can include 'in', 'instanceof'
+#define TOKEN_ARROW     4
+#define TOKEN_COLON     5   // used in label or dict
+#define TOKEN_BRACE     6   // block-like {
+#define TOKEN_ARRAY     7
+#define TOKEN_PAREN     8
+#define TOKEN_T_BRACE   9  // '${' within template literal
+#define TOKEN_TERNARY   10  // starts ternary block, "? ... :"
+#define TOKEN_CLOSE     11  // '}', ']', ')' or ':'
 
 // variable: could be anything
-#define TOKEN_COMMENT   14
-#define TOKEN_STRING    15
-#define TOKEN_REGEXP    16  // literal "/foo/", not "new RegExp('foo')"
-#define TOKEN_NUMBER    17
-#define TOKEN_SYMBOL    18
-#define TOKEN_KEYWORD   19
-#define TOKEN_LABEL     20  // to the left of a ':', e.g. 'foo:'
+#define TOKEN_COMMENT   12
+#define TOKEN_STRING    13
+#define TOKEN_REGEXP    14  // literal "/foo/", not "new RegExp('foo')"
+#define TOKEN_NUMBER    15
+#define TOKEN_SYMBOL    16
+#define TOKEN_KEYWORD   17
+#define TOKEN_LABEL     18  // to the left of a ':', e.g. 'foo:'
 
 // internal/ambiguous tokens
-#define TOKEN_LIT       29  // symbol, keyword or label
-#define TOKEN_SLASH     30  // ambigous slash that is op or regexp
+#define TOKEN_LIT       30  // symbol, keyword or label
+#define TOKEN_SLASH     31  // ambigous slash that is op or regexp
 
 // special marks
 #define MARK_IMPORT     1   // this is the name inside static import

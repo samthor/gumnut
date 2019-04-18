@@ -214,9 +214,9 @@ static eat_out eat_token(char *p) {
   // dot notation
   if (start == '.') {
     if (next == '.' && p[2] == '.') {
-      return _reth(3, TOKEN_SPREAD, MISC_SPREAD);  // '...' operator
+      return _reth(3, TOKEN_OP, MISC_SPREAD);  // '...' operator
     }
-    return _reth(1, TOKEN_DOT, MISC_DOT);  // it's valid to say e.g., "foo . bar", so separate token
+    return _reth(1, TOKEN_OP, MISC_DOT);  // it's valid to say e.g., "foo . bar", so separate token
   }
 
   // literals

@@ -921,8 +921,6 @@ regular_bail:
       }
       return record_walk(sd, 1);  // otherwise, just a regular value
 
-    case TOKEN_DOT:
-    case TOKEN_SPREAD:
     case TOKEN_OP: {
       int has_value = 0;
       if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_INCDEC) {
@@ -1028,10 +1026,10 @@ regular_bail:
 
   // look for async arrow function
   if (sd->tok.hash == LIT_ASYNC) {
-    if (sd->curr->t1.type == TOKEN_DOT) {
-      sd->tok.type = TOKEN_SYMBOL;
+    if (sd->curr->t1.hash == MISC_DOT) {
+      sd->tok.type = TOKEN_SYMBOL;   // ".async" is always a funtion call
     } else if (sd->next->type == TOKEN_LIT) {
-      sd->tok.type = TOKEN_KEYWORD;
+      sd->tok.type = TOKEN_KEYWORD;  // "async foo" is always a keyword
     } else if (sd->next->type == TOKEN_PAREN) {
       // otherwise, actually ambiguous: leave as TOKEN_LIT
       return record_walk(sd, 0);

@@ -462,6 +462,14 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("async assumed with dot", ".async()",
+    TOKEN_OP,        // .
+    TOKEN_SYMBOL,    // async
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("using await as name inside async", "async () => class await {}",
     TOKEN_LIT,       // async
     TOKEN_PAREN,     // (
