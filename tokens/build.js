@@ -215,7 +215,7 @@ function renderChoice(all, space='', prefix='') {
     let len = `p - start - 1`;  // safely consumed this many chars (based on conditional progress)
 
     const conditional = chars.map((char) => {
-      return `${readNext} != ${char}`;
+      return `${readNext} != '${String.fromCharCode(char)}'`;
     });
     const check = String.fromCharCode(...chars)
     prefix += check;
@@ -224,7 +224,6 @@ function renderChoice(all, space='', prefix='') {
     }
 
     out += `${space}if (${conditional.join(' || ')}) {
-${space}  // != "${check}"
 ${space}  return ${len};
 ${space}}\n`;
     out += renderChoice(rest, space, prefix);
@@ -241,7 +240,7 @@ ${space}}\n`;
   tail.forEach((rest, char) => {
     if (char) {
       const extra = String.fromCharCode(char);
-      out += `${space}case ${char}:  // '${extra}'\n`;
+      out += `${space}case '${extra}':\n`;
       out += renderChoice(rest, space + '  ', prefix + extra);
     } else {
       hasDefault = true;
