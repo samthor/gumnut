@@ -78,7 +78,7 @@ const queue = (all, bits=0) => {
   }
   for (const cand of all) {
     const prev = pendingNames.get(cand) || 0;
-    pendingNames.set(cand, prev | bits)
+    pendingNames.set(cand, prev | bits);
   }
 };
 
@@ -217,7 +217,7 @@ function renderChoice(all, space='', prefix='') {
     const conditional = chars.map((char) => {
       return `${readNext} != '${String.fromCharCode(char)}'`;
     });
-    const check = String.fromCharCode(...chars)
+    const check = String.fromCharCode(...chars);
     prefix += check;
     if (chars.length === 1) {
       len = prefix.length - 1;  // we safely consumed this many chars (one cond, so no sub)
@@ -267,7 +267,7 @@ function renderSpecial(special) {
   all.sort((a, b) => a[0] - b[0]);
 
   const lines = all.map(([value, key]) => {
-    return `#define _MASK_${key.padEnd(16)} ${value}\n`
+    return `#define _MASK_${key.padEnd(16)} ${value}\n`;
   });
   return lines.join('');
 }
