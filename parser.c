@@ -271,6 +271,26 @@ static int match_class(simpledef *sd) {
 }
 
 
+static int enact_defn(simpledef *sd) {
+  // ...match function
+  int context = match_function(sd);
+  if (context >= 0) {
+    stack_inc(sd, SSTACK__FUNC);
+    sd->curr->context = context;
+    return 1;
+  }
+
+  // ... match class
+  int special = match_class(sd);
+  if (special >= 0) {
+    stack_inc(sd, SSTACK__CLASS);
+    sd->curr->special = special;
+    return 1;
+  }
+
+  return 0;
+}
+
 // matches a "break foo;" or "continue;", emits ASI if required
 static int match_label_keyword(simpledef *sd) {
   if (sd->tok.hash != LIT_BREAK && sd->tok.hash != LIT_CONTINUE) {
@@ -602,24 +622,6 @@ static int simple_consume(simpledef *sd) {
     return 0;
   }
 
-  // hoists which are valid at block or other state
-
-  // ...match hoisted function (don't insert a regular statement first)
-  int context = match_function(sd);
-  if (context >= 0) {
-    stack_inc(sd, SSTACK__FUNC);
-    sd->curr->context = context;
-    return 0;
-  }
-
-  // ... match hoisted class
-  int special = match_class(sd);
-  if (special >= 0) {
-    stack_inc(sd, SSTACK__CLASS);
-    sd->curr->special = special;
-    return 0;
-  }
-
   // zero state, determine what to push
   if (sd->curr->stype == SSTACK__BLOCK) {
     do {
@@ -708,7 +710,7 @@ static int simple_consume(simpledef *sd) {
         break;  // e.g. "return ..." or "throw ..." starts a statement
       }
 
-      // module valid cases
+      // module valid cases at top-level
       if (sd->curr == sd->stack && sd->is_module) {
 
         // match "import" which starts a sstack special
@@ -781,6 +783,11 @@ static int simple_consume(simpledef *sd) {
           sd->curr->special = (hash == LIT_FOR ? SPECIAL__FOR : 0);
         }
 
+        return 0;
+      }
+
+      // hoisted function or class
+      if (enact_defn(sd)) {
         return 0;
       }
     } while (0);  // so block checks can bail out
@@ -980,6 +987,11 @@ static int simple_consume(simpledef *sd) {
       debugf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
       return ERROR__INTERNAL;
 
+  }
+
+  // match function or class as value
+  if (enact_defn(sd)) {
+    return 0;
   }
 
   // match valid unary ops
