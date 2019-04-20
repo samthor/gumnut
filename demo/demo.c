@@ -43,7 +43,17 @@ int read_stdin(char **buf) {
   return pos;
 }
 
+typedef struct {
+  int tokens;
+  int asi;
+} demo_context;
+
 void render_callback(void *arg, token *out) {
+  demo_context *context = (demo_context *) arg;
+  ++context->tokens;
+  if (out->type == TOKEN_SEMICOLON && !out->len) {
+    ++context->asi;
+  }
 #ifdef SPEED
   // don't do anything, just show how fast this is?
 #else
@@ -61,14 +71,15 @@ int main() {
   if (len < 0) {
     return -1;
   }
-#ifdef SPEED
-  fprintf(stderr, "read %d bytes\n", len);
-#endif
+  fprintf(stderr, ">> read %d bytes\n", len);
+  demo_context context;
+  bzero(&context, sizeof(demo_context));
 
   tokendef td = prsr_init_token(buf);
-  int out = prsr_simple(&td, 0, render_callback, NULL);
+  int out = prsr_simple(&td, 0, render_callback, &context);
   if (out) {
     fprintf(stderr, "ret=%d\n", out);
   }
+  fprintf(stderr, ">> %d tokens (%d asi)\n", context.tokens, context.asi);
   return out;
 }
