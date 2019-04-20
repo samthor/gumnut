@@ -2,12 +2,15 @@
 #include "../token.h"
 #include "../parser.h"
 #include <stdio.h>
+#include <strings.h>
+#include <stdlib.h>
 
-typedef struct {
+typedef struct _testdef {
   const char *name;
   const char *input;
   int *expected;  // zero-terminated token types
   int is_module;
+  struct testdef *next;  // for failures
 } testdef;
 
 typedef struct {
@@ -85,12 +88,22 @@ int run_testdef(testdef *def) {
   td.is_module = _name[0] == '^'; \
   int v[] = {__VA_ARGS__ TOKEN_EOF}; \
   td.expected = v; \
-  ok |= run_testdef(&td); \
+  int lerr = run_testdef(&td); \
+  if (lerr) { \
+    err |= lerr; \
+    last->next = calloc(1, sizeof(testdef)); \
+    last = (testdef *) last->next; \
+    *last = td; \
+    ++ecount; \
+  } \
   printf("\n"); \
 }
 
 int main() {
-  int ok = 0;
+  int err = 0;
+  int ecount = 0;
+  testdef fail, *last = &fail;
+  bzero(&fail, sizeof(fail));
 
   _test("zero", "\n");
 
@@ -493,7 +506,26 @@ int main() {
     TOKEN_KEYWORD,   // break
     TOKEN_SEMICOLON, // ASI ;
     TOKEN_CLOSE,     // }
-  )
+  );
 
-  return ok;
+  _test("host function stops statement", "abc\nfunction foo() {}",
+    TOKEN_SYMBOL,    // abc
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_KEYWORD,   // function
+    TOKEN_SYMBOL,    // foo
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+  );
+
+  // restate all errors
+  testdef *p = &fail;
+  if (ecount) {
+    printf("errors (%d):\n", ecount);
+  }
+  while ((p = (testdef *) p->next)) {
+    printf("-- %s\n", p->name);
+  }
+  return err;
 }
