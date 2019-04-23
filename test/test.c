@@ -86,12 +86,13 @@ int run_testdef(testdef *def) {
   td.name = _name; \
   td.input = _input; \
   td.is_module = _name[0] == '^'; \
+  td.next = NULL; \
   int v[] = {__VA_ARGS__ TOKEN_EOF}; \
   td.expected = v; \
   int lerr = run_testdef(&td); \
   if (lerr) { \
     err |= lerr; \
-    last->next = calloc(1, sizeof(testdef)); \
+    last->next = malloc(sizeof(testdef)); \
     last = (testdef *) last->next; \
     *last = td; \
     ++ecount; \
@@ -527,6 +528,13 @@ int main() {
     TOKEN_CLOSE,     // )
     TOKEN_BRACE,     // {
     TOKEN_CLOSE,     // }
+  );
+
+  _test("await should treat +/- as part of var, and keyword itself", "await +123",
+    TOKEN_KEYWORD,   // await
+    TOKEN_OP,        // +
+    TOKEN_NUMBER,    // 123
+    TOKEN_SEMICOLON, // ASI ;
   );
 
   // restate all errors
