@@ -107,13 +107,15 @@ static int consume_string(char *p, int *line_no, int *litflag) {
 
       case '\\':
         c = p[++len];
-        if (c != '\n') {
-          continue;  // just consume next char
+        if (c == '\n') {
+          ++(*line_no);  // record if newline (this is valid in all string types)
         }
-        // ... but record if it was a newline
+        break;
 
       case '\n':
-        // FIXME: only allowed in template literals
+        if (start != '`') {
+          return len;  // invalid, but we consumed partial string until newline
+        }
         ++(*line_no);
         break;
     }
