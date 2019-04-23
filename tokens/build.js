@@ -56,6 +56,8 @@ const extraDefines = {
   DOT: '.',
   STAR: '*',
   INCDEC: '+-',  // nb. this cheats and we use hash of +-
+  NOT: '!',
+  BITNOT: '~',
 };
 
 // ways of marking up hashes

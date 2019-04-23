@@ -188,21 +188,32 @@ static eat_out eat_token(char *p) {
       }
     }
 
-    if (start == '=' && c == '>') {
-      return _reth(2, TOKEN_ARROW, MISC_ARROW);  // arrow for arrow function
-    } else if (c == start && (c == '+' || c == '-')) {
-      // nb. we don't actaully care which one this is?
-      return _reth(2, TOKEN_OP, MISC_INCDEC);
-    } else if (c == start && (c == '|' || c == '&')) {
-      ++len;  // eat || or &&: but no more
-    } else if (c == '=') {
-      // consume a suffix '=' (or whole ===, !==)
-      c = p[++len];
-      if (c == '=' && (start == '=' || start == '!')) {
-        ++len;
+    if (len == 1) {
+      // simple cases that are hashed
+      switch (start) {
+        case '*':
+          return _reth(1, TOKEN_OP, MISC_STAR);
+        case '~':
+          return _reth(1, TOKEN_OP, MISC_BITNOT);
+        case '!':
+          return _reth(1, TOKEN_OP, MISC_NOT);
       }
-    } else if (start == '*' && len == 1) {
-      return _reth(1, TOKEN_OP, MISC_STAR);
+
+      // nb. these are all allowed=1, so len=1 even though we're consuming more
+      if (start == '=' && c == '>') {
+        return _reth(2, TOKEN_ARROW, MISC_ARROW);  // arrow for arrow function
+      } else if (c == start && (c == '+' || c == '-')) {
+        // nb. we don't actaully care which one this is?
+        return _reth(2, TOKEN_OP, MISC_INCDEC);
+      } else if (c == start && (c == '|' || c == '&')) {
+        ++len;  // eat || or &&: but no more
+      } else if (c == '=') {
+        // consume a suffix '=' (or whole ===, !==)
+        c = p[++len];
+        if (c == '=' && (start == '=' || start == '!')) {
+          ++len;
+        }
+      }
     }
 
     return _ret(len, TOKEN_OP);

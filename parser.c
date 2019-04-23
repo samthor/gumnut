@@ -336,7 +336,11 @@ static int is_token_valuelike(token *t) {
   return t->type == TOKEN_SYMBOL ||
       t->type == TOKEN_NUMBER ||
       t->type == TOKEN_STRING ||
-      t->type == TOKEN_BRACE;
+      t->type == TOKEN_BRACE ||
+  // https://www.ecma-international.org/ecma-262/9.0/index.html#prod-UnaryExpression
+  // FIXME: in Chrome's top-level await support (e.g. in DevTools), this also includes + and -
+      t->hash == MISC_NOT ||
+      t->hash == MISC_BITNOT;
 }
 
 
@@ -361,7 +365,8 @@ static int match_decl(simpledef *sd) {
 
   // in strict mode, 'let' is always a keyword (well, reserved)
   if (!(sd->curr->context & CONTEXT__STRICT) && sd->tok.hash == LIT_LET) {
-    if (!is_token_valuelike(sd->next)) {
+    if (!is_token_valuelike(sd->next) && sd->next->type != TOKEN_ARRAY) {
+      // ... let[] is declaration, but e.g. "await []" is an index
       return -1;
     }
     // OK: destructuring "let[..]" or "let{..}", and not with "in" or "instanceof" following

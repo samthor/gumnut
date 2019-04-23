@@ -530,8 +530,15 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
-  _test("await should treat +/- as part of var, and keyword itself", "await +123",
+  _test("await should treat ~ as unary op", "await ~123",
     TOKEN_KEYWORD,   // await
+    TOKEN_OP,        // ~
+    TOKEN_NUMBER,    // 123
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
+  _test("await should treat + as regular op", "await +123",
+    TOKEN_SYMBOL,    // await
     TOKEN_OP,        // +
     TOKEN_NUMBER,    // 123
     TOKEN_SEMICOLON, // ASI ;
