@@ -196,7 +196,10 @@ static eat_out eat_token(char *p) {
         case '~':
           return _reth(1, TOKEN_OP, MISC_BITNOT);
         case '!':
-          return _reth(1, TOKEN_OP, MISC_NOT);
+          if (c != '=') {
+            return _reth(1, TOKEN_OP, MISC_NOT);
+          }
+          break;
       }
 
       // nb. these are all allowed=1, so len=1 even though we're consuming more
