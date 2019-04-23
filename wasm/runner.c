@@ -1,4 +1,3 @@
-#include <string.h>
 #include "../token.h"
 #include "../parser.h"
 
