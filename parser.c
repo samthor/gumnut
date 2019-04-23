@@ -206,8 +206,11 @@ static int is_unary(uint32_t hash, uint8_t context) {
 
 // matches any current function decl/stmt
 static int match_function(simpledef *sd) {
-  if (sd->tok.hash == LIT_ASYNC && sd->next->hash != LIT_FUNCTION) {
-    return -1;
+  if (sd->tok.hash == LIT_ASYNC) {
+    if (sd->next->hash != LIT_FUNCTION) {
+      return -1;
+    }
+    // otherwise fine
   } else if (sd->tok.hash != LIT_FUNCTION) {
     return -1;
   }

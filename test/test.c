@@ -519,6 +519,16 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("async part of function", "async\nfunction\nfoo() {}",
+    TOKEN_KEYWORD,   // async
+    TOKEN_KEYWORD,   // function
+    TOKEN_SYMBOL,    // foo
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {
