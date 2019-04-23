@@ -544,6 +544,10 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("hashbang as comment", "#!hello",
+    TOKEN_COMMENT,   // #!hello
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {

@@ -358,7 +358,7 @@ static char *eat_hashbang(tokendef *d) {
   char *newline = strchr(p, '\n');
   if (!newline) {
     // ... single line file?!
-    len = strlen(p + 2);
+    len = strlen(p) + 2;
   } else {
     len = newline - d->buf;
   }
