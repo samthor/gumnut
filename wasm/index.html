@@ -86,31 +86,35 @@ window.addEventListener('load', (ev) => {
     }
     node.className = type.toLowerCase();
     node.title = type;
-    output.appendChild(document.createTextNode(' '));
+
+    if (output.lastChild && output.lastChild.localName !== 'aside') {
+      output.appendChild(document.createTextNode(' '));
+    }
     output.appendChild(node);
     return node;
   };
   const appendLine = () => {
-    if (output.childNodes.length && output.lastChild.textContent != '\n') {
+    if (output.childNodes.length && output.lastChild.textContent !=='\n') {
       output.appendChild(document.createTextNode('\n'));
     }
   };
 
   const render = (tokens, view) => {
-    const lineHolders = [];
-
     let lineNo = 0;
     output.textContent = '';
     tokens.forEach((token) => {
       if (token.lineNo !== lineNo) {
         const valid = token.lineNo > lineNo;
         appendLine();
-        const node = append(token.lineNo, '_lineno');
-        lineHolders.push(node);
-        if (valid) {
-          lineNo = token.lineNo;
-        } else {
+
+        const node = document.createElement('aside');
+        node.dataset.line = token.lineNo;
+        output.appendChild(node);
+
+        if (!valid) {
           node.classList.add('__invalid');
+        } else {
+          lineNo = token.lineNo;
         }
       }
 
@@ -138,10 +142,11 @@ window.addEventListener('load', (ev) => {
       node.tabIndex = 0;
     });
 
+    // take largest lineNo length and set as var
     const len = `${lineNo}`.length;
-    lineHolders.forEach((node) => {
-      node.textContent = node.textContent.padStart(len);
-    });
+    if (output.style.setProperty) {
+      output.style.setProperty('--line-no-width', `${len}ch`);
+    }
   };
 
   ready.then(({instance, view}) => {
@@ -262,13 +267,21 @@ document.addEventListener('drop', (ev) => {
   pre {
     cursor: pointer;
   }
-  pre span._lineno {
+  pre aside {
+    /* used as line numbers */
+    display: inline;
     background: purple;
     color: white;
+    margin-right: 1ch;
   }
-  pre span._lineno.__invalid {
+  pre aside.__invalid {
     background: red;
-    text-decoration: none;
+  }
+  pre aside::before {
+    content: attr(data-line);
+    display: inline-block;
+    min-width: var(--line-no-width, 1ch);
+    text-align: right;
   }
   pre span._asi {
     background: green;
