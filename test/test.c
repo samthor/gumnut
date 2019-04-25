@@ -548,6 +548,12 @@ int main() {
     TOKEN_COMMENT,   // #!hello
   );
 
+  _test("hashbang as comment", "#!hello /*\nfoo",
+    TOKEN_COMMENT,   // #!hello
+    TOKEN_SYMBOL,    // foo
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {
