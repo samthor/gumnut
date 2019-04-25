@@ -42,6 +42,10 @@ const controlKeyword =
 const controlParenKeyword =
     " catch if for switch while with ";
 
+// control keywords that must have {}
+const controlBraceKeyword =
+    " catch finally switch try ";
+
 // reserved until ES3
 const oldKeyword = 
     " abstract boolean byte char double final float goto int long native short synchronized" +
@@ -70,17 +74,20 @@ const special = {
   DECL: 32,
   CONTROL: 64,
   CONTROL_PAREN: 128,
+  CONTROL_BRACE: 256,
 };
 
 
 const pendingNames = new Map();
-const queue = (all, bits=0) => {
+const queue = (all, ...bits) => {
   if (typeof all === 'string') {
     all = all.split(/\s+/).filter(Boolean);
   }
+
+  const bitsum = bits.reduce((a, b) => a + b, 0);
   for (const cand of all) {
     const prev = pendingNames.get(cand) || 0;
-    pendingNames.set(cand, prev | bits);
+    pendingNames.set(cand, prev | bitsum);
   }
 };
 
@@ -88,16 +95,17 @@ const queue = (all, bits=0) => {
 const nameToHash = new Map();
 const hashToName = new Map();
 
-queue(alwaysKeyword, special.KEYWORD | special.STRICT_KEYWORD);
+queue(alwaysKeyword, special.KEYWORD, special.STRICT_KEYWORD);
 queue(alwaysStrictKeyword, special.STRICT_KEYWORD);
-queue(unaryOp, special.KEYWORD | special.UNARY_OP);
+queue(unaryOp, special.KEYWORD, special.UNARY_OP);
 queue(optionalUnaryOp, special.UNARY_OP);
-queue(relOp, special.KEYWORD | special.REL_OP);
+queue(relOp, special.KEYWORD, special.REL_OP);
 queue(neverLabel, special.MASQUERADE);
 queue(optionalKeyword);
 queue(declKeyword, special.DECL);
 queue(controlKeyword, special.CONTROL);
 queue(controlParenKeyword, special.CONTROL_PAREN);
+queue(controlBraceKeyword, special.CONTROL_BRACE);
 const litOnly = Array.from(pendingNames.keys()).sort();
 
 // add other random punctuators _after_ saving litOnly
@@ -116,20 +124,30 @@ pendingNames.forEach((bits, name) => {
 
 
 function generateHash(s, bits=0) {
-  // 0: bits
-  // 1: s[0]
-  // 2: s[1]
-  // 3: length
-  let out = Math.min(bits, 255);
-
-  if (s.length > 0) {
-    out += s.charCodeAt(0) << 8;
-    if (s.length > 1) {
-      out += s.charCodeAt(1) << 16;
-    }
+  if (bits >= (1 << 13)) {
+    throw new Error('using more than 13 bits');
+  } else if (!s.length) {
+    throw new Error('empty string for hash');
   }
 
-  out += Math.min(s.length, 255) << 24;
+  const ordZero = s.charCodeAt(0) || 0;
+  const ordOne = s.charCodeAt(1) || 0;
+  if (ordZero >= 128 || ordOne >= 128) {
+    throw new Error('ord for char out of range');
+  }
+  const length = Math.min(s.length, 15);
+
+  let out = bits;        // 0-13
+  out += ordZero << 13;  // 13-20
+  out += ordOne << 20;   // 20-27
+  out += length << 27;   // 27-31
+  // we don't use bit 32, avoid being interpreted as signed int
+
+  // can't use << as JS wraps to unsigned here
+  if (out >= (2 ** 31)) {
+    throw new Error(`out of range of 32-bit int: ${out}, ${out.toString(2)} (${out.toString(2).length})`);
+  }
+
   return out;
 }
 
