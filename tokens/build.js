@@ -65,25 +65,42 @@ const extraDefines = {
 };
 
 // ways of marking up hashes
-const special = {
-  KEYWORD: 1,
-  STRICT_KEYWORD: 2,
-  REL_OP: 4,
-  UNARY_OP: 8,
-  MASQUERADE: 16,
-  DECL: 32,
-  CONTROL: 64,
-  CONTROL_PAREN: 128,
-  CONTROL_BRACE: 256,
-};
+const specials = [
+  'keyword',
+  'strictKeyword',
+  'relOp',
+  'unaryOp',
+  'masquerade',
+  'decl',
+  'control',
+  'controlParen',
+  'controlBrace',
+  // 'es3Reserved',
+];
+
+
+const maximumSpecialBit = 13;
+if (specials.length >= maximumSpecialBit) {
+  throw new Error(`too many special bits: ${specials.length}`);
+}
+
+
+function bitValueFor(name) {
+  const index = specials.indexOf(name);
+  if (index === -1) {
+    throw new Error('invalid bit request: ' + name);
+  }
+  return 1 << index;
+}
 
 
 const pendingNames = new Map();
-const queue = (all, ...bits) => {
+const queue = (all, ...names) => {
   if (typeof all === 'string') {
     all = all.split(/\s+/).filter(Boolean);
   }
 
+  const bits = names.map((name) => bitValueFor(name));
   const bitsum = bits.reduce((a, b) => a + b, 0);
   for (const cand of all) {
     const prev = pendingNames.get(cand) || 0;
@@ -95,17 +112,18 @@ const queue = (all, ...bits) => {
 const nameToHash = new Map();
 const hashToName = new Map();
 
-queue(alwaysKeyword, special.KEYWORD, special.STRICT_KEYWORD);
-queue(alwaysStrictKeyword, special.STRICT_KEYWORD);
-queue(unaryOp, special.KEYWORD, special.UNARY_OP);
-queue(optionalUnaryOp, special.UNARY_OP);
-queue(relOp, special.KEYWORD, special.REL_OP);
-queue(neverLabel, special.MASQUERADE);
+queue(alwaysKeyword, 'keyword', 'strictKeyword');
+queue(alwaysStrictKeyword, 'strictKeyword');
+queue(unaryOp, 'keyword', 'unaryOp');
+queue(optionalUnaryOp, 'unaryOp');
+queue(relOp, 'keyword', 'relOp');
+queue(neverLabel, 'masquerade');
 queue(optionalKeyword);
-queue(declKeyword, special.DECL);
-queue(controlKeyword, special.CONTROL);
-queue(controlParenKeyword, special.CONTROL_PAREN);
-queue(controlBraceKeyword, special.CONTROL_BRACE);
+queue(declKeyword, 'decl');
+queue(controlKeyword, 'control');
+queue(controlParenKeyword, 'controlParen');
+queue(controlBraceKeyword, 'controlBrace');
+// queue(oldKeyword, 'es3Reserved');
 const litOnly = Array.from(pendingNames.keys()).sort();
 
 // add other random punctuators _after_ saving litOnly
@@ -279,18 +297,15 @@ ${space}}\n`;
 }
 
 
-function renderSpecial(special) {
-  const all = [];
-  for (const key in special) {
-    all.push([special[key], key]);
-  }
-  all.sort((a, b) => a[0] - b[0]);
-
-  const lines = all.map(([value, key]) => {
-    return `#define _MASK_${key.padEnd(16)} ${value}\n`;
+function renderSpecial(specials) {
+  const lines = specials.map((name, i) => {
+    const upper = name.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase();
+    const value = bitValueFor(name);
+    return `#define _MASK_${upper.padEnd(16)} ${value}\n`;
   });
   return lines.join('');
 }
+
 
 function main() {
   const helperOutput = `// Generated on ${now}
@@ -329,7 +344,7 @@ int consume_known_lit(char *, uint32_t *);
 #ifndef _LIT_H
 #define _LIT_H
 
-${renderSpecial(special)}
+${renderSpecial(specials)}
 ${renderDefines(litOnly, 'lit_')}
 ${renderDefines(extraDefines, 'misc_')}
 #endif//_LIT_H
