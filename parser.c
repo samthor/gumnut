@@ -537,8 +537,10 @@ static int simple_consume(simpledef *sd) {
 
       case TOKEN_COMMA:  // valid
       default:           // invalid, but whatever
-        return record_walk(sd, 0);
+        break;
     }
+
+    return record_walk(sd, 0);
   }
 
   // function state, allow () or {}
@@ -592,23 +594,31 @@ static int simple_consume(simpledef *sd) {
 
   // class state, just insert group (for extends) or bail
   if (sd->curr->stype == SSTACK__CLASS) {
-    if (!is_token_valuelike_keyword(&(sd->tok))) {
-      // invalid, not a valuelike for either extends or main class def
-      --sd->curr;
-    } else if (sd->curr->special == SPECIAL__FREE_VALUE) {
-      // found extendable value, just parse it below
-      sd->curr->special = 0;
-    } else if (sd->tok.type != TOKEN_BRACE) {
-      // invalid, not a brace for main class def
-      --sd->curr;
-      debugf("got invalid non-brace sd->curr=%d\n", sd->curr->stype);
-    } else {
-      // terminal state of class definition, pop and insert dict
-      --sd->curr;
-      record_walk(sd, 0);
-      stack_inc(sd, SSTACK__DICT);
+    do {
+      if (!is_token_valuelike_keyword(&(sd->tok))) {
+        // invalid, not a valuelike for either extends or main class def
+        --sd->curr;
+      } else if (sd->curr->special == SPECIAL__FREE_VALUE) {
+        // found extendable value, just parse it below
+        // nb. This really isn't "any value".
+        // ... Chrome refuses to parse "class X extends await foo {}" (treats as unexpected reserved word, same as yield, "blank" context?)
+        // ... but does allow "extends foo.bar" (FIXME currently unsupported)
+        // ... or "extends bar['zing']" etc.
+        sd->curr->special = 0;
+        break;
+      } else if (sd->tok.type != TOKEN_BRACE) {
+        // invalid, not a brace for main class def
+        --sd->curr;
+        debugf("got invalid non-brace sd->curr=%d\n", sd->curr->stype);
+      } else {
+        // terminal state of class definition, pop and insert dict
+        --sd->curr;
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__DICT);
+      }
+
       return 0;
-    }
+    } while (0);
   }
 
   // do...while state
@@ -622,11 +632,11 @@ static int simple_consume(simpledef *sd) {
         yield_asi(sd);
       }
       --sd->curr;
-      return 0;
+    } else {
+      // start of do...while, just push block
+      stack_inc(sd, SSTACK__BLOCK);
     }
 
-    // start of do...while, just push block
-    stack_inc(sd, SSTACK__BLOCK);
     return 0;
   }
 
@@ -1022,11 +1032,11 @@ static int simple_consume(simpledef *sd) {
     return record_walk(sd, 0);
   }
 
-  // match curious cases inside "for (" (nb. we eat "for async" => "for", for convenience)
+  // match curious cases inside "for ("
   sstack *up = (sd->curr - 1);
   if (sd->curr->stype == SSTACK__GROUP && sd->curr->special == SPECIAL__FOR) {
 
-    // start of "for (", look for decl (var/let/etc)
+    // start of "for (", look for decl (var/let/const) and mark as keyword
     if (sd->curr->t1.type == TOKEN_EOF) {
       if (match_decl(sd) >= 0) {
         return 0;
@@ -1051,7 +1061,6 @@ static int simple_consume(simpledef *sd) {
       return 0;
     }
     // ... otherwise, it's an invalid keyword
-    // ... exception: `for (var x;;)` is valid
     sd->tok.type = TOKEN_KEYWORD;
     return record_walk(sd, 0);
   }

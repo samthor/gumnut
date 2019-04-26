@@ -98,10 +98,12 @@ int run_testdef(testdef *def) {
     ++ecount; \
   } \
   printf("\n"); \
+  ++count; \
 }
 
 int main() {
   int err = 0;
+  int count = 0;
   int ecount = 0;
   testdef fail, *last = &fail;
   bzero(&fail, sizeof(fail));
@@ -554,10 +556,27 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  // FIXME: fails on "if" because we think it's an anon block (foo.bar breaks extends)
+  _test("class extends op-like", "class X extends foo.bar { if() {} }",
+    TOKEN_KEYWORD,   // class
+    TOKEN_SYMBOL,    // X
+    TOKEN_KEYWORD,   // extends
+    TOKEN_SYMBOL,    // foo
+    TOKEN_OP,        // .
+    TOKEN_SYMBOL,    // bar
+    TOKEN_BRACE,     // {
+    TOKEN_SYMBOL,    // if
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {
-    printf("errors (%d):\n", ecount);
+    printf("errors (%d/%d):\n", ecount, count);
   }
   while ((p = (testdef *) p->next)) {
     printf("-- %s\n", p->name);
