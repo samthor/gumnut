@@ -8,7 +8,7 @@
 #define SSTACK__BLOCK    2  // block execution context
 #define SSTACK__DICT     3  // within regular dict "{}"
 #define SSTACK__FUNC     4  // expects upcoming "name () {}"
-#define SSTACK__CLASS    5  // expects "extends X"? "{}"
+#define SSTACK__EXTENDS  5  // expects "extends X"? "{}"
 #define SSTACK__DO_WHILE 6  // state machine for "do ... while"
 #define SSTACK__MODULE   7  // state machine for import/export defs
 
@@ -18,9 +18,6 @@
 // SSTACK__BLOCK
 #define SPECIAL__INIT       1
 
-// SSTACK__CLASS
-// for e.g. "class extends {} {}", left is value (just one single token, or e.g. "(foo)")
-#define SPECIAL__FREE_VALUE 1
 
 
 #ifdef DEBUG
@@ -242,35 +239,27 @@ static int match_class(simpledef *sd) {
   sd->tok.type = TOKEN_KEYWORD;
   record_walk(sd, 0);
 
-  int special = 0;
-
   // optionally consume class name
-  if (sd->tok.type == TOKEN_LIT) {
-    uint32_t h = sd->tok.hash;
-    if (h == LIT_EXTENDS) {
-      // ... short-circuit if name is "extends"
-      special = SPECIAL__FREE_VALUE;
+  uint32_t h = sd->tok.hash;
+  if (sd->tok.type == TOKEN_LIT && h != LIT_EXTENDS) {
+    if (!is_valid_name(h, sd->curr->context) || h == LIT_YIELD || h == LIT_LET) {
+      // nb. "yield" or "let" is always an invalid class name, even in non-strict (but this
+      // doesn't apply to function)
+      // ... this might actually be a V8 "feature", but it's the same in Firefox
+      sd->tok.type = TOKEN_KEYWORD;  // "class if" is invalid
     } else {
-      if (!is_valid_name(h, sd->curr->context) || h == LIT_YIELD || h == LIT_LET) {
-        // nb. "yield" or "let" is always an invalid class name, even in non-strict (but this
-        // doesn't apply to function)
-        // ... this might actually be a V8 "feature", but it's the same in Firefox
-        sd->tok.type = TOKEN_KEYWORD;  // "class if" is invalid
-      } else {
-        sd->tok.type = TOKEN_SYMBOL;
-      }
-      skip_walk(sd, 0);  // consume name
+      sd->tok.type = TOKEN_SYMBOL;
     }
+    skip_walk(sd, 0);  // consume name
   }
 
-  // consume extends
-  if (special || sd->tok.hash == LIT_EXTENDS) {
+  if (h == LIT_EXTENDS || sd->tok.hash == LIT_EXTENDS) {
     sd->tok.type = TOKEN_KEYWORD;
-    skip_walk(sd, 0);  // consume "extends" keyword
-    special = SPECIAL__FREE_VALUE;
+    skip_walk(sd, 0);  // consume "extends" keyword, treat as non-value
+    return 1;
   }
 
-  return special;
+  return 0;
 }
 
 
@@ -284,10 +273,19 @@ static int enact_defn(simpledef *sd) {
   }
 
   // ... match class
-  int special = match_class(sd);
-  if (special >= 0) {
-    stack_inc(sd, SSTACK__CLASS);
-    sd->curr->special = special;
+  int extends = match_class(sd);
+  if (extends == 0) {
+    if (sd->tok.type != TOKEN_BRACE) {
+      // "class Foo" without extends, and without following brace- abandon
+      return 0;
+    }
+
+    // no 'extends', so just skip to dict-land
+    record_walk(sd, 0);
+    stack_inc(sd, SSTACK__DICT);
+    return 1;
+  } else if (extends > 0) {
+    stack_inc(sd, SSTACK__EXTENDS);
     return 1;
   }
 
@@ -593,32 +591,26 @@ static int simple_consume(simpledef *sd) {
   }
 
   // class state, just insert group (for extends) or bail
-  if (sd->curr->stype == SSTACK__CLASS) {
-    do {
-      if (!is_token_valuelike_keyword(&(sd->tok))) {
-        // invalid, not a valuelike for either extends or main class def
-        --sd->curr;
-      } else if (sd->curr->special == SPECIAL__FREE_VALUE) {
-        // found extendable value, just parse it below
-        // nb. This really isn't "any value".
-        // ... Chrome refuses to parse "class X extends await foo {}" (treats as unexpected reserved word, same as yield, "blank" context?)
-        // ... but does allow "extends foo.bar" (FIXME currently unsupported)
-        // ... or "extends bar['zing']" etc.
-        sd->curr->special = 0;
-        break;
-      } else if (sd->tok.type != TOKEN_BRACE) {
-        // invalid, not a brace for main class def
-        --sd->curr;
-        debugf("got invalid non-brace sd->curr=%d\n", sd->curr->stype);
-      } else {
-        // terminal state of class definition, pop and insert dict
-        --sd->curr;
-        record_walk(sd, 0);
-        stack_inc(sd, SSTACK__DICT);
-      }
+  if (sd->curr->stype == SSTACK__EXTENDS) {
 
+    if (sd->tok_has_value && sd->tok.type == TOKEN_BRACE) {
+      // this was read after a value (otherwise invalid, would be treated as anon block), pop us
+      // and start the dict-like class block
+      sd->curr->special = 0;
+      --sd->curr;
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__DICT);
       return 0;
-    } while (0);
+    }
+
+    // ... check for invalid constructs
+    if (sd->tok.type == TOKEN_CLOSE || sd->tok.type == TOKEN_COMMA || sd->tok.type == TOKEN_SEMICOLON) {
+      debugf("stopping invalid extends construct\n");
+      --sd->curr;  // just pop SSTACK__EXTENDS and continue with whatever
+      return 0;
+    }
+
+    // ... otherwise, this is just the part before dict "{", consume like group value
   }
 
   // do...while state
