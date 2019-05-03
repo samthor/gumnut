@@ -8,7 +8,7 @@
 #define SSTACK__BLOCK    2  // block execution context
 #define SSTACK__DICT     3  // within regular dict "{}"
 #define SSTACK__FUNC     4  // expects upcoming "name () {}"
-#define SSTACK__EXTENDS  5  // expects "extends X"? "{}"
+#define SSTACK__CLASS    5  // expects "extends X"? "{}"
 #define SSTACK__DO_WHILE 6  // state machine for "do ... while"
 #define SSTACK__MODULE   7  // state machine for import/export defs
 
@@ -237,28 +237,21 @@ static int match_class(simpledef *sd) {
     return -1;
   }
   sd->tok.type = TOKEN_KEYWORD;
-  record_walk(sd, 0);
+  record_walk(sd, 0);  // consume "class"
 
-  // optionally consume class name
+  // optionally consume class name if not "extends"
   uint32_t h = sd->tok.hash;
-  if (sd->tok.type == TOKEN_LIT && h != LIT_EXTENDS) {
-    if (!is_valid_name(h, sd->curr->context) || h == LIT_YIELD || h == LIT_LET) {
-      // nb. "yield" or "let" is always an invalid class name, even in non-strict (but this
-      // doesn't apply to function)
-      // ... this might actually be a V8 "feature", but it's the same in Firefox
-      sd->tok.type = TOKEN_KEYWORD;  // "class if" is invalid
-    } else {
-      sd->tok.type = TOKEN_SYMBOL;
-    }
-    skip_walk(sd, 0);  // consume name
+  if (h == LIT_EXTENDS || sd->tok.type != TOKEN_LIT) {
+    return 0;  // ... if this isn't TOKEN_BRACE, it's invalid, but let stack handler deal
+  } else if (!is_valid_name(h, sd->curr->context) || h == LIT_YIELD || h == LIT_LET) {
+    // nb. "yield" or "let" are both always invalid, even in non-strict (doesn't apply to function)
+    // ... this might actually be a V8 "feature", but it's the same in Firefox, and both actually
+    // complain that it's invalid in strict mode even if _not_ in that mode (!)
+    sd->tok.type = TOKEN_KEYWORD;  // "class if" is invalid
+  } else {
+    sd->tok.type = TOKEN_SYMBOL;
   }
-
-  if (h == LIT_EXTENDS || sd->tok.hash == LIT_EXTENDS) {
-    sd->tok.type = TOKEN_KEYWORD;
-    skip_walk(sd, 0);  // consume "extends" keyword, treat as non-value
-    return 1;
-  }
-
+  skip_walk(sd, 0);  // consume name even if it's an invalid keyword
   return 0;
 }
 
@@ -273,19 +266,9 @@ static int enact_defn(simpledef *sd) {
   }
 
   // ... match class
-  int extends = match_class(sd);
-  if (extends == 0) {
-    if (sd->tok.type != TOKEN_BRACE) {
-      // "class Foo" without extends, and without following brace- abandon
-      return 0;
-    }
-
-    // no 'extends', so just skip to dict-land
-    record_walk(sd, 0);
-    stack_inc(sd, SSTACK__DICT);
-    return 1;
-  } else if (extends > 0) {
-    stack_inc(sd, SSTACK__EXTENDS);
+  int class = match_class(sd);
+  if (class >= 0) {
+    stack_inc(sd, SSTACK__CLASS);
     return 1;
   }
 
@@ -591,9 +574,19 @@ static int simple_consume(simpledef *sd) {
   }
 
   // class state, just insert group (for extends) or bail
-  if (sd->curr->stype == SSTACK__EXTENDS) {
+  if (sd->curr->stype == SSTACK__CLASS) {
+    int zero = (sd->curr->t1.type == TOKEN_EOF);
+    if (zero) {
+      // zero state
+      if (sd->tok.hash == LIT_EXTENDS) {
+        // ... check for extends, valid
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);  // consume "extends" keyword, treat as non-value
+        return 0;
+      }
+    }
 
-    if (sd->tok_has_value && sd->tok.type == TOKEN_BRACE) {
+    if ((sd->tok_has_value || zero) && sd->tok.type == TOKEN_BRACE) {
       // this was read after a value (otherwise invalid, would be treated as anon block), pop us
       // and start the dict-like class block
       sd->curr->special = 0;
@@ -603,10 +596,10 @@ static int simple_consume(simpledef *sd) {
       return 0;
     }
 
-    // ... check for invalid constructs
-    if (sd->tok.type == TOKEN_CLOSE || sd->tok.type == TOKEN_COMMA || sd->tok.type == TOKEN_SEMICOLON) {
+    // check for invalid at zero state, or unexpected tokens
+    if (zero || sd->tok.type == TOKEN_CLOSE || sd->tok.type == TOKEN_COMMA || sd->tok.type == TOKEN_SEMICOLON) {
       debugf("stopping invalid extends construct\n");
-      --sd->curr;  // just pop SSTACK__EXTENDS and continue with whatever
+      --sd->curr;
       return 0;
     }
 
