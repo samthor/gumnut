@@ -275,6 +275,7 @@ static int enact_defn(simpledef *sd) {
   return 0;
 }
 
+
 // matches a "break foo;" or "continue;", emits ASI if required
 static int match_label_keyword(simpledef *sd) {
   if (sd->tok.hash != LIT_BREAK && sd->tok.hash != LIT_CONTINUE) {
