@@ -799,6 +799,7 @@ static int simple_consume(simpledef *sd) {
     // ... or start a regular statement
     stack_inc(sd, 0);
     // FIXME: we can't return here, otherwise we leave bad stack
+    // ... if an ASI is inserted, we're fine, otherwise stack is confused - maybe not closing properly
   }
 
   // match statements
