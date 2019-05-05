@@ -373,7 +373,10 @@ static int simple_consume_expr(simpledef *sd) {
 
     case TOKEN_COMMA:
       if ((sd->curr - 1)->stype == SSTACK__DICT) {
-        debugf("dict stype=%d\n", sd->curr->stype);
+        if (sd->curr->stype != SSTACK__STMT) {
+          debugf("unhandled stype within dict: %d\n", sd->curr->stype);
+          return ERROR__INTERNAL;
+        }
         --sd->curr;
         return 0;
       }
@@ -636,447 +639,454 @@ static int simple_consume_expr(simpledef *sd) {
 
 static int simple_consume(simpledef *sd) {
 
-  // import state
-  if (sd->curr->stype == SSTACK__MODULE) {
-
-    switch (sd->tok.type) {
-      case TOKEN_BRACE:
-        record_walk(sd, 0);
-        stack_inc(sd, SSTACK__MODULE);
-        return 0;
-
-      // unexpected, but handle anyway
-      case TOKEN_T_BRACE:
-      case TOKEN_PAREN:
-      case TOKEN_ARRAY:
-        return simple_consume_expr(sd);
-
-      case TOKEN_LIT:
-        break;
-
-      case TOKEN_COMMA:
-        return record_walk(sd, 0);
-
-      case TOKEN_CLOSE:
-        if ((sd->curr - 1)->stype != SSTACK__MODULE) {
-          return ERROR__INTERNAL;  // impossible, we're at top-level
-        }
-        int line_no = sd->tok.line_no;
-        skip_walk(sd, 0);
-        --sd->curr;  // close inner
-
-        if ((sd->curr - 1)->stype == SSTACK__MODULE) {
-          return 0;  // invalid several descendant case
-        }
-        --sd->curr;  // close outer
-
-        if (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_FROM) {
-          // ... inner {} must have trailer "from './path'"
-          sd->tok.type = TOKEN_KEYWORD;
+  switch (sd->curr->stype) {
+    // import state
+    case SSTACK__MODULE:
+      switch (sd->tok.type) {
+        case TOKEN_BRACE:
           record_walk(sd, 0);
-          if (sd->tok.type == TOKEN_STRING) {
-            sd->tok.mark = MARK_IMPORT;
+          stack_inc(sd, SSTACK__MODULE);
+          return 0;
+
+        // unexpected, but handle anyway
+        case TOKEN_T_BRACE:
+        case TOKEN_PAREN:
+        case TOKEN_ARRAY:
+          return simple_consume_expr(sd);
+
+        case TOKEN_LIT:
+          break;
+
+        case TOKEN_COMMA:
+          return record_walk(sd, 0);
+
+        case TOKEN_CLOSE:
+          if ((sd->curr - 1)->stype != SSTACK__MODULE) {
+            return ERROR__INTERNAL;  // impossible, we're at top-level
           }
-        } else if (sd->tok.type != TOKEN_SEMICOLON && sd->tok.line_no != line_no) {
-          // ... or just abandon, generating semi if needed (valid in export case)
-          yield_asi(sd);
+          int line_no = sd->tok.line_no;
+          skip_walk(sd, 0);
+          --sd->curr;  // close inner
+
+          if ((sd->curr - 1)->stype == SSTACK__MODULE) {
+            return 0;  // invalid several descendant case
+          }
+          --sd->curr;  // close outer
+
+          if (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_FROM) {
+            // ... inner {} must have trailer "from './path'"
+            sd->tok.type = TOKEN_KEYWORD;
+            record_walk(sd, 0);
+            if (sd->tok.type == TOKEN_STRING) {
+              sd->tok.mark = MARK_IMPORT;
+            }
+          } else if (sd->tok.type != TOKEN_SEMICOLON && sd->tok.line_no != line_no) {
+            // ... or just abandon, generating semi if needed (valid in export case)
+            yield_asi(sd);
+          }
+          return 0;
+
+        case TOKEN_OP:
+          if (sd->tok.hash == MISC_STAR) {
+            sd->tok.type = TOKEN_SYMBOL;  // pretend this is symbol
+            return record_walk(sd, 0);
+          }
+          // fall-through
+
+        default:
+          if ((sd->curr - 1)->stype != SSTACK__MODULE) {
+            debugf("abandoning module for reasons: %d\n", sd->tok.type);
+            --sd->curr;
+            return 0;  // not inside submodule, just give up
+          }
+          return record_walk(sd, 0);
+      }
+
+      // consume and bail out on "from" if it follows a symbol or close brace
+      if ((sd->curr - 1)->stype != SSTACK__MODULE &&
+          sd->curr->t1.type == TOKEN_SYMBOL &&
+          sd->tok.hash == LIT_FROM) {
+        --sd->curr;  // close outer
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+
+        // restart as regular statement, marking as import name
+        if (sd->tok.type == TOKEN_STRING) {
+          sd->tok.mark = MARK_IMPORT;
         }
         return 0;
+      }
 
-      case TOKEN_OP:
-        if (sd->tok.hash == MISC_STAR) {
-          sd->tok.type = TOKEN_SYMBOL;  // pretend this is symbol
-          return record_walk(sd, 0);
-        }
-        // fall-through
+      // consume "as" as a keyword if it follows a symbol
+      if (sd->curr->t1.type == TOKEN_SYMBOL && sd->tok.hash == LIT_AS) {
+        sd->tok.type = TOKEN_KEYWORD;
+        return record_walk(sd, 0);
+      }
 
-      default:
-        if ((sd->curr - 1)->stype != SSTACK__MODULE) {
-          debugf("abandoning module for reasons: %d\n", sd->tok.type);
+      // otherwise just mask as symbol or keyword
+      if (is_valid_name(sd->tok.hash, sd->curr->context)) {
+        sd->tok.type = TOKEN_SYMBOL;
+      } else {
+        // ... invalid, of course
+        sd->tok.type = TOKEN_KEYWORD;
+      }
+      return record_walk(sd, 0);
+
+    // dict state (left)
+    case SSTACK__DICT: {
+      uint8_t context = 0;
+
+      // search for function
+      // ... look for 'static' without '(' next
+      if (sd->tok.type == TOKEN_LIT &&
+          sd->td->next.type != TOKEN_PAREN &&
+          sd->tok.hash == LIT_STATIC) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+      }
+
+      // ... look for 'async' without '(' next
+      if (sd->tok.type == TOKEN_LIT &&
+          sd->td->next.type != TOKEN_PAREN &&
+          sd->tok.hash == LIT_ASYNC) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+        context |= CONTEXT__ASYNC;
+      }
+
+      // ... look for '*'
+      if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) {
+        context |= CONTEXT__GENERATOR;
+        record_walk(sd, 0);
+      }
+
+      // ... look for get/set without '(' next
+      if (sd->tok.type == TOKEN_LIT &&
+          sd->td->next.type != TOKEN_PAREN &&
+          (sd->tok.hash == LIT_GET || sd->tok.hash == LIT_SET)) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+      }
+
+      // terminal state of left side
+      switch (sd->tok.type) {
+        // ... anything that looks like it could be a function, that way (and let stack fail)
+        case TOKEN_LIT:
+        case TOKEN_PAREN:
+        case TOKEN_BRACE:
+        case TOKEN_ARRAY:
+          debugf("pretending to be function: %.*s\n", sd->tok.len, sd->tok.p);
+          stack_inc(sd, SSTACK__FUNC);
+          sd->curr->context = context;
+          return 0;
+
+        case TOKEN_T_BRACE:  // incase someone puts `${foo}` on the left
+        case TOKEN_COLON:
+          record_walk(sd, 0);
+          stack_inc(sd, SSTACK__STMT);
+          debugf("pushing stmt for colon\n");
+          return 0;
+
+        case TOKEN_CLOSE:
+          skip_walk(sd, 1);
           --sd->curr;
-          return 0;  // not inside submodule, just give up
+          return 0;
+
+        case TOKEN_COMMA:  // valid
+        default:           // invalid, but whatever
+          break;
+      }
+
+      return record_walk(sd, 0);
+    }
+
+    // function state, allow () or {}
+    case SSTACK__FUNC:
+      if (sd->tok.type == TOKEN_ARRAY) {
+        // allow "function ['name']"
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__GROUP);
+
+        // ... but "{async [await 'name']..." doesn't take await from our context
+        sd->curr->context = (sd->curr - 2)->context;
+        return 0;
+      }
+
+      if (sd->tok.type == TOKEN_LIT) {
+        sstack *p = (sd->curr - 1);  // use context from parent, "async function await() {}" is valid :(
+
+        // we're only maybe a keyword in non-dict modes
+        if (p->stype != SSTACK__DICT && !is_valid_name(sd->tok.hash, p->context)) {
+          sd->tok.type = TOKEN_KEYWORD;
+        } else {
+          sd->tok.type = TOKEN_SYMBOL;
         }
         return record_walk(sd, 0);
-    }
-
-    // consume and bail out on "from" if it follows a symbol or close brace
-    if ((sd->curr - 1)->stype != SSTACK__MODULE &&
-        sd->curr->t1.type == TOKEN_SYMBOL &&
-        sd->tok.hash == LIT_FROM) {
-      --sd->curr;  // close outer
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
-
-      // restart as regular statement, marking as import name
-      if (sd->tok.type == TOKEN_STRING) {
-        sd->tok.mark = MARK_IMPORT;
       }
-      return 0;
-    }
 
-    // consume "as" as a keyword if it follows a symbol
-    if (sd->curr->t1.type == TOKEN_SYMBOL && sd->tok.hash == LIT_AS) {
-      sd->tok.type = TOKEN_KEYWORD;
-      return record_walk(sd, 0);
-    }
-
-    // otherwise just mask as symbol or keyword
-    if (is_valid_name(sd->tok.hash, sd->curr->context)) {
-      sd->tok.type = TOKEN_SYMBOL;
-    } else {
-      // ... invalid, of course
-      sd->tok.type = TOKEN_KEYWORD;
-    }
-    return record_walk(sd, 0);
-  }
-
-  // dict state (left)
-  if (sd->curr->stype == SSTACK__DICT) {
-    uint8_t context = 0;
-
-    // search for function
-    // ... look for 'static' without '(' next
-    if (sd->tok.type == TOKEN_LIT &&
-        sd->td->next.type != TOKEN_PAREN &&
-        sd->tok.hash == LIT_STATIC) {
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
-    }
-
-    // ... look for 'async' without '(' next
-    if (sd->tok.type == TOKEN_LIT &&
-        sd->td->next.type != TOKEN_PAREN &&
-        sd->tok.hash == LIT_ASYNC) {
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
-      context |= CONTEXT__ASYNC;
-    }
-
-    // ... look for '*'
-    if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) {
-      context |= CONTEXT__GENERATOR;
-      record_walk(sd, 0);
-    }
-
-    // ... look for get/set without '(' next
-    if (sd->tok.type == TOKEN_LIT &&
-        sd->td->next.type != TOKEN_PAREN &&
-        (sd->tok.hash == LIT_GET || sd->tok.hash == LIT_SET)) {
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
-    }
-
-    // terminal state of left side
-    switch (sd->tok.type) {
-      // ... anything that looks like it could be a function, that way (and let stack fail)
-      case TOKEN_LIT:
-      case TOKEN_PAREN:
-      case TOKEN_BRACE:
-      case TOKEN_ARRAY:
-        debugf("pretending to be function: %.*s\n", sd->tok.len, sd->tok.p);
-        stack_inc(sd, SSTACK__FUNC);
-        sd->curr->context = context;
-        return 0;
-
-      case TOKEN_T_BRACE:  // incase someone puts `${foo}` on the left
-      case TOKEN_COLON:
+      if (sd->tok.type == TOKEN_PAREN) {
+        // allow "function ()"
         record_walk(sd, 0);
-        stack_inc(sd, SSTACK__STMT);
-        debugf("pushing stmt for colon\n");
-        return 0;
-
-      case TOKEN_CLOSE:
-        skip_walk(sd, 1);
-        --sd->curr;
-        return 0;
-
-      case TOKEN_COMMA:  // valid
-      default:           // invalid, but whatever
-        break;
-    }
-
-    return record_walk(sd, 0);
-  }
-
-  // function state, allow () or {}
-  if (sd->curr->stype == SSTACK__FUNC) {
-
-    if (sd->tok.type == TOKEN_ARRAY) {
-      // allow "function ['name']"
-      record_walk(sd, 0);
-      stack_inc(sd, SSTACK__GROUP);
-
-      // ... but "{async [await 'name']..." doesn't take await from our context
-      sd->curr->context = (sd->curr - 2)->context;
-      return 0;
-    }
-
-    if (sd->tok.type == TOKEN_LIT) {
-      int context = (sd->curr - 1)->context;  // "async function await() {}" is valid :(
-      int parent = (sd->curr - 1)->stype;
-
-      // we're only maybe a keyword in non-dict modes
-      if (parent != SSTACK__DICT && !is_valid_name(sd->tok.hash, context)) {
-        sd->tok.type = TOKEN_KEYWORD;
-      } else {
-        sd->tok.type = TOKEN_SYMBOL;
-      }
-      return record_walk(sd, 0);
-    }
-
-    if (sd->tok.type == TOKEN_PAREN) {
-      // allow "function ()"
-      record_walk(sd, 0);
-      stack_inc(sd, SSTACK__GROUP);
-      return 0;
-    }
-
-    if (sd->tok.type == TOKEN_BRACE) {
-      // terminal state of func, pop and insert normal block w/retained context
-      uint8_t context = sd->curr->context;
-      --sd->curr;
-      record_walk(sd, 0);
-      stack_inc(sd, SSTACK__BLOCK);
-      sd->curr->context = context;
-      sd->curr->special = SPECIAL__INIT;
-      return 0;
-    }
-
-    // invalid, abandon function def
-    --sd->curr;
-    return 0;
-  }
-
-  // class state, just insert group (for extends) or bail
-  if (sd->curr->stype == SSTACK__CLASS) {
-    int zero = (sd->curr->t1.type == TOKEN_EOF);
-    if (zero) {
-      // zero state
-      if (sd->tok.hash == LIT_EXTENDS) {
-        // ... check for extends, valid
-        sd->tok.type = TOKEN_KEYWORD;
-        record_walk(sd, 0);  // consume "extends" keyword, treat as non-value
-        return 0;
-      }
-    }
-
-    if ((sd->tok_has_value || zero) && sd->tok.type == TOKEN_BRACE) {
-      // this was read after a value (otherwise invalid, would be treated as anon block), pop us
-      // and start the dict-like class block
-      sd->curr->special = 0;
-      --sd->curr;
-      record_walk(sd, 0);
-      stack_inc(sd, SSTACK__DICT);
-      return 0;
-    }
-
-    // check for invalid at zero state, or unexpected tokens
-    if (zero || sd->tok.type == TOKEN_CLOSE || sd->tok.type == TOKEN_COMMA || sd->tok.type == TOKEN_SEMICOLON) {
-      debugf("stopping invalid extends construct\n");
-      --sd->curr;
-      return 0;
-    }
-
-    // ... otherwise, this is just the part before dict-like "{", consume expr
-    return simple_consume_expr(sd);
-  }
-
-  // do...while state
-  if (sd->curr->stype == SSTACK__DO_WHILE) {
-    if (sd->curr->t1.type) {
-      // this is end of valid group, emit ASI if there's not one
-      // occurs regardless of newline, e.g. "do ; while (0) foo;" is valid, ASI after close paren
-      if (sd->tok.type == TOKEN_SEMICOLON) {
-        skip_walk(sd, 0);
-      } else {
-        yield_asi(sd);
-      }
-      --sd->curr;
-    } else {
-      // start of do...while, just push block
-      stack_inc(sd, SSTACK__BLOCK);
-    }
-
-    return 0;
-  }
-
-  // zero state, determine what to push
-  if (sd->curr->stype == SSTACK__BLOCK) {
-    do {
-
-      // finished our first _anything_ clear initial bit
-      if (sd->curr->t1.type && sd->curr->special) {
-        sd->curr->special = 0;
-
-        // look for 'use strict' of single statement
-        if (sd->curr->t1.type == TOKEN_SEMICOLON) {
-          sstack *prev = (sd->curr + 1);  // this will be previous statement
-          if (!prev->t2.type && is_use_strict(&(prev->t1))) {
-            sd->curr->context |= CONTEXT__STRICT;
-            debugf("got use strict in single statement\n");
-          }
-        }
-      }
-
-      // check incase at least one statement has occured in DO_WHILE > BLOCK
-      int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_BRACE);
-      if ((sd->curr - 1)->stype == SSTACK__DO_WHILE && has_statement) {
-        --sd->curr;  // pop to DO_WHILE
-
-        // look for following "while (", fail if not
-        if (sd->next->type == TOKEN_PAREN &&
-            sd->tok.type == TOKEN_LIT &&
-            sd->tok.hash == LIT_WHILE) {
-          sd->tok.type = TOKEN_KEYWORD;
-          record_walk(sd, 0);  // consume while
-          record_walk(sd, 0);  // consume paren
-          stack_inc(sd, SSTACK__GROUP);
-          return 0;
-        }
-
-        // couldn't find suffix "while(", retry
-        // FIXME: error case
-        --sd->curr;
+        stack_inc(sd, SSTACK__GROUP);
         return 0;
       }
 
-      // match anonymous block
       if (sd->tok.type == TOKEN_BRACE) {
-        debugf("got anon block\n");
+        // terminal state of func, pop and insert normal block w/retained context
+        uint8_t context = sd->curr->context;
+        --sd->curr;
         record_walk(sd, 0);
         stack_inc(sd, SSTACK__BLOCK);
+        sd->curr->context = context;
+        sd->curr->special = SPECIAL__INIT;
         return 0;
       }
 
-      // only care about lit here
-      if (sd->tok.type != TOKEN_LIT) {
-        break;
-      }
+      // invalid, abandon function def
+      --sd->curr;
+      return 0;
 
-      // match label
-      if (is_label(&(sd->tok), sd->curr->context) && sd->next->type == TOKEN_COLON) {
-        sd->tok.type = TOKEN_LABEL;
-        skip_walk(sd, -1);  // consume label
-        skip_walk(sd, 0);  // consume colon
-        return 0;
-      }
-
-      // match label keyword (e.g. "break foo;")
-      if (match_label_keyword(sd) >= 0) {
-        return 0;
-      }
-
-      // match single-only
-      if (sd->tok.hash == LIT_DEBUGGER) {
-        sd->tok.type = TOKEN_KEYWORD;
-        record_walk(sd, 0);
-        yield_restrict_asi(sd);
-        return 0;
-      }
-
-      // match restricted statement starters
-      if (sd->tok.hash == LIT_RETURN || sd->tok.hash == LIT_THROW) {
-        int hash = sd->tok.hash;
-        sd->tok.type = TOKEN_KEYWORD;
-        record_walk(sd, 0);
-
-        // throw doesn't cause ASI, because it's invalid either way
-        if (hash == LIT_RETURN && yield_restrict_asi(sd)) {
+    // class state, just insert group (for extends) or bail
+    case SSTACK__CLASS: {
+      int zero = (sd->curr->t1.type == TOKEN_EOF);
+      if (zero) {
+        // zero state
+        if (sd->tok.hash == LIT_EXTENDS) {
+          // ... check for extends, valid
+          sd->tok.type = TOKEN_KEYWORD;
+          record_walk(sd, 0);  // consume "extends" keyword, treat as non-value
           return 0;
         }
-
-        break;  // e.g. "return ..." or "throw ..." starts a statement
       }
 
-      // module valid cases at top-level
-      if (sd->curr == sd->stack && sd->is_module) {
+      if ((sd->tok_has_value || zero) && sd->tok.type == TOKEN_BRACE) {
+        // this was read after a value (otherwise invalid, would be treated as anon block), pop us
+        // and start the dict-like class block
+        sd->curr->special = 0;
+        --sd->curr;
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__DICT);
+        return 0;
+      }
 
-        // match "import" which starts a sstack special
-        if (sd->tok.hash == LIT_IMPORT) {
-          sd->tok.type = TOKEN_KEYWORD;
-          record_walk(sd, 0);
+      // check for invalid at zero state, or unexpected tokens
+      if (zero || sd->tok.type == TOKEN_CLOSE || sd->tok.type == TOKEN_COMMA || sd->tok.type == TOKEN_SEMICOLON) {
+        debugf("stopping invalid extends construct\n");
+        --sd->curr;
+        return 0;
+      }
 
-          // short-circuit for "import 'foo'"
-          if (sd->tok.type == TOKEN_STRING) {
-            sd->tok.mark = MARK_IMPORT;
-            break;  // starts a statement containing at least one string
-          }
+      // ... otherwise, this is just the part before dict-like "{", consume expr
+      return simple_consume_expr(sd);
+    }
 
+    // do...while state
+    case SSTACK__DO_WHILE:
+      if (sd->curr->t1.type) {
+        // this is end of valid group, emit ASI if there's not one
+        // occurs regardless of newline, e.g. "do ; while (0) foo;" is valid, ASI after close paren
+        if (sd->tok.type == TOKEN_SEMICOLON) {
+          skip_walk(sd, 0);
+        } else {
+          yield_asi(sd);
+        }
+        --sd->curr;
+      } else {
+        // start of do...while, just push block
+        stack_inc(sd, SSTACK__BLOCK);
+      }
+
+      return 0;
+
+    case SSTACK__GROUP:
+    case SSTACK__STMT:
+      return simple_consume_expr(sd);
+
+    default:
+      debugf("unhandled stype=%d\n", sd->curr->stype);
+      return ERROR__INTERNAL;
+
+    // zero state, determine what to push
+    case SSTACK__BLOCK:
+      break;
+  }
+
+  // ... continue from SSTACK__BLOCK
+  do {
+    // finished our first _anything_ clear initial bit
+    if (sd->curr->t1.type && sd->curr->special) {
+      sd->curr->special = 0;
+
+      // look for 'use strict' of single statement
+      if (sd->curr->t1.type == TOKEN_SEMICOLON) {
+        sstack *prev = (sd->curr + 1);  // this will be previous statement
+        if (!prev->t2.type && is_use_strict(&(prev->t1))) {
+          sd->curr->context |= CONTEXT__STRICT;
+          debugf("got use strict in single statement\n");
+        }
+      }
+    }
+
+    // check incase at least one statement has occured in DO_WHILE > BLOCK
+    int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_BRACE);
+    if ((sd->curr - 1)->stype == SSTACK__DO_WHILE && has_statement) {
+      --sd->curr;  // pop to DO_WHILE
+
+      // look for following "while (", fail if not
+      if (sd->next->type == TOKEN_PAREN &&
+          sd->tok.type == TOKEN_LIT &&
+          sd->tok.hash == LIT_WHILE) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);  // consume while
+        record_walk(sd, 0);  // consume paren
+        stack_inc(sd, SSTACK__GROUP);
+        return 0;
+      }
+
+      // couldn't find suffix "while(", retry
+      // FIXME: error case
+      --sd->curr;
+      return 0;
+    }
+
+    // match anonymous block
+    if (sd->tok.type == TOKEN_BRACE) {
+      debugf("got anon block\n");
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__BLOCK);
+      return 0;
+    }
+
+    // don't start a statement when done anyway
+    if (sd->tok.type == TOKEN_EOF) {
+      return 0;
+    }
+
+    // only care about lit here
+    if (sd->tok.type != TOKEN_LIT) {
+      break;
+    }
+
+    // match label
+    if (is_label(&(sd->tok), sd->curr->context) && sd->next->type == TOKEN_COLON) {
+      sd->tok.type = TOKEN_LABEL;
+      skip_walk(sd, -1);  // consume label
+      skip_walk(sd, 0);  // consume colon
+      return 0;
+    }
+
+    // match label keyword (e.g. "break foo;")
+    if (match_label_keyword(sd) >= 0) {
+      return 0;
+    }
+
+    // match single-only
+    if (sd->tok.hash == LIT_DEBUGGER) {
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+      yield_restrict_asi(sd);
+      return 0;
+    }
+
+    // match restricted statement starters
+    if (sd->tok.hash == LIT_RETURN || sd->tok.hash == LIT_THROW) {
+      int hash = sd->tok.hash;
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+
+      // throw doesn't cause ASI, because it's invalid either way
+      if (hash == LIT_RETURN && yield_restrict_asi(sd)) {
+        return 0;
+      }
+
+      break;  // e.g. "return ..." or "throw ..." starts a statement
+    }
+
+    // module valid cases at top-level
+    if (sd->curr == sd->stack && sd->is_module) {
+
+      // match "import" which starts a sstack special
+      if (sd->tok.hash == LIT_IMPORT) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+
+        // short-circuit for "import 'foo'"
+        if (sd->tok.type == TOKEN_STRING) {
+          sd->tok.mark = MARK_IMPORT;
+          break;  // starts a statement containing at least one string
+        }
+
+        stack_inc(sd, SSTACK__MODULE);
+        return 0;
+      }
+
+      // match "export" which is sort of a no-op, resets to default state
+      if (sd->tok.hash == LIT_EXPORT) {
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);
+
+        if ((sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) ||
+            sd->tok.type == TOKEN_BRACE) {
           stack_inc(sd, SSTACK__MODULE);
           return 0;
         }
 
-        // match "export" which is sort of a no-op, resets to default state
-        if (sd->tok.hash == LIT_EXPORT) {
+        if (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_DEFAULT) {
           sd->tok.type = TOKEN_KEYWORD;
           record_walk(sd, 0);
-
-          if ((sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) ||
-              sd->tok.type == TOKEN_BRACE) {
-            stack_inc(sd, SSTACK__MODULE);
-            return 0;
-          }
-
-          if (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_DEFAULT) {
-            sd->tok.type = TOKEN_KEYWORD;
-            record_walk(sd, 0);
-          }
-
-          // interestingly: "export default function() {}" is valid and a decl
-          // so classic JS rules around decl must have names are ignored
-          // ... "export default if (..)" is invalid, so we don't care if you do wrong things after
-          return 0;
         }
 
+        // interestingly: "export default function() {}" is valid and a decl
+        // so classic JS rules around decl must have names are ignored
+        // ... "export default if (..)" is invalid, so we don't care if you do wrong things after
+        return 0;
       }
 
-      // match "var", "let" and "const"
-      if (match_decl(sd) >= 0) {
-        break;  // matched, now rest is regular statement
-      }
+    }
 
-      // match e.g., "if", "catch"
-      if (sd->tok.hash & _MASK_CONTROL) {
-        uint32_t hash = sd->tok.hash;
+    // match "var", "let" and "const"
+    if (match_decl(sd) >= 0) {
+      break;  // matched, now rest is regular statement
+    }
+
+    // match e.g., "if", "catch"
+    if (sd->tok.hash & _MASK_CONTROL) {
+      uint32_t hash = sd->tok.hash;
+      sd->tok.type = TOKEN_KEYWORD;
+      record_walk(sd, 0);
+
+      // match "for await"
+      if (sd->tok.type == TOKEN_LIT && hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
+        // even outside strict/async mode, this is valid, but an error
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
+      }
 
-        // match "for await"
-        if (sd->tok.type == TOKEN_LIT && hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
-          // even outside strict/async mode, this is valid, but an error
-          sd->tok.type = TOKEN_KEYWORD;
-          record_walk(sd, 0);
-        }
-
-        // match "do"
-        if (hash == LIT_DO) {
-          stack_inc(sd, SSTACK__DO_WHILE);
-          return 0;
-        }
-
-        // if we need a paren, consume without putting into statement
-        if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
-          record_walk(sd, 0);
-          stack_inc(sd, SSTACK__GROUP);
-          sd->curr->special = (hash == LIT_FOR ? SPECIAL__FOR : 0);
-        }
-
+      // match "do"
+      if (hash == LIT_DO) {
+        stack_inc(sd, SSTACK__DO_WHILE);
         return 0;
       }
 
-      // hoisted function or class
-      if (enact_defn(sd)) {
-        return 0;
+      // if we need a paren, consume without putting into statement
+      if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
+        record_walk(sd, 0);
+        stack_inc(sd, SSTACK__GROUP);
+        sd->curr->special = (hash == LIT_FOR ? SPECIAL__FOR : 0);
       }
-    } while (0);  // so block checks can bail out
 
-    // ... or start a regular statement
-    stack_inc(sd, 0);
-    // FIXME: we can't return here, otherwise we leave bad stack
-    // ... if an ASI is inserted, we're fine, otherwise stack is confused - maybe not closing properly
-  }
+      return 0;
+    }
 
-  return simple_consume_expr(sd);
+    // hoisted function or class
+    if (enact_defn(sd)) {
+      return 0;
+    }
+  } while (0);  // so block checks can bail out
+
+  // start a regular statement
+  stack_inc(sd, 0);
+  return 0;
 }
 
 
