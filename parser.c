@@ -359,6 +359,281 @@ static int match_decl(simpledef *sd) {
 }
 
 
+// consumes an expr/assignment-like expr (not always SSTACK__STMT, but often)
+static int simple_consume_expr(simpledef *sd) {
+
+  // match statements
+  switch (sd->tok.type) {
+    case TOKEN_SEMICOLON:
+      if (!sd->curr->stype) {
+        --sd->curr;
+      }
+      record_walk(sd, 0);  // semi goes in block
+      return 0;
+
+    case TOKEN_COMMA:
+      if ((sd->curr - 1)->stype == SSTACK__DICT) {
+        debugf("dict stype=%d\n", sd->curr->stype);
+        --sd->curr;
+        return 0;
+      }
+
+      // relevant in "async () => blah, foo", reset from parent
+      sd->curr->context = (sd->curr - 1)->context;
+      return record_walk(sd, 0);
+
+    case TOKEN_ARROW:
+      if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_SYMBOL)) {
+        // not a valid arrow func, treat as op
+        return record_walk(sd, 0);
+      }
+
+      uint8_t context = (sd->curr->context & CONTEXT__STRICT);
+      if (sd->curr->t2.type == TOKEN_KEYWORD && sd->curr->t2.hash == LIT_ASYNC) {
+        context |= CONTEXT__ASYNC;
+      }
+
+      if (sd->td->next.type == TOKEN_BRACE) {
+        // the sensible arrow function case, with a proper body
+        // e.g. "() => { statements }"
+        record_walk(sd, -1);  // consume =>
+        record_walk(sd, 0);  // consume {
+        stack_inc(sd, SSTACK__BLOCK);
+        sd->curr->special = SPECIAL__INIT;
+      } else {
+        // just change statement's context (e.g. () => async () => () => ...)
+        record_walk(sd, 0);
+      }
+      sd->curr->context = context;
+      return 0;
+
+    case TOKEN_EOF:
+      yield_valid_asi(sd);
+      // don't walk over EOF, caller deals with it
+      return 0;
+
+    case TOKEN_CLOSE: {
+      token *yield = NULL;
+
+      switch (sd->curr->stype) {
+        case SSTACK__GROUP:
+          // closing a group
+          --sd->curr;
+
+          // ... look if next token is =>, and resolve any pending "async"
+          yield = &(sd->curr->t2);
+          if (sd->curr->t1.type == TOKEN_PAREN && yield->type == TOKEN_LIT) {
+            yield->type = (sd->next->type == TOKEN_ARROW ? TOKEN_KEYWORD : TOKEN_SYMBOL);
+            yield->mark = MARK_RESOLVE;
+          } else {
+            yield = NULL;
+          }
+          break;
+
+        case SSTACK__STMT:
+          if ((sd->curr - 1)->stype == SSTACK__DICT) {
+            debugf("closing right-side of dict\n");
+            --sd->curr;
+            return 0;  // let dict handle this
+          }
+          // fall-through
+
+        case SSTACK__BLOCK:
+          // closing a brace, yield ASI (will decrement !stype)
+          yield_valid_asi(sd);
+          --sd->curr;  // pop out of block or dict
+          break;
+
+        default:
+          debugf("can't handle type: %d\n", sd->curr->stype);
+          return ERROR__INTERNAL;
+      }
+
+      // anything but ending up in naked block has value
+      int has_value = (sd->curr->stype != SSTACK__BLOCK);
+      if (sd->curr->t1.type == TOKEN_TERNARY) {
+        // ... but not "? ... :"
+        has_value = 0;
+      } else if (sd->curr->stype == SSTACK__DICT) {
+        // ... but not in the left side of a dict (although it's probably moot)
+        has_value = 0;
+      }
+
+      if (sd->tok.type != TOKEN_EOF) {
+        // noisy for EOF, where we don't care /shrug
+        debugf("popped stack (%ld) in op? has_value=%d (stype=%d)\n", sd->curr - sd->stack, has_value, sd->curr->stype);
+      }
+      skip_walk(sd, has_value);
+
+      if (yield) {
+        sd->cb(sd->arg, yield);
+      }
+      return 0;
+    }
+
+    case TOKEN_BRACE:
+      if (sd->tok_has_value && !sd->curr->stype) {
+        // found an invalid brace, restart as block
+        if (sd->tok.line_no != sd->curr->t1.line_no) {
+          // ... with optional ASI
+          yield_valid_asi(sd);
+        } else {
+          --sd->curr;  // yield_valid_asi does this otherwise
+        }
+        return 0;
+      }
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__DICT);
+      return 0;
+
+    case TOKEN_TERNARY:
+    case TOKEN_ARRAY:
+    case TOKEN_PAREN:
+    case TOKEN_T_BRACE:
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__GROUP);
+      return 0;
+
+    case TOKEN_LIT:
+      if (sd->tok.hash & _MASK_REL_OP) {
+        sd->tok.type = TOKEN_OP;
+        return record_walk(sd, 0);
+      }
+      // nb. we catch "await", "delete", "new" etc below
+      // fall-through
+
+    case TOKEN_STRING:
+      if (sd->curr->t1.type == TOKEN_T_BRACE) {
+        // if we're a string following ${}, this is part a of a template literal and doesn't have
+        // special ASI casing (e.g. '${\n\n}' isn't really causing a newline)
+        return record_walk(sd, 1);
+      }
+      // fall-through
+
+    case TOKEN_REGEXP:
+    case TOKEN_NUMBER:
+      // basic ASI detection inside statement: value on a new line than before, with value
+      if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
+        sd->tok_has_value = 0;
+        yield_valid_asi(sd);
+        return 0;
+      }
+
+      if (sd->tok.type == TOKEN_LIT) {
+        break;  // special lit handling
+      }
+      return record_walk(sd, 1);  // otherwise, just a regular value
+
+    case TOKEN_OP: {
+      int has_value = 0;
+      if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_INCDEC) {
+        // if we had value, but are on new line, insert an ASI: this is a PostfixExpression that
+        // disallows LineTerminator
+        if (sd->tok_has_value && sd->tok.line_no != sd->curr->t1.line_no) {
+          sd->tok_has_value = 0;
+          yield_valid_asi(sd);
+          return 0;
+        }
+
+        // ++ or -- don't change value-ness
+        has_value = sd->tok_has_value;
+      }
+      return record_walk(sd, has_value);
+    }
+
+    case TOKEN_COLON:
+      if (!sd->curr->stype) {
+        --sd->curr;  // this catches cases like "case {}:", pretend that was a statement
+      } else {
+        // always invalid here
+      }
+      return record_walk(sd, 0);
+
+    default:
+      // nb. This is likely because we haven't resolved a TOKEN_SLASH somewhere.
+      debugf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
+      return ERROR__INTERNAL;
+
+  }
+
+  // match function or class as value
+  if (enact_defn(sd)) {
+    return 0;
+  }
+
+  // match valid unary ops
+  if (is_unary(sd->tok.hash, sd->curr->context)) {
+    sd->tok.type = TOKEN_OP;
+    record_walk(sd, 0);
+
+    if (sd->curr->t1.hash == LIT_YIELD) {
+      // yield is a restricted keyword (this does nothing inside group, but is invalid)
+      yield_restrict_asi(sd);
+    }
+    return 0;
+  }
+
+  // match non-async await: this is valid iff it _looks_ like unary op use (e.g. await value).
+  // this is a lookahead for value, rather than what we normally do
+  if (sd->tok.hash == LIT_AWAIT && is_token_valuelike(sd->next)) {
+    // ... to be clear, this is an error, but it IS parsed as a keyword
+    sd->tok.type = TOKEN_KEYWORD;
+    return record_walk(sd, 0);
+  }
+
+  // match curious cases inside "for ("
+  sstack *up = (sd->curr - 1);
+  if (sd->curr->stype == SSTACK__GROUP && sd->curr->special == SPECIAL__FOR) {
+
+    // start of "for (", look for decl (var/let/const) and mark as keyword
+    if (sd->curr->t1.type == TOKEN_EOF) {
+      if (match_decl(sd) >= 0) {
+        return 0;
+      }
+    }
+
+    // find "of" between two value-like things
+    if (sd->tok.type == TOKEN_LIT &&
+        sd->tok.hash == LIT_OF &&
+        is_token_valuelike_keyword(&(sd->curr->t1)) &&
+        is_token_valuelike_keyword(sd->next)) {
+      sd->tok.type = TOKEN_OP;
+      return record_walk(sd, 0);
+    }
+  }
+
+  // aggressive keyword match inside statement
+  if (is_always_keyword(sd->tok.hash, sd->curr->context)) {
+    if (!sd->curr->stype && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
+      // if a keyword on a new line would make an invalid statement, restart with it
+      yield_valid_asi(sd);
+      return 0;
+    }
+    // ... otherwise, it's an invalid keyword
+    sd->tok.type = TOKEN_KEYWORD;
+    return record_walk(sd, 0);
+  }
+
+  // look for async arrow function
+  if (sd->tok.hash == LIT_ASYNC) {
+    if (sd->curr->t1.hash == MISC_DOT) {
+      sd->tok.type = TOKEN_SYMBOL;   // ".async" is always a funtion call
+    } else if (sd->next->type == TOKEN_LIT) {
+      sd->tok.type = TOKEN_KEYWORD;  // "async foo" is always a keyword
+    } else if (sd->next->type == TOKEN_PAREN) {
+      // otherwise, actually ambiguous: leave as TOKEN_LIT
+      return record_walk(sd, 0);
+    }
+  }
+
+  // if nothing else known, treat as symbol
+  if (sd->tok.type == TOKEN_LIT) {
+    sd->tok.type = TOKEN_SYMBOL;
+  }
+  return record_walk(sd, 1);
+}
+
+
 static int simple_consume(simpledef *sd) {
 
   // import state
@@ -374,9 +649,7 @@ static int simple_consume(simpledef *sd) {
       case TOKEN_T_BRACE:
       case TOKEN_PAREN:
       case TOKEN_ARRAY:
-        record_walk(sd, 0);
-        stack_inc(sd, SSTACK__GROUP);
-        return 0;
+        return simple_consume_expr(sd);
 
       case TOKEN_LIT:
         break;
@@ -419,7 +692,7 @@ static int simple_consume(simpledef *sd) {
 
       default:
         if ((sd->curr - 1)->stype != SSTACK__MODULE) {
-          debugf("abandoning module for reasons\n");
+          debugf("abandoning module for reasons: %d\n", sd->tok.type);
           --sd->curr;
           return 0;  // not inside submodule, just give up
         }
@@ -508,8 +781,8 @@ static int simple_consume(simpledef *sd) {
       case TOKEN_T_BRACE:  // incase someone puts `${foo}` on the left
       case TOKEN_COLON:
         record_walk(sd, 0);
-        stack_inc(sd, SSTACK__GROUP);
-        debugf("pushing group for colon\n");
+        stack_inc(sd, SSTACK__STMT);
+        debugf("pushing stmt for colon\n");
         return 0;
 
       case TOKEN_CLOSE:
@@ -604,7 +877,8 @@ static int simple_consume(simpledef *sd) {
       return 0;
     }
 
-    // ... otherwise, this is just the part before dict "{", consume like group value
+    // ... otherwise, this is just the part before dict-like "{", consume expr
+    return simple_consume_expr(sd);
   }
 
   // do...while state
@@ -802,273 +1076,7 @@ static int simple_consume(simpledef *sd) {
     // ... if an ASI is inserted, we're fine, otherwise stack is confused - maybe not closing properly
   }
 
-  // match statements
-  switch (sd->tok.type) {
-    case TOKEN_SEMICOLON:
-      if (!sd->curr->stype) {
-        --sd->curr;
-      }
-      record_walk(sd, 0);  // semi goes in block
-      return 0;
-
-    case TOKEN_COMMA:
-      if ((sd->curr - 1)->stype == SSTACK__DICT) {
-        --sd->curr;
-        return 0;
-      }
-
-      // relevant in "async () => blah, foo", reset from parent
-      sd->curr->context = (sd->curr - 1)->context;
-      return record_walk(sd, 0);
-
-    case TOKEN_ARROW:
-      if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_SYMBOL)) {
-        // not a valid arrow func, treat as op
-        return record_walk(sd, 0);
-      }
-
-      uint8_t context = (sd->curr->context & CONTEXT__STRICT);
-      if (sd->curr->t2.type == TOKEN_KEYWORD && sd->curr->t2.hash == LIT_ASYNC) {
-        context |= CONTEXT__ASYNC;
-      }
-
-      if (sd->td->next.type == TOKEN_BRACE) {
-        // the sensible arrow function case, with a proper body
-        // e.g. "() => { statements }"
-        record_walk(sd, -1);  // consume =>
-        record_walk(sd, 0);  // consume {
-        stack_inc(sd, SSTACK__BLOCK);
-        sd->curr->special = SPECIAL__INIT;
-      } else {
-        // just change statement's context (e.g. () => async () => () => ...)
-        record_walk(sd, 0);
-      }
-      sd->curr->context = context;
-      return 0;
-
-    case TOKEN_EOF:
-      yield_valid_asi(sd);
-      // don't walk over EOF, caller deals with it
-      return 0;
-
-    case TOKEN_CLOSE:
-      // are we on the right side of a dictionary, closing the dict?
-      if (sd->curr->stype == SSTACK__GROUP &&
-          (sd->curr - 1)->t1.type == TOKEN_COLON) {
-        --sd->curr;
-        if (sd->curr->stype != SSTACK__DICT) {
-          return ERROR__INTERNAL;
-        }
-        debugf("closing a dict\n");
-        return 0;  // let dict handle this one (as if it was back on left)
-      }
-
-      token *yield = NULL;
-
-      if (sd->curr->stype == SSTACK__GROUP) {
-        // closing a group
-        --sd->curr;
-
-        // ... look if next token is =>, and resolve any pending "async"
-        yield = &(sd->curr->t2);
-        if (sd->curr->t1.type == TOKEN_PAREN && yield->type == TOKEN_LIT) {
-          yield->type = (sd->next->type == TOKEN_ARROW ? TOKEN_KEYWORD : TOKEN_SYMBOL);
-          yield->mark = MARK_RESOLVE;
-        } else {
-          yield = NULL;
-        }
-
-      } else if (sd->curr->stype == SSTACK__BLOCK || !sd->curr->stype) {
-        // closing a brace, yield ASI (will decrement !stype)
-        yield_valid_asi(sd);
-        --sd->curr;  // pop out of block though
-      } else {
-        // should be normal block or group, no other cases handled
-        debugf("can't handle type: %d\n", sd->curr->stype);
-        return ERROR__INTERNAL;
-      }
-
-      // anything but ending up in naked block has value
-      int has_value = (sd->curr->stype != SSTACK__BLOCK);
-      if (sd->curr->t1.type == TOKEN_TERNARY) {
-        // ... but not "? ... :"
-        has_value = 0;
-      } else if (sd->curr->stype == SSTACK__DICT) {
-        // ... but not in the left side of a dict (although it's probably moot)
-        has_value = 0;
-      }
-
-      if (sd->tok.type != TOKEN_EOF) {
-        // noisy for EOF, where we don't care /shrug
-        debugf("popped stack (%ld) in op? has_value=%d (stype=%d)\n", sd->curr - sd->stack, has_value, sd->curr->stype);
-      }
-      skip_walk(sd, has_value);
-
-      if (yield) {
-        sd->cb(sd->arg, yield);
-      }
-      return 0;
-
-    case TOKEN_BRACE:
-      if (sd->tok_has_value && !sd->curr->stype) {
-        // found an invalid brace, restart as block
-        if (sd->tok.line_no != sd->curr->t1.line_no) {
-          // ... with optional ASI
-          yield_valid_asi(sd);
-        } else {
-          --sd->curr;  // yield_valid_asi does this otherwise
-        }
-        return 0;
-      }
-      record_walk(sd, 0);
-      stack_inc(sd, SSTACK__DICT);
-      return 0;
-
-    case TOKEN_TERNARY:
-    case TOKEN_ARRAY:
-    case TOKEN_PAREN:
-    case TOKEN_T_BRACE:
-      record_walk(sd, 0);
-      stack_inc(sd, SSTACK__GROUP);
-      return 0;
-
-    case TOKEN_LIT:
-      if (sd->tok.hash & _MASK_REL_OP) {
-        sd->tok.type = TOKEN_OP;
-        return record_walk(sd, 0);
-      }
-      // nb. we catch "await", "delete", "new" etc below
-      // fall-through
-
-    case TOKEN_STRING:
-      if (sd->curr->t1.type == TOKEN_T_BRACE) {
-        // if we're a string following ${}, this is part a of a template literal and doesn't have
-        // special ASI casing (e.g. '${\n\n}' isn't really causing a newline)
-        return record_walk(sd, 1);
-      }
-      // fall-through
-
-    case TOKEN_REGEXP:
-    case TOKEN_NUMBER:
-      // basic ASI detection inside statement: value on a new line than before, with value
-      if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
-        sd->tok_has_value = 0;
-        yield_valid_asi(sd);
-        return 0;
-      }
-
-      if (sd->tok.type == TOKEN_LIT) {
-        break;  // special lit handling
-      }
-      return record_walk(sd, 1);  // otherwise, just a regular value
-
-    case TOKEN_OP: {
-      int has_value = 0;
-      if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_INCDEC) {
-        // if we had value, but are on new line, insert an ASI: this is a PostfixExpression that
-        // disallows LineTerminator
-        if (sd->tok_has_value && sd->tok.line_no != sd->curr->t1.line_no) {
-          sd->tok_has_value = 0;
-          yield_valid_asi(sd);
-          return 0;
-        }
-
-        // ++ or -- don't change value-ness
-        has_value = sd->tok_has_value;
-      }
-      return record_walk(sd, has_value);
-    }
-
-    case TOKEN_COLON:
-      if (!sd->curr->stype) {
-        --sd->curr;  // this catches cases like "case {}:", pretend that was a statement
-      } else {
-        // always invalid here
-      }
-      return record_walk(sd, 0);
-
-    default:
-      // nb. This is likely because we haven't resolved a TOKEN_SLASH somewhere.
-      debugf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
-      return ERROR__INTERNAL;
-
-  }
-
-  // match function or class as value
-  if (enact_defn(sd)) {
-    return 0;
-  }
-
-  // match valid unary ops
-  if (is_unary(sd->tok.hash, sd->curr->context)) {
-    sd->tok.type = TOKEN_OP;
-    record_walk(sd, 0);
-
-    if (sd->curr->t1.hash == LIT_YIELD) {
-      // yield is a restricted keyword (this does nothing inside group, but is invalid)
-      yield_restrict_asi(sd);
-    }
-    return 0;
-  }
-
-  // match non-async await: this is valid iff it _looks_ like unary op use (e.g. await value).
-  // this is a lookahead for value, rather than what we normally do
-  if (sd->tok.hash == LIT_AWAIT && is_token_valuelike(sd->next)) {
-    // ... to be clear, this is an error, but it IS parsed as a keyword
-    sd->tok.type = TOKEN_KEYWORD;
-    return record_walk(sd, 0);
-  }
-
-  // match curious cases inside "for ("
-  sstack *up = (sd->curr - 1);
-  if (sd->curr->stype == SSTACK__GROUP && sd->curr->special == SPECIAL__FOR) {
-
-    // start of "for (", look for decl (var/let/const) and mark as keyword
-    if (sd->curr->t1.type == TOKEN_EOF) {
-      if (match_decl(sd) >= 0) {
-        return 0;
-      }
-    }
-
-    // find "of" between two value-like things
-    if (sd->tok.type == TOKEN_LIT &&
-        sd->tok.hash == LIT_OF &&
-        is_token_valuelike_keyword(&(sd->curr->t1)) &&
-        is_token_valuelike_keyword(sd->next)) {
-      sd->tok.type = TOKEN_OP;
-      return record_walk(sd, 0);
-    }
-  }
-
-  // aggressive keyword match inside statement
-  if (is_always_keyword(sd->tok.hash, sd->curr->context)) {
-    if (!sd->curr->stype && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
-      // if a keyword on a new line would make an invalid statement, restart with it
-      yield_valid_asi(sd);
-      return 0;
-    }
-    // ... otherwise, it's an invalid keyword
-    sd->tok.type = TOKEN_KEYWORD;
-    return record_walk(sd, 0);
-  }
-
-  // look for async arrow function
-  if (sd->tok.hash == LIT_ASYNC) {
-    if (sd->curr->t1.hash == MISC_DOT) {
-      sd->tok.type = TOKEN_SYMBOL;   // ".async" is always a funtion call
-    } else if (sd->next->type == TOKEN_LIT) {
-      sd->tok.type = TOKEN_KEYWORD;  // "async foo" is always a keyword
-    } else if (sd->next->type == TOKEN_PAREN) {
-      // otherwise, actually ambiguous: leave as TOKEN_LIT
-      return record_walk(sd, 0);
-    }
-  }
-
-  // if nothing else known, treat as symbol
-  if (sd->tok.type == TOKEN_LIT) {
-    sd->tok.type = TOKEN_SYMBOL;
-  }
-  return record_walk(sd, 1);
+  return simple_consume_expr(sd);
 }
 
 

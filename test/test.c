@@ -438,6 +438,15 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("dict closed on right", "+{x:}",
+    TOKEN_OP,        // +
+    TOKEN_BRACE,     // {
+    TOKEN_SYMBOL,    // x
+    TOKEN_COLON,     // :
+    TOKEN_CLOSE,     // }
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("dict method", "void {[] () {}}",
     TOKEN_OP,        // void
     TOKEN_BRACE,     // {
