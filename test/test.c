@@ -170,7 +170,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_SYMBOL,    // y
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_REGEXP,    // / 100 /
     TOKEN_SEMICOLON, // ASI ;
@@ -182,7 +182,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_SYMBOL,    // y
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_OP,        // /
     TOKEN_NUMBER,    // 100
@@ -227,14 +227,14 @@ int main() {
     TOKEN_KEYWORD,   // class
     TOKEN_SYMBOL,    // Foo
     TOKEN_KEYWORD,   // extends
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_CLOSE,     // }
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_SYMBOL,    // if
     TOKEN_PAREN,     // (
     TOKEN_SYMBOL,    // x
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
     TOKEN_OP,        // /
@@ -258,14 +258,14 @@ int main() {
 
   _test("dict keyword-ness", "void {async * get get() {}}",
     TOKEN_OP,        // void
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_KEYWORD,   // async
     TOKEN_OP,        // *
     TOKEN_KEYWORD,   // get
     TOKEN_SYMBOL,    // get
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
     TOKEN_SEMICOLON, // ASI ;
@@ -276,7 +276,7 @@ int main() {
     TOKEN_OP,        // *
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_OP,        // yield
     TOKEN_REGEXP,    // /123/
     TOKEN_SEMICOLON, // ASI ;
@@ -288,7 +288,7 @@ int main() {
     TOKEN_OP,        // *
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_OP,        // yield
     TOKEN_SEMICOLON, // ASI ;
     TOKEN_REGEXP,    // /123/
@@ -301,7 +301,7 @@ int main() {
     TOKEN_OP,        // *
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_PAREN,     // (
     TOKEN_OP,        // yield
     TOKEN_REGEXP,    // /123/
@@ -392,20 +392,20 @@ int main() {
   );
 
   _test("arrow ASI bug", "{_ => {}}",
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_SYMBOL,    // _
     TOKEN_ARROW,     // =>
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_SEMICOLON, // ASI ;
     TOKEN_CLOSE,     // }
   );
 
   _test("arrow value bug", "{_ => {}/123/g;}",
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_SYMBOL,    // _
     TOKEN_ARROW,     // =>
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_OP,        // /
     TOKEN_NUMBER,    // 123
@@ -417,7 +417,7 @@ int main() {
 
   _test("ASI in case", "switch { default: }",
     TOKEN_KEYWORD,   // switch
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_KEYWORD,   // default
     TOKEN_COLON,     // :
     TOKEN_CLOSE,     // }
@@ -425,14 +425,14 @@ int main() {
 
   _test("dict method after colon", "void {:,get x() {}}",
     TOKEN_OP,        // void
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_COLON,     // :
     TOKEN_COMMA,     // ,
     TOKEN_KEYWORD,   // get
     TOKEN_SYMBOL,    // x
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
     TOKEN_SEMICOLON, // ASI ;
@@ -440,7 +440,7 @@ int main() {
 
   _test("dict closed on right", "+{x:}",
     TOKEN_OP,        // +
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_SYMBOL,    // x
     TOKEN_COLON,     // :
     TOKEN_CLOSE,     // }
@@ -449,12 +449,12 @@ int main() {
 
   _test("dict method", "void {[] () {}}",
     TOKEN_OP,        // void
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_ARRAY,     // [
     TOKEN_CLOSE,     // ]
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
     TOKEN_SEMICOLON, // ASI ;
@@ -464,7 +464,7 @@ int main() {
     TOKEN_KEYWORD,   // import
     TOKEN_SYMBOL,    // foo
     TOKEN_COMMA,     // ,
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_SYMBOL,    // zing
     TOKEN_KEYWORD,   // as
     TOKEN_SYMBOL,    // what
@@ -477,12 +477,12 @@ int main() {
   _test("static", "class X { static x() {} }",
     TOKEN_KEYWORD,   // class
     TOKEN_SYMBOL,    // X
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,     // {
     TOKEN_KEYWORD,   // static
     TOKEN_SYMBOL,    // x
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );
@@ -503,7 +503,7 @@ int main() {
     TOKEN_ARROW,     // =>
     TOKEN_KEYWORD,   // class
     TOKEN_KEYWORD,   // await
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_CLOSE,     // }
     TOKEN_SEMICOLON, // ASI ;
   );
@@ -514,7 +514,7 @@ int main() {
   );
 
   _test("doesn't consume label", "{break}",
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_KEYWORD,   // break
     TOKEN_SEMICOLON, // ASI ;
     TOKEN_CLOSE,     // }
@@ -527,7 +527,7 @@ int main() {
     TOKEN_SYMBOL,    // foo
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
   );
 
@@ -537,7 +537,7 @@ int main() {
     TOKEN_SYMBOL,    // foo
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
   );
 
@@ -565,7 +565,6 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
-  // FIXME: fails on "if" because we think it's an anon block (foo.bar breaks extends)
   _test("class extends op-like", "class X extends foo.bar { if() {} }",
     TOKEN_KEYWORD,   // class
     TOKEN_SYMBOL,    // X
@@ -573,11 +572,11 @@ int main() {
     TOKEN_SYMBOL,    // foo
     TOKEN_OP,        // .
     TOKEN_SYMBOL,    // bar
-    TOKEN_BRACE,     // {
+    TOKEN_DICT,      // {
     TOKEN_SYMBOL,    // if
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );

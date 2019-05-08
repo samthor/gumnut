@@ -400,6 +400,7 @@ static int simple_consume_expr(simpledef *sd) {
         // the sensible arrow function case, with a proper body
         // e.g. "() => { statements }"
         record_walk(sd, -1);  // consume =>
+        sd->tok.type = TOKEN_EXEC;
         record_walk(sd, 0);  // consume {
         stack_inc(sd, SSTACK__BLOCK);
         sd->curr->special = SPECIAL__INIT;
@@ -485,6 +486,7 @@ static int simple_consume_expr(simpledef *sd) {
         }
         return 0;
       }
+      sd->tok.type = TOKEN_DICT;
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__DICT);
       return 0;
@@ -644,6 +646,7 @@ static int simple_consume(simpledef *sd) {
     case SSTACK__MODULE:
       switch (sd->tok.type) {
         case TOKEN_BRACE:
+          sd->tok.type = TOKEN_DICT;
           record_walk(sd, 0);
           stack_inc(sd, SSTACK__MODULE);
           return 0;
@@ -835,6 +838,7 @@ static int simple_consume(simpledef *sd) {
         // terminal state of func, pop and insert normal block w/retained context
         uint8_t context = sd->curr->context;
         --sd->curr;
+        sd->tok.type = TOKEN_EXEC;
         record_walk(sd, 0);
         stack_inc(sd, SSTACK__BLOCK);
         sd->curr->context = context;
@@ -864,6 +868,7 @@ static int simple_consume(simpledef *sd) {
         // and start the dict-like class block
         sd->curr->special = 0;
         --sd->curr;
+        sd->tok.type = TOKEN_DICT;
         record_walk(sd, 0);
         stack_inc(sd, SSTACK__DICT);
         return 0;
@@ -952,6 +957,7 @@ static int simple_consume(simpledef *sd) {
     // match anonymous block
     if (sd->tok.type == TOKEN_BRACE) {
       debugf("got anon block\n");
+      sd->tok.type = TOKEN_EXEC;
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__BLOCK);
       return 0;
