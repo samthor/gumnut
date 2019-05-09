@@ -31,7 +31,7 @@
 typedef struct {
   token t1;
   token t2;
-  uint8_t stype : 4;
+  uint8_t stype : 3;
   uint8_t context : 4;
   uint8_t special : 1;
 } sstack;
@@ -944,7 +944,7 @@ static int simple_consume(simpledef *sd) {
 
       // couldn't find suffix "while(", retry
       // FIXME: error case
-      debugf("do-while state without while()");
+      debugf("do-while state without while()\n");
       --sd->curr;
       return 0;
     }
