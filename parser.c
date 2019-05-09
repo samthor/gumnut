@@ -361,8 +361,6 @@ static int match_decl(simpledef *sd) {
 
 // consumes an expr/assignment-like expr (not always SSTACK__STMT, but often)
 static int simple_consume_expr(simpledef *sd) {
-
-  // match statements
   switch (sd->tok.type) {
     case TOKEN_SEMICOLON:
       if (!sd->curr->stype) {
@@ -445,7 +443,12 @@ static int simple_consume_expr(simpledef *sd) {
         case SSTACK__BLOCK:
           // closing a brace, yield ASI (will decrement !stype)
           yield_valid_asi(sd);
-          --sd->curr;  // pop out of block or dict
+          if (sd->curr == sd->stack) {
+            // ... top-level, invalid CLOSE
+            debugf("invalid close\n");
+          } else {
+            --sd->curr;  // pop out of block or dict
+          }
           break;
 
         default:
@@ -453,16 +456,8 @@ static int simple_consume_expr(simpledef *sd) {
           return ERROR__INTERNAL;
       }
 
-      // anything but ending up in naked block has value
-      int has_value = (sd->curr->stype != SSTACK__BLOCK);
-      if (sd->curr->t1.type == TOKEN_TERNARY) {
-        // ... but not "? ... :"
-        has_value = 0;
-      } else if (sd->curr->stype == SSTACK__DICT) {
-        // ... but not in the left side of a dict (although it's probably moot)
-        has_value = 0;
-      }
-
+      // value if this places us into a statement/group
+      int has_value = (sd->curr->stype == SSTACK__STMT || sd->curr->stype == SSTACK__GROUP);
       if (sd->tok.type != TOKEN_EOF) {
         // noisy for EOF, where we don't care /shrug
         debugf("popped stack (%ld) in op? has_value=%d (stype=%d)\n", sd->curr - sd->stack, has_value, sd->curr->stype);
@@ -640,7 +635,6 @@ static int simple_consume_expr(simpledef *sd) {
 
 
 static int simple_consume(simpledef *sd) {
-
   switch (sd->curr->stype) {
     // import state
     case SSTACK__MODULE:
@@ -889,7 +883,7 @@ static int simple_consume(simpledef *sd) {
     case SSTACK__DO_WHILE:
       if (sd->curr->t1.type) {
         // this is end of valid group, emit ASI if there's not one
-        // occurs regardless of newline, e.g. "do ; while (0) foo;" is valid, ASI after close paren
+        // occurs regardless of newline, e.g. "do;while(0)foo" is valid, ASI after close paren
         if (sd->tok.type == TOKEN_SEMICOLON) {
           skip_walk(sd, 0);
         } else {
@@ -950,6 +944,7 @@ static int simple_consume(simpledef *sd) {
 
       // couldn't find suffix "while(", retry
       // FIXME: error case
+      debugf("do-while state without while()");
       --sd->curr;
       return 0;
     }
@@ -1125,26 +1120,33 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     char *prev = sd.tok.p;
     ret = simple_consume(&sd);
 
+    // regular failure case
     if (ret) {
-      // regular failure case
-    } else if (prev == sd.tok.p) {
-      if (unchanged < 2) {
+      break;
+    }
+
+    // check stack range
+    int depth = sd.curr - sd.stack;
+    if (depth >= __STACK_SIZE - 1 || depth < 0) {
+      debugf("stack exception\n");
+      ret = ERROR__STACK;
+      break;
+    }
+
+    // allow unchanged ptr for some attempts for state machine
+    if (prev == sd.tok.p) {
+      if (unchanged++ < 2) {
         // we give it two chances to change something to let the state machine work
-        unchanged++;
         continue;
       }
       debugf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
       ret = ERROR__INTERNAL;
-    } else if (sd.curr - sd.stack >= (__STACK_SIZE - 1)) {
-      debugf("outgrew stack\n");
-      ret = ERROR__STACK;
-    } else {
-      prev = sd.tok.p;
-      unchanged = 0;
-      continue;
+      break;
     }
 
-    break;
+    // success
+    prev = sd.tok.p;
+    unchanged = 0;
   }
 
   if (ret) {
@@ -1153,13 +1155,13 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     debugf("no EOF but valid response\n");
     return ERROR__STACK;
   } else if (sd.curr != sd.stack) {
-
+#ifdef DEBUG
     debugf("stack is %ld too high\n", sd.curr - sd.stack);
-    while (sd.curr != sd.stack) {
+    while (sd.curr > sd.stack) {
       debugf("%ld: %d (t1=%d/%d line=%d, t2=%d/%d line=%d)\n", sd.curr - sd.stack, sd.curr->stype, sd.curr->t1.type, sd.curr->t1.hash, sd.curr->t1.line_no, sd.curr->t2.type, sd.curr->t2.hash, sd.curr->t2.line_no);
       --sd.curr;
     }
-
+#endif
     return ERROR__STACK;
   }
 

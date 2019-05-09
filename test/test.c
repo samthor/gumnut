@@ -385,6 +385,28 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("do-while stack", "do;while()bar",
+    TOKEN_KEYWORD,   // do
+    TOKEN_SEMICOLON, // ;
+    TOKEN_KEYWORD,   // while
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_SYMBOL,    // bar
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
+  _test("do-while value-like", "do;while()\n/foo/",
+    TOKEN_KEYWORD,   // do
+    TOKEN_SEMICOLON, // ;
+    TOKEN_KEYWORD,   // while
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_REGEXP,    // /foo/
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("strict", "'use strict'; let",
     TOKEN_STRING,    // 'blah'
     TOKEN_SEMICOLON, // ;
