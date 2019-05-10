@@ -790,8 +790,9 @@ static int simple_consume(simpledef *sd) {
           return 0;
 
         case TOKEN_CLOSE:
-          skip_walk(sd, 1);
           --sd->curr;
+          debugf("closing dict, value=%d level=%ld\n", sd->curr->stype == SSTACK__EXPR, sd->curr - sd->stack);
+          skip_walk(sd, (sd->curr->stype == SSTACK__EXPR));
           return 0;
 
         case TOKEN_COMMA:  // valid
