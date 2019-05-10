@@ -603,6 +603,13 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("ternary has no value", "?:/foo/",
+    TOKEN_TERNARY,   // ?
+    TOKEN_CLOSE,     // :
+    TOKEN_REGEXP,    // /foo/
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {

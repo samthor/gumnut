@@ -58,8 +58,10 @@ void render_callback(void *arg, token *out) {
   char c = ' ';
   if (out->type == TOKEN_SEMICOLON && !out->len) {
     c = ';';  // this is an ASI
+  } else if (out->hash) {
+    c = '#';  // has a hash
   }
-  printf("%c%4d.%02d: %.*s (%d)\n", c, out->line_no, out->type, out->len, out->p, out->hash);
+  printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
 #endif
 }
 

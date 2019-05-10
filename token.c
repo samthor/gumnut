@@ -497,6 +497,7 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
 
     case TOKEN_CLOSE:
       if (!d->depth) {
+        eat_next(d);  // consume invalid close but return error
         return ERROR__STACK;
       }
       uint8_t type = d->stack[--d->depth];
