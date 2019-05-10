@@ -60,6 +60,7 @@ int run_testdef(testdef *def) {
   int out = prsr_simple(&td, def->is_module, testdef_step, &active);
   while (active.at + 1 < active.len) {
     token fake;
+    bzero(&fake, sizeof(token));
     fake.type = 0;
     testdef_step(&active, &fake);
   }
