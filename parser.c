@@ -3,8 +3,8 @@
 #include "parser.h"
 #include "tokens/lit.h"
 
-#define SSTACK__STMT     0  // within regular statement (not a hoist)
-#define SSTACK__GROUP    1  // group execution context "()" or "[]"
+#define SSTACK__EXPR     0
+#define SSTACK__CONTROL  1  // control group e.g. "for (...)"
 #define SSTACK__BLOCK    2  // block execution context
 #define SSTACK__DICT     3  // within regular dict "{}"
 #define SSTACK__FUNC     4  // expects upcoming "name () {}"
@@ -12,7 +12,7 @@
 #define SSTACK__DO_WHILE 6  // state machine for "do ... while"
 #define SSTACK__MODULE   7  // state machine for import/export defs
 
-// SSTACK__GROUP
+// SSTACK__CONTROL
 #define SPECIAL__FOR        1
 
 // SSTACK__BLOCK
@@ -76,18 +76,23 @@ static void yield_asi(simpledef *sd) {
 }
 
 
+static inline int is_regular_statement(sstack *curr) {
+  return curr->stype == SSTACK__EXPR && (curr - 1)->stype == SSTACK__BLOCK;
+}
+
+
 // optionally yields ASI for restrict, assumes sd->curr->t1 is the restricted keyword
 static int yield_restrict_asi(simpledef *sd) {
-  sstack *c = sd->curr;
   int line_no = sd->curr->t1.line_no;
 
   if (line_no == sd->tok.line_no && sd->tok.type != TOKEN_CLOSE && sd->tok.type != TOKEN_EOF) {
     return 0;  // not new line, not close token
   }
 
+  sstack *c = sd->curr;
   if (c->stype == SSTACK__BLOCK) {
     // ok
-  } else if (!c->stype) {
+  } else if (is_regular_statement(c)) {
     --sd->curr;
   } else {
     return 0;
@@ -100,7 +105,7 @@ static int yield_restrict_asi(simpledef *sd) {
 
 // there's been an invalid construction in grammar, yield an ASI before us
 static int yield_valid_asi(simpledef *sd) {
-  if (sd->curr->stype == SSTACK__STMT) {
+  if (is_regular_statement(sd->curr)) {
     sstack *prev = sd->curr;
     --sd->curr;
     if (prev->t1.type) {
@@ -363,7 +368,7 @@ static int match_decl(simpledef *sd) {
 static int simple_consume_expr(simpledef *sd) {
   switch (sd->tok.type) {
     case TOKEN_SEMICOLON:
-      if (!sd->curr->stype) {
+      if (is_regular_statement(sd->curr)) {
         --sd->curr;
       }
       record_walk(sd, 0);  // semi goes in block
@@ -371,7 +376,7 @@ static int simple_consume_expr(simpledef *sd) {
 
     case TOKEN_COMMA:
       if ((sd->curr - 1)->stype == SSTACK__DICT) {
-        if (sd->curr->stype != SSTACK__STMT) {
+        if (sd->curr->stype != SSTACK__EXPR) {
           debugf("unhandled stype within dict: %d\n", sd->curr->stype);
           return ERROR__INTERNAL;
         }
@@ -415,22 +420,29 @@ static int simple_consume_expr(simpledef *sd) {
       return 0;
 
     case TOKEN_CLOSE:
-      switch (sd->curr->stype) {
-        case SSTACK__STMT:
-          if ((sd->curr - 1)->stype == SSTACK__DICT) {
-            debugf("closing right-side of dict\n");
-            --sd->curr;
-          } else {
-            yield_valid_asi(sd);  // might close if we're in block (pops !stype)
-          }
-          return 0;  // let parent handle this
+      if (sd->curr->stype != SSTACK__EXPR) {
+        debugf("can't close non-expr: %d\n", sd->curr->stype);
+        return ERROR__INTERNAL;
+      }
 
-        case SSTACK__GROUP:
+      sstack *up = sd->curr - 1;
+      switch ((sd->curr - 1)->stype) {
+        case SSTACK__DICT:
+          --sd->curr;  // end statement inside dict
+          return 0;    // ... let dict handle close
+
+        case SSTACK__BLOCK:
+          yield_valid_asi(sd);  // might close if we're in block (pops !stype)
+          return 0;
+
+        case SSTACK__EXPR:
           break;
 
         default:
-          debugf("can't handle type: %d\n", sd->curr->stype);
-          return ERROR__INTERNAL;
+          // this would be hoisted class/func or control group, not a value after
+          skip_walk(sd, 0);
+          --sd->curr;
+          return 0;
       }
 
       // closing a group
@@ -448,17 +460,13 @@ static int simple_consume_expr(simpledef *sd) {
         }
       }
 
-      // value if this places us into a statement/group
-      int has_value = (sd->curr->stype == SSTACK__STMT || sd->curr->stype == SSTACK__GROUP);
-      if (sd->curr->t1.type == TOKEN_TERNARY) {
-        // ... except if this was a ternary group
-        has_value = 0;
-      }
+      // value if this places us into a statement/group (but not if this was ternary)
+      int has_value = (sd->curr->stype == SSTACK__EXPR && sd->curr->t1.type != TOKEN_TERNARY);
       skip_walk(sd, has_value);
       return 0;
 
     case TOKEN_BRACE:
-      if (sd->tok_has_value && !sd->curr->stype) {
+      if (sd->tok_has_value && is_regular_statement(sd->curr)) {
         // found an invalid brace, restart as block
         if (sd->tok.line_no != sd->curr->t1.line_no) {
           // ... with optional ASI
@@ -478,7 +486,7 @@ static int simple_consume_expr(simpledef *sd) {
     case TOKEN_PAREN:
     case TOKEN_T_BRACE:
       record_walk(sd, 0);
-      stack_inc(sd, SSTACK__GROUP);
+      stack_inc(sd, SSTACK__EXPR);
       return 0;
 
     case TOKEN_LIT:
@@ -500,7 +508,7 @@ static int simple_consume_expr(simpledef *sd) {
     case TOKEN_REGEXP:
     case TOKEN_NUMBER:
       // basic ASI detection inside statement: value on a new line than before, with value
-      if (!sd->curr->stype && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
+      if (is_regular_statement(sd->curr) && sd->tok.line_no != sd->curr->t1.line_no && sd->tok_has_value) {
         sd->tok_has_value = 0;
         yield_valid_asi(sd);
         return 0;
@@ -529,7 +537,7 @@ static int simple_consume_expr(simpledef *sd) {
     }
 
     case TOKEN_COLON:
-      if (!sd->curr->stype) {
+      if (is_regular_statement(sd->curr)) {
         --sd->curr;  // this catches cases like "case {}:", pretend that was a statement
       } else {
         // always invalid here
@@ -570,7 +578,7 @@ static int simple_consume_expr(simpledef *sd) {
 
   // match curious cases inside "for ("
   sstack *up = (sd->curr - 1);
-  if (sd->curr->stype == SSTACK__GROUP && sd->curr->special == SPECIAL__FOR) {
+  if (up->stype == SSTACK__CONTROL && up->special == SPECIAL__FOR && sd->curr->stype == SSTACK__EXPR) {
 
     // start of "for (", look for decl (var/let/const) and mark as keyword
     if (sd->curr->t1.type == TOKEN_EOF) {
@@ -591,7 +599,7 @@ static int simple_consume_expr(simpledef *sd) {
 
   // aggressive keyword match inside statement
   if (is_always_keyword(sd->tok.hash, sd->curr->context)) {
-    if (!sd->curr->stype && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
+    if (is_regular_statement(sd->curr) && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
       // if a keyword on a new line would make an invalid statement, restart with it
       yield_valid_asi(sd);
       return 0;
@@ -767,7 +775,7 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_T_BRACE:  // incase someone puts `${foo}` on the left
         case TOKEN_COLON:
           record_walk(sd, 0);
-          stack_inc(sd, SSTACK__STMT);
+          stack_inc(sd, SSTACK__EXPR);
           debugf("pushing stmt for colon\n");
           return 0;
 
@@ -789,7 +797,7 @@ static int simple_consume(simpledef *sd) {
       if (sd->tok.type == TOKEN_ARRAY) {
         // allow "function ['name']"
         record_walk(sd, 0);
-        stack_inc(sd, SSTACK__GROUP);
+        stack_inc(sd, SSTACK__EXPR);
 
         // ... but "{async [await 'name']..." doesn't take await from our context
         sd->curr->context = (sd->curr - 2)->context;
@@ -811,7 +819,7 @@ static int simple_consume(simpledef *sd) {
       if (sd->tok.type == TOKEN_PAREN) {
         // allow "function ()"
         record_walk(sd, 0);
-        stack_inc(sd, SSTACK__GROUP);
+        stack_inc(sd, SSTACK__EXPR);
         return 0;
       }
 
@@ -884,8 +892,16 @@ static int simple_consume(simpledef *sd) {
 
       return 0;
 
-    case SSTACK__GROUP:
-    case SSTACK__STMT:
+    // control group state
+    case SSTACK__CONTROL:
+      // FIXME: does nothing right now _except_ hide group from parent block
+      if (sd->curr->t1.type == TOKEN_PAREN) {
+        // previous "(", was this ...
+      }
+      --sd->curr;
+      return 0;
+
+    case SSTACK__EXPR:
       return simple_consume_expr(sd);
 
     default:
@@ -923,7 +939,7 @@ static int simple_consume(simpledef *sd) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);  // consume while
       record_walk(sd, 0);  // consume paren
-      stack_inc(sd, SSTACK__GROUP);
+      stack_inc(sd, SSTACK__EXPR);
       return 0;
     }
 
@@ -950,8 +966,7 @@ static int simple_consume(simpledef *sd) {
         --sd->curr;  // pop out of block or dict
       }
       // "function {}" that ends in statement/group has value
-      int has_value = (sd->curr->stype == SSTACK__STMT || sd->curr->stype == SSTACK__GROUP);
-      skip_walk(sd, has_value);
+      skip_walk(sd, sd->curr->stype == SSTACK__EXPR);
       return 0;
 
     case TOKEN_EOF:
@@ -1065,11 +1080,15 @@ static int simple_consume(simpledef *sd) {
       return 0;
     }
 
+    // always start control group otherwise
+    // FIXME: put before tokens above
+    stack_inc(sd, SSTACK__CONTROL);
+
     // if we need a paren, consume without putting into statement
     if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
-      record_walk(sd, 0);
-      stack_inc(sd, SSTACK__GROUP);
       sd->curr->special = (hash == LIT_FOR ? SPECIAL__FOR : 0);
+      record_walk(sd, 0);
+      stack_inc(sd, SSTACK__EXPR);
     }
 
     return 0;
@@ -1082,7 +1101,7 @@ static int simple_consume(simpledef *sd) {
 
 block_bail:
   // start a regular statement
-  stack_inc(sd, SSTACK__STMT);
+  stack_inc(sd, SSTACK__EXPR);
   return 0;
 }
 
