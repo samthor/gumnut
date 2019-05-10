@@ -176,6 +176,14 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("class decl regexp", "class {} / 100 /",
+    TOKEN_KEYWORD,   // function
+    TOKEN_DICT,      // {
+    TOKEN_CLOSE,     // }
+    TOKEN_REGEXP,    // / 100 /
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("function statement", "(function(y) {} / 100 /)",
     TOKEN_PAREN,     // (
     TOKEN_KEYWORD,   // function
