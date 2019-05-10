@@ -243,6 +243,18 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("dict string name", "+{'abc'() {}}",
+    TOKEN_OP,        // +
+    TOKEN_DICT,      // {
+    TOKEN_STRING,    // 'abc'
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_EXEC,      // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("ASI for PostfixExpression", "a\n++\nb",
     TOKEN_SYMBOL,    // a
     TOKEN_SEMICOLON, // ASI ;

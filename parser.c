@@ -12,11 +12,14 @@
 #define SSTACK__DO_WHILE 6  // state machine for "do ... while"
 #define SSTACK__MODULE   7  // state machine for import/export defs
 
+// SSTACK__EXPR
+#define SPECIAL__GROUP   1  // was started with a real (), [] etc
+
 // SSTACK__CONTROL
-#define SPECIAL__FOR        1
+#define SPECIAL__FOR     1  // TODO: remove in favor of SSTACK__CONTROL token check
 
 // SSTACK__BLOCK
-#define SPECIAL__INIT       1
+#define SPECIAL__INIT    1  // is this the first statement in a block?
 
 
 
@@ -425,12 +428,7 @@ static int simple_consume_expr(simpledef *sd) {
         return ERROR__INTERNAL;
       }
 
-      sstack *up = sd->curr - 1;
       switch ((sd->curr - 1)->stype) {
-        case SSTACK__DICT:
-          --sd->curr;  // end statement inside dict
-          return 0;    // ... let dict handle close
-
         case SSTACK__BLOCK:
           yield_valid_asi(sd);  // might close if we're in block (pops !stype)
           return 0;
@@ -440,7 +438,11 @@ static int simple_consume_expr(simpledef *sd) {
 
         default:
           // this would be hoisted class/func or control group, not a value after
-          skip_walk(sd, 0);
+          if (sd->curr->special) {
+            skip_walk(sd, 0);
+          } else {
+            // ... got a close for a statement which doesn't expect one, let parent handle
+          }
           --sd->curr;
           return 0;
       }
@@ -487,6 +489,7 @@ static int simple_consume_expr(simpledef *sd) {
     case TOKEN_T_BRACE:
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__EXPR);
+      sd->curr->special = SPECIAL__GROUP;
       return 0;
 
     case TOKEN_LIT:
@@ -644,7 +647,9 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_T_BRACE:
         case TOKEN_PAREN:
         case TOKEN_ARRAY:
-          return simple_consume_expr(sd);
+          stack_inc(sd, SSTACK__EXPR);
+          sd->curr->special = SPECIAL__GROUP;
+          return 0;
 
         case TOKEN_LIT:
           break;
@@ -763,6 +768,12 @@ static int simple_consume(simpledef *sd) {
       // terminal state of left side
       switch (sd->tok.type) {
         // ... anything that looks like it could be a function, that way (and let stack fail)
+        case TOKEN_STRING:
+          if (sd->tok.p[0] == '`' || sd->next->type != TOKEN_PAREN) {
+            break;  // don't allow anything but " 'foo' ( "
+          }
+          // fall-through
+
         case TOKEN_LIT:
         case TOKEN_PAREN:
         case TOKEN_BRACE:
@@ -772,7 +783,6 @@ static int simple_consume(simpledef *sd) {
           sd->curr->context = context;
           return 0;
 
-        case TOKEN_T_BRACE:  // incase someone puts `${foo}` on the left
         case TOKEN_COLON:
           record_walk(sd, 0);
           stack_inc(sd, SSTACK__EXPR);
@@ -785,54 +795,67 @@ static int simple_consume(simpledef *sd) {
           return 0;
 
         case TOKEN_COMMA:  // valid
-        default:           // invalid, but whatever
-          break;
+          return record_walk(sd, 0);
       }
 
-      return record_walk(sd, 0);
+      // if this a single literal, it's valid: e.g. {'abc':def}
+      // ... but we pretend it's an expression anyway (and : closes it)
+      debugf("starting expr inside left dict\n");
+      stack_inc(sd, SSTACK__EXPR);
+      return 0;
     }
 
     // function state, allow () or {}
     case SSTACK__FUNC:
-      if (sd->tok.type == TOKEN_ARRAY) {
-        // allow "function ['name']"
-        record_walk(sd, 0);
-        stack_inc(sd, SSTACK__EXPR);
 
-        // ... but "{async [await 'name']..." doesn't take await from our context
-        sd->curr->context = (sd->curr - 2)->context;
-        return 0;
-      }
+      switch (sd->tok.type) {
+        case TOKEN_ARRAY:
+          // allow "function ['name']" (for dict)
+          record_walk(sd, 0);
+          stack_inc(sd, SSTACK__EXPR);
+          sd->curr->special = SPECIAL__GROUP;
 
-      if (sd->tok.type == TOKEN_LIT) {
-        sstack *p = (sd->curr - 1);  // use context from parent, "async function await() {}" is valid :(
+          // ... but "{async [await 'name']..." doesn't take await from our context
+          sd->curr->context = (sd->curr - 2)->context;
+          return 0;
 
-        // we're only maybe a keyword in non-dict modes
-        if (p->stype != SSTACK__DICT && !is_valid_name(sd->tok.hash, p->context)) {
-          sd->tok.type = TOKEN_KEYWORD;
-        } else {
-          sd->tok.type = TOKEN_SYMBOL;
+        case TOKEN_STRING:
+          // allow "function 'foo'" (for dict)
+          if (sd->tok.p[0] == '`') {
+            break;  // don't allow template literals
+          }
+          return record_walk(sd, 0);
+
+        case TOKEN_LIT: {
+          sstack *p = (sd->curr - 1);  // use context from parent, "async function await() {}" is valid :(
+
+          // we're only maybe a keyword in non-dict modes
+          if (p->stype != SSTACK__DICT && !is_valid_name(sd->tok.hash, p->context)) {
+            sd->tok.type = TOKEN_KEYWORD;
+          } else {
+            sd->tok.type = TOKEN_SYMBOL;
+          }
+          return record_walk(sd, 0);
         }
-        return record_walk(sd, 0);
-      }
 
-      if (sd->tok.type == TOKEN_PAREN) {
-        // allow "function ()"
-        record_walk(sd, 0);
-        stack_inc(sd, SSTACK__EXPR);
-        return 0;
-      }
+        case TOKEN_PAREN:
+          // allow "function ()"
+          record_walk(sd, 0);
+          stack_inc(sd, SSTACK__EXPR);
+          sd->curr->special = SPECIAL__GROUP;
+          return 0;
 
-      if (sd->tok.type == TOKEN_BRACE) {
-        // terminal state of func, pop and insert normal block w/retained context
-        uint8_t context = sd->curr->context;
-        --sd->curr;
-        sd->tok.type = TOKEN_EXEC;
-        record_walk(sd, 0);
-        stack_inc(sd, SSTACK__BLOCK);
-        sd->curr->context = context;
-        sd->curr->special = SPECIAL__INIT;
-        return 0;
+        case TOKEN_BRACE: {
+          // terminal state of func, pop and insert normal block w/retained context
+          uint8_t context = sd->curr->context;
+          --sd->curr;
+          sd->tok.type = TOKEN_EXEC;
+          record_walk(sd, 0);
+          stack_inc(sd, SSTACK__BLOCK);
+          sd->curr->context = context;
+          sd->curr->special = SPECIAL__INIT;
+          return 0;
+        }
       }
 
       // invalid, abandon function def
@@ -940,6 +963,7 @@ static int simple_consume(simpledef *sd) {
       record_walk(sd, 0);  // consume while
       record_walk(sd, 0);  // consume paren
       stack_inc(sd, SSTACK__EXPR);
+      sd->curr->special = SPECIAL__GROUP;
       return 0;
     }
 
@@ -1089,6 +1113,7 @@ static int simple_consume(simpledef *sd) {
       sd->curr->special = (hash == LIT_FOR ? SPECIAL__FOR : 0);
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__EXPR);
+      sd->curr->special = SPECIAL__GROUP;
     }
 
     return 0;
