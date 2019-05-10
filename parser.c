@@ -84,7 +84,7 @@ static void yield_asi(simpledef *sd) {
 static int yield_restrict_asi(simpledef *sd) {
   int line_no = sd->curr->t1.line_no;
 
-  if (line_no == sd->tok.line_no && sd->tok.type != TOKEN_CLOSE && sd->tok.type != TOKEN_EOF) {
+  if (line_no == sd->tok.line_no && sd->tok.type != TOKEN_CLOSE) {
     return 0;  // not new line, not close token
   }
 
@@ -348,7 +348,7 @@ static int simple_consume_expr(simpledef *sd) {
 #ifdef DEBUG
         if (sd->curr->special) {
           debugf("block expr must not be special\n");
-          return ERROR__INTERNAL;
+          return ERROR__ASSERT;
         }
 #endif
         --sd->curr;
@@ -391,16 +391,6 @@ static int simple_consume_expr(simpledef *sd) {
       }
       sd->curr->context = context;
       return 0;
-
-    case TOKEN_EOF: {
-      // don't walk over EOF, caller deals with it
-      int yield = (sd->curr->t1.type);
-      --sd->curr;
-      if (yield) {
-        yield_asi(sd);
-      }
-      return 0;
-    }
 
     case TOKEN_CLOSE: {
       sstack *prev = sd->curr;
@@ -532,7 +522,7 @@ static int simple_consume_expr(simpledef *sd) {
       if ((sd->curr - 1)->stype == SSTACK__BLOCK) {
         --sd->curr;  // this catches cases like "case {}:", pretend that was an expr on its own
       } else {
-        // does nothing here
+        // does nothing here (invalid)
       }
       return record_walk(sd, 0);
 
@@ -573,7 +563,7 @@ static int simple_consume_expr(simpledef *sd) {
   if (up->stype == SSTACK__CONTROL && up->special == SPECIAL__FOR && sd->curr->stype == SSTACK__EXPR) {
 
     // start of "for (", look for decl (var/let/const) and mark as keyword
-    if (sd->curr->t1.type == TOKEN_EOF) {
+    if (!sd->curr->t1.type) {
       if (match_decl(sd) >= 0) {
         return 0;
       }
@@ -851,25 +841,22 @@ static int simple_consume(simpledef *sd) {
       }
 
       // invalid, abandon function def
+      debugf("invalid function construct\n");
       --sd->curr;
       return 0;
 
-    // class state, just insert group (for extends) or bail
+    // class state, just insert group (for extends) or dict-like
     case SSTACK__CLASS: {
-      int zero = (sd->curr->t1.type == TOKEN_EOF);
-      if (zero) {
-        // zero state
-        if (sd->tok.hash == LIT_EXTENDS) {
-          // ... check for extends, valid
-          sd->tok.type = TOKEN_KEYWORD;
-          record_walk(sd, 0);  // consume "extends" keyword, treat as non-value
-          return 0;
-        }
+      if (!sd->curr->t1.type && sd->tok.hash == LIT_EXTENDS) {
+        // ... check for extends, valid
+        sd->tok.type = TOKEN_KEYWORD;
+        record_walk(sd, 0);  // consume "extends" keyword, treat as non-value
+        stack_inc(sd, SSTACK__EXPR);
+        return 0;
       }
 
-      if ((sd->tok_has_value || zero) && sd->tok.type == TOKEN_BRACE) {
-        // this was read after a value (otherwise invalid, would be treated as anon block), pop us
-        // and start the dict-like class block
+      if (sd->tok.type == TOKEN_BRACE) {
+        // start dict-like block (pop SSTACK__CLASS)
         sd->curr->special = 0;
         --sd->curr;
         sd->tok.type = TOKEN_DICT;
@@ -878,15 +865,9 @@ static int simple_consume(simpledef *sd) {
         return 0;
       }
 
-      // check for invalid at zero state, or unexpected tokens
-      if (zero || sd->tok.type == TOKEN_CLOSE || sd->tok.type == TOKEN_COMMA || sd->tok.type == TOKEN_SEMICOLON) {
-        debugf("stopping invalid extends construct\n");
-        --sd->curr;
-        return 0;
-      }
-
-      // ... otherwise, this is just the part before dict-like "{", consume expr
-      stack_inc(sd, SSTACK__EXPR);
+      // invalid, abandon class def
+      debugf("invalid class construct\n");
+      --sd->curr;
       return 0;
     }
 
@@ -984,9 +965,6 @@ static int simple_consume(simpledef *sd) {
       }
       // "function {}" that ends in statement/group has value
       skip_walk(sd, sd->curr->stype == SSTACK__EXPR);
-      return 0;
-
-    case TOKEN_EOF:
       return 0;
 
     case TOKEN_LIT:
@@ -1143,17 +1121,9 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
 
   int unchanged = 0;
   int ret = 0;
-  for (;;) {
-    if (!sd.tok.type) {
-      ret = simple_consume(&sd);
-      skip_walk(&sd, 0);
-      break;
-    }
-
+  while (sd.tok.type) {
     char *prev = sd.tok.p;
     ret = simple_consume(&sd);
-
-    // regular failure case
     if (ret) {
       break;
     }
@@ -1161,7 +1131,7 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     // check stack range
     int depth = sd.curr - sd.stack;
     if (depth >= __STACK_SIZE - 1 || depth < 0) {
-      debugf("stack exception\n");
+      debugf("stack exception, depth=%d\n", depth);
       ret = ERROR__STACK;
       break;
     }
@@ -1184,10 +1154,24 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
 
   if (ret) {
     return ret;
-  } else if (sd.tok.type != TOKEN_EOF) {
-    debugf("no EOF but valid response\n");
-    return ERROR__STACK;
-  } else if (sd.curr != sd.stack) {
+  }
+
+  // consume fake TOKEN_CLOSE in a few cases for ASI (do-while needs trailer to ASI)
+  int stype = sd.curr->stype;
+  if (stype == SSTACK__DO_WHILE ||
+      (stype == SSTACK__EXPR && (sd.curr - 1)->stype == SSTACK__BLOCK)) {
+    char *held = sd.tok.p;
+    sd.tok.type = TOKEN_CLOSE;
+    sd.tok.p = 0;
+    simple_consume(&sd);
+    sd.tok.p = held;
+  }
+
+  // emit 'real' EOF for caller
+  sd.tok.type = TOKEN_EOF;
+  skip_walk(&sd, 0);
+
+  if (sd.curr != sd.stack) {
 #ifdef DEBUG
     debugf("stack is %ld too high\n", sd.curr - sd.stack);
     while (sd.curr > sd.stack) {

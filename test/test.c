@@ -330,7 +330,7 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
-  _test("for() matches let keyword", "for(let x;let;)",
+  _test("for() matches let keyword", "for(let x;let;);",
     TOKEN_KEYWORD,   // for
     TOKEN_PAREN,     // (
     TOKEN_KEYWORD,   // let
@@ -339,18 +339,20 @@ int main() {
     TOKEN_SYMBOL,    // let
     TOKEN_SEMICOLON, // ;
     TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ;
   );
 
-  _test("for await() matches keyword", "for await(let x)",
+  _test("for await() matches keyword", "for await(let x);",
     TOKEN_KEYWORD,   // for
     TOKEN_KEYWORD,   // await
     TOKEN_PAREN,     // (
     TOKEN_KEYWORD,   // let
     TOKEN_SYMBOL,    // x
     TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ;
   );
 
-  _test("for(blah of foo) matches keyword", "for(const x of bar)",
+  _test("for(blah of foo) matches keyword", "for(const x of bar);",
     TOKEN_KEYWORD,   // for
     TOKEN_PAREN,     // (
     TOKEN_KEYWORD,   // const
@@ -358,6 +360,7 @@ int main() {
     TOKEN_OP,        // of
     TOKEN_SYMBOL,    // bar
     TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ;
   );
 
   _test("strict mode await", "'use strict'; await x;",
@@ -375,7 +378,8 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
-  _test("do-while while sanity check", "do while(2) x\nwhile(1) while(0)",
+  // nb. last semi is needed, attached to "while(0)" on its own
+  _test("do-while while sanity check", "do while(2) x\nwhile(1) while(0);",
     TOKEN_KEYWORD,   // do
     TOKEN_KEYWORD,   // while
     TOKEN_PAREN,     // (
@@ -392,6 +396,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_NUMBER,    // 0
     TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ;
   );
 
   _test("do-while ASIs", "do foo\nwhile(0)",
