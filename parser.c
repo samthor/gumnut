@@ -1102,7 +1102,29 @@ block_bail:
 }
 
 
+#ifdef DEBUG
+void render_token(token *out, char *start) {
+  if (!out->type) {
+    return;
+  }
+  char c = ' ';
+  if (out->type == TOKEN_SEMICOLON && !out->len) {
+    c = ';';  // this is an ASI
+  } else if (out->hash) {
+    c = '#';  // has a hash
+  }
+  int at = 0;
+  if (out->p) {
+    at = out->p - start;
+  }
+  printf("%c%4d.%02d: %.*s [%d]\n", c, out->line_no, out->type, out->len, out->p, at);
+}
+#endif
+
 int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
+#ifdef DEBUG
+  char *start = td->buf;
+#endif
   simpledef sd;
   bzero(&sd, sizeof(simpledef));
   sd.curr = sd.stack;
@@ -1174,10 +1196,12 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
   if (sd.curr != sd.stack) {
 #ifdef DEBUG
     debugf("stack is %ld too high\n", sd.curr - sd.stack);
-    while (sd.curr > sd.stack) {
-      debugf("%ld: %d (t1=%d/%d line=%d, t2=%d/%d line=%d)\n", sd.curr - sd.stack, sd.curr->stype, sd.curr->t1.type, sd.curr->t1.hash, sd.curr->t1.line_no, sd.curr->t2.type, sd.curr->t2.hash, sd.curr->t2.line_no);
-      --sd.curr;
-    }
+    sstack *t = sd.stack;
+    do {
+      debugf("stack=%ld stype=%d\n", t - sd.stack, t->stype);
+      render_token(&(t->t2), start);
+      render_token(&(t->t1), start);
+    } while (t != sd.curr && ++t);
 #endif
     return ERROR__STACK;
   }
