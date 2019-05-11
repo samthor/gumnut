@@ -292,18 +292,24 @@ static int is_use_strict(token *t) {
 // used directly only for "let" and "await" (at top-level), so doesn't include e.g. paren or array,
 // as these would be indexing or calling
 static int is_token_valuelike(token *t) {
-  if (t->type == TOKEN_LIT) {
-    // _any_ lit is fine (even keywords, even if invalid) except "in" and "instanceof"
-    return !(t->hash & _MASK_REL_OP);
+  switch (t->type) {
+    case TOKEN_LIT:
+      // _any_ lit is fine (even keywords, even if invalid) except "in" and "instanceof"
+      return !(t->hash & _MASK_REL_OP);
+
+    case TOKEN_SYMBOL:
+    case TOKEN_NUMBER:
+    case TOKEN_STRING:
+    case TOKEN_BRACE:
+      return 1;
+
+    case TOKEN_OP:
+      // https://www.ecma-international.org/ecma-262/9.0/index.html#prod-UnaryExpression
+      // FIXME: in Chrome's top-level await support (e.g. in DevTools), this also includes + and -
+      return t->hash == MISC_NOT || t->hash == MISC_BITNOT;
   }
-  return t->type == TOKEN_SYMBOL ||
-      t->type == TOKEN_NUMBER ||
-      t->type == TOKEN_STRING ||
-      t->type == TOKEN_BRACE ||
-  // https://www.ecma-international.org/ecma-262/9.0/index.html#prod-UnaryExpression
-  // FIXME: in Chrome's top-level await support (e.g. in DevTools), this also includes + and -
-      t->hash == MISC_NOT ||
-      t->hash == MISC_BITNOT;
+
+  return 0;
 }
 
 
