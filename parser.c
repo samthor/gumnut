@@ -15,9 +15,6 @@
 // SSTACK__EXPR
 #define SPECIAL__GROUP   1  // was started with a real (), [] etc
 
-// SSTACK__CONTROL
-#define SPECIAL__FOR     1  // TODO: remove in favor of SSTACK__CONTROL token check
-
 // SSTACK__BLOCK
 #define SPECIAL__INIT    1  // is this the first statement in a block?
 
@@ -67,13 +64,13 @@ static sstack *stack_inc(simpledef *sd, uint8_t stype) {
 
 
 // stores a virtual token in the stream, and yields it before the current token
-static void yield_asi(simpledef *sd) {
+static void yield_virt(simpledef *sd, int type) {
   token *t = &(sd->curr->t1);
   sd->curr->t2 = *t;  // move t1 => t2
   bzero(t, sizeof(token));
 
   t->line_no = sd->prev_line_no;
-  t->type = TOKEN_SEMICOLON;
+  t->type = type;
 
   sd->cb(sd->arg, t);
 }
@@ -97,7 +94,7 @@ static int yield_restrict_asi(simpledef *sd) {
     return 0;
   }
 
-  yield_asi(sd);
+  yield_virt(sd, TOKEN_SEMICOLON);
   return 1;
 }
 
@@ -409,7 +406,7 @@ static int simple_consume_expr(simpledef *sd) {
         case SSTACK__BLOCK: {
           // parent is block, maybe yield ASI but pop either way
           if (prev->t1.type) {
-            yield_asi(sd);
+            yield_virt(sd, TOKEN_SEMICOLON);
           }
           return 0;
         }
@@ -454,7 +451,7 @@ static int simple_consume_expr(simpledef *sd) {
             (sd->curr - 1)->stype == SSTACK__BLOCK);
         --sd->curr;
         if (yield) {
-          yield_asi(sd);
+          yield_virt(sd, TOKEN_SEMICOLON);
         }
         return 0;
       }
@@ -497,7 +494,7 @@ static int simple_consume_expr(simpledef *sd) {
           sd->curr->t1.type) {
         sd->tok_has_value = 0;
         --sd->curr;
-        yield_asi(sd);
+        yield_virt(sd, TOKEN_SEMICOLON);
         return 0;
       }
 
@@ -516,7 +513,7 @@ static int simple_consume_expr(simpledef *sd) {
           int yield = (sd->curr->t1.type);
           --sd->curr;
           if (yield) {
-            yield_asi(sd);
+            yield_virt(sd, TOKEN_SEMICOLON);
           }
           return 0;
         }
@@ -567,9 +564,9 @@ static int simple_consume_expr(simpledef *sd) {
     return record_walk(sd, 0);
   }
 
-  // match curious cases inside "for ("
+  // match curious cases inside "for (" (t1=paren, t2=for)
   sstack *up = (sd->curr - 1);
-  if (up->stype == SSTACK__CONTROL && up->special == SPECIAL__FOR && sd->curr->stype == SSTACK__EXPR) {
+  if (up->stype == SSTACK__CONTROL && up->t2.hash == LIT_FOR && sd->curr->stype == SSTACK__EXPR) {
 
     // start of "for (", look for decl (var/let/const) and mark as keyword
     if (!sd->curr->t1.type) {
@@ -593,7 +590,7 @@ static int simple_consume_expr(simpledef *sd) {
     if (up->stype == SSTACK__BLOCK && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
       // if a keyword on a new line would make an invalid statement, restart with it
       --sd->curr;
-      yield_asi(sd);
+      yield_virt(sd, TOKEN_SEMICOLON);
       return 0;
     }
     // ... otherwise, it's an invalid keyword
@@ -669,7 +666,7 @@ static int simple_consume(simpledef *sd) {
             }
           } else if (sd->tok.type != TOKEN_SEMICOLON && sd->tok.line_no != line_no) {
             // ... or just abandon, generating semi if needed (valid in export case)
-            yield_asi(sd);
+            yield_virt(sd, TOKEN_SEMICOLON);
           }
           return 0;
 
@@ -888,7 +885,7 @@ static int simple_consume(simpledef *sd) {
         if (sd->tok.type == TOKEN_SEMICOLON) {
           skip_walk(sd, 0);
         } else {
-          yield_asi(sd);
+          yield_virt(sd, TOKEN_SEMICOLON);
         }
         --sd->curr;
       } else {
@@ -900,11 +897,38 @@ static int simple_consume(simpledef *sd) {
 
     // control group state
     case SSTACK__CONTROL:
-      // FIXME: does nothing right now _except_ hide group from parent block
-      if (sd->curr->t1.type == TOKEN_PAREN) {
-        // previous "(", was this ...
+      // if we had an exec, then abandon: all done
+      if (sd->curr->t1.type == TOKEN_EXEC) {
+        --sd->curr;
+#ifdef DEBUG
+        if (sd->curr->stype != SSTACK__BLOCK) {
+          debugf("control found NOT in block\n");
+          return ERROR__ASSERT;
+        }
+#endif
+        debugf("exec within control all done\n");
+        // repeat if within a single block (NULL pointer)
+        if (sd->curr > sd->stack && !(sd->curr - 1)->t1.p) {
+          debugf("closed control inside ANOTHER control\n");
+          --sd->curr;
+        }
+        return 0;
       }
-      --sd->curr;
+
+      // otherwise, start an exec block
+      if (sd->tok.type == TOKEN_BRACE) {
+        // ... found e.g., "if {}"
+        printf("started brace in control\n");
+        sd->tok.type = TOKEN_EXEC;
+        record_walk(sd, 0);
+      } else {
+        // ... found e.g. "if something_else"
+        printf("push anon exec block\n");
+        yield_virt(sd, TOKEN_EXEC);
+      }
+
+      stack_inc(sd, SSTACK__BLOCK);
+      sd->curr->special = SPECIAL__INIT;
       return 0;
 
     case SSTACK__EXPR:
@@ -917,6 +941,18 @@ static int simple_consume(simpledef *sd) {
     // zero state, determine what to push
     case SSTACK__BLOCK:
       break;
+  }
+
+  if ((sd->curr->t1.type && sd->curr->special) || sd->tok.type == TOKEN_CLOSE) {
+    // close pending single block
+    if (sd->curr > sd->stack && !(sd->curr - 1)->t1.p) {
+      --sd->curr;
+      if (sd->curr->stype != SSTACK__CONTROL) {
+        return ERROR__INTERNAL;
+      }
+      // yield back to SSTACK__CONTROL
+      return 0;
+    }
   }
 
   // finished our first _anything_ clear initial bit
@@ -970,8 +1006,15 @@ static int simple_consume(simpledef *sd) {
         // ... top-level, invalid CLOSE
         debugf("invalid close\n");
       } else {
-        --sd->curr;  // pop out of block or dict
+       --sd->curr;  // pop out of block or dict
+ #ifdef DEBUG
+        if (sd->curr->stype == SSTACK__CONTROL && sd->curr->t1.type == TOKEN_EXEC && !sd->curr->t1.p) {
+          debugf("TOKEN_CLOSE inside SSTACK__BLOCK for single block\n");
+          return ERROR__ASSERT;
+        }
+#endif
       }
+
       // "function {}" that ends in statement/group has value
       skip_walk(sd, sd->curr->stype == SSTACK__EXPR);
       return 0;
@@ -1067,6 +1110,8 @@ static int simple_consume(simpledef *sd) {
 
   // match e.g., "if", "catch"
   if (sd->tok.hash & _MASK_CONTROL) {
+    stack_inc(sd, SSTACK__CONTROL);
+
     uint32_t hash = sd->tok.hash;
     sd->tok.type = TOKEN_KEYWORD;
     record_walk(sd, 0);
@@ -1075,22 +1120,11 @@ static int simple_consume(simpledef *sd) {
     if (sd->tok.type == TOKEN_LIT && hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
       // even outside strict/async mode, this is valid, but an error
       sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);
+      skip_walk(sd, 0);
     }
-
-    // match "do"
-    if (hash == LIT_DO) {
-      stack_inc(sd, SSTACK__DO_WHILE);
-      return 0;
-    }
-
-    // always start control group otherwise
-    // FIXME: put before tokens above
-    stack_inc(sd, SSTACK__CONTROL);
 
     // if we need a paren, consume without putting into statement
     if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
-      sd->curr->special = (hash == LIT_FOR ? SPECIAL__FOR : 0);
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__EXPR);
       sd->curr->special = SPECIAL__GROUP;
@@ -1150,6 +1184,7 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
   sd.curr->special = SPECIAL__INIT;
   record_walk(&sd, 0);
 
+  int pdepth = 0;
   int unchanged = 0;
   int ret = 0;
   while (sd.tok.type) {
@@ -1168,9 +1203,10 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     }
 
     // allow unchanged ptr for some attempts for state machine
-    if (prev == sd.tok.p) {
+    if (prev == sd.tok.p && depth >= pdepth) {
       if (unchanged++ < 2) {
-        // we give it two chances to change something to let the state machine work
+        // we give it two chances (at >= depth) to change something to let the state machine work
+        pdepth = depth;
         continue;
       }
       debugf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
@@ -1179,6 +1215,7 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     }
 
     // success
+    pdepth = depth;
     prev = sd.tok.p;
     unchanged = 0;
   }
