@@ -400,6 +400,16 @@ int main() {
     TOKEN_SEMICOLON, // ;
   );
 
+  _test("do-while block", "do {} while ();",
+    TOKEN_KEYWORD,   // do
+    TOKEN_EXEC,      // {
+    TOKEN_CLOSE,     // }
+    TOKEN_KEYWORD,   // while
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ;
+  );
+
   _test("do-while ASIs", "do foo\nwhile(0)",
     TOKEN_KEYWORD,   // do
     TOKEN_SYMBOL,    // foo
