@@ -307,16 +307,19 @@ static int is_token_valuelike(token *t) {
 }
 
 
-// is theis token valuelike following (or before) a keyword? (e.g. "extends []")
+// is this token valuelike following "of" inside a "for (... of ...)"?
 static int is_token_valuelike_keyword(token *t) {
   if (is_token_valuelike(t)) {
     return 1;
   }
-  return t->type == TOKEN_PAREN ||
-      t->type == TOKEN_ARRAY ||
-      t->type == TOKEN_BRACE ||
-      t->type == TOKEN_SLASH ||
-      t->type == TOKEN_REGEXP;
+  switch (t->type) {
+    case TOKEN_PAREN:
+    case TOKEN_ARRAY:
+    case TOKEN_BRACE:
+    case TOKEN_SLASH:
+      return 1;
+  }
+  return 0;
 }
 
 
@@ -572,7 +575,7 @@ static int simple_consume_expr(simpledef *sd) {
     // find "of" between two value-like things
     if (sd->tok.type == TOKEN_LIT &&
         sd->tok.hash == LIT_OF &&
-        is_token_valuelike_keyword(&(sd->curr->t1)) &&
+        sd->tok_has_value &&
         is_token_valuelike_keyword(sd->next)) {
       sd->tok.type = TOKEN_OP;
       return record_walk(sd, 0);
@@ -925,7 +928,7 @@ static int simple_consume(simpledef *sd) {
   }
 
   // check incase at least one statement has occured in DO_WHILE > BLOCK
-  int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_BRACE);
+  int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_EXEC);
   if ((sd->curr - 1)->stype == SSTACK__DO_WHILE && has_statement) {
     --sd->curr;  // pop to DO_WHILE
 
