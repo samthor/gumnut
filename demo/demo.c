@@ -56,10 +56,16 @@ void render_callback(void *arg, token *out) {
   }
 #ifndef SPEED
   char c = ' ';
-  if (out->type == TOKEN_SEMICOLON && !out->len) {
-    c = ';';  // this is an ASI
-  } else if (out->hash) {
+  if (out->hash) {
     c = '#';  // has a hash
+  } else if (!out->len) {
+    if (out->type == TOKEN_SEMICOLON) {
+      c = ';';  // this is an ASI
+    } else if (out->type == TOKEN_EXEC) {
+      c = '{';
+    } else if (out->type == TOKEN_CLOSE) {
+      c = '}';
+    }
   }
   printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
 #endif
