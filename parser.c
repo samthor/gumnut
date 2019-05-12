@@ -1228,8 +1228,9 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
 
     // allow unchanged ptr for some attempts for state machine
     if (prev == sd.tok.p) {
-      if (unchanged++ < 3) {
-        // we give it three chances to change something to let the state machine work
+      if (unchanged++ < 4) {
+        // we give it four chances to change something to let the state machine work
+        // (needed for SSTACK__CONTROL)
         continue;
       }
       debugf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
