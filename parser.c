@@ -9,14 +9,16 @@
 #define SSTACK__DICT     3  // within regular dict "{}"
 #define SSTACK__FUNC     4  // expects upcoming "name () {}"
 #define SSTACK__CLASS    5  // expects "extends X"? "{}"
-#define SSTACK__DO_WHILE 6  // state machine for "do ... while"
-#define SSTACK__MODULE   7  // state machine for import/export defs
+#define SSTACK__MODULE   6  // state machine for import/export defs
 
 // SSTACK__EXPR
-#define SPECIAL__GROUP   1  // was started with a real (), [] etc
+#define SPECIAL__GROUP     1  // was started with a real (), [] etc
+
+// SSTACK__CONTROL
+#define SPECIAL__DO_WHILE  1  // is do-while
 
 // SSTACK__BLOCK
-#define SPECIAL__INIT    1  // is this the first statement in a block?
+#define SPECIAL__INIT      1  // is this the first statement in a block?
 
 
 
@@ -618,6 +620,32 @@ static int simple_consume_expr(simpledef *sd) {
 }
 
 
+static int maybe_close_control(simpledef *sd, token *t) {
+  sstack *c = sd->curr;
+
+  if (c == sd->stack) {
+    return 0;  // can't close top or even check above
+  } else if (t && t->type == TOKEN_CLOSE) {
+    // allowed
+  } else if (c->stype != SSTACK__BLOCK || !c->t1.type || !c->special) {
+    return 0;
+  }
+
+  if ((c - 1)->t1.p) {
+    // check for parent NULL: this implies empty TOKEN_EXEC above us
+    return 0;
+  }
+
+  --sd->curr;
+#ifdef DEBUG
+  if (sd->curr->stype != SSTACK__CONTROL || sd->curr->t1.type != TOKEN_EXEC) {
+    return ERROR__ASSERT;
+  }
+#endif
+  return 1;
+}
+
+
 static int simple_consume(simpledef *sd) {
   switch (sd->curr->stype) {
     // import state
@@ -795,7 +823,6 @@ static int simple_consume(simpledef *sd) {
 
     // function state, allow () or {}
     case SSTACK__FUNC:
-
       switch (sd->tok.type) {
         case TOKEN_ARRAY:
           // allow "function ['name']" (for dict)
@@ -877,9 +904,52 @@ static int simple_consume(simpledef *sd) {
       return 0;
     }
 
-    // do...while state
-    case SSTACK__DO_WHILE:
-      if (sd->curr->t1.type) {
+    // control group state
+    case SSTACK__CONTROL:
+      // if we had an exec, then abandon: all done
+      if (sd->curr->t1.type == TOKEN_EXEC) {
+        if (!sd->curr->t1.p) {
+restart_control:
+          // ... was virtual exec, emit close (real token didn't close us)
+          yield_virt(sd, TOKEN_CLOSE);
+        }
+
+        if (sd->curr->special == SPECIAL__DO_WHILE) {
+          // ... special-case do-while: don't leave CONTROL just yet, search for trailer "while ("
+          if (sd->next->type == TOKEN_PAREN &&
+              sd->tok.type == TOKEN_LIT &&
+              sd->tok.hash == LIT_WHILE) {
+            sd->tok.type = TOKEN_KEYWORD;
+            record_walk(sd, 0);  // consume while
+            record_walk(sd, 0);  // consume paren
+            stack_inc(sd, SSTACK__EXPR);
+            sd->curr->special = SPECIAL__GROUP;
+            return 0;
+          }
+          // ... treats invalid 'do-while' as regular control group
+          debugf("invalid do-while, abandoning\n");
+        }
+
+check_single_block:
+        --sd->curr;  // leave SSTACK__CONTROL
+#ifdef DEBUG
+        if (sd->curr->stype != SSTACK__BLOCK) {
+          debugf("control found NOT in block\n");
+          return ERROR__ASSERT;
+        }
+#endif
+
+        // repeat if within a single block (NULL pointer)
+        if (sd->curr != sd->stack && !(sd->curr - 1)->t1.p) {
+          debugf("closed control inside ANOTHER control\n");
+          --sd->curr;
+          goto restart_control;
+        }
+        return 0;
+      }
+
+      // look for close of do-while ()'s
+      if (sd->curr->special == SPECIAL__DO_WHILE && sd->curr->t1.type == TOKEN_PAREN) {
         // this is end of valid group, emit ASI if there's not one
         // occurs regardless of newline, e.g. "do;while(0)foo" is valid, ASI after close paren
         if (sd->tok.type == TOKEN_SEMICOLON) {
@@ -887,48 +957,30 @@ static int simple_consume(simpledef *sd) {
         } else {
           yield_virt(sd, TOKEN_SEMICOLON);
         }
-        --sd->curr;
-      } else {
-        // start of do...while, just push block
-        stack_inc(sd, SSTACK__BLOCK);
+        // FIXME: gross, but we want to check if this semi closes anything else
+        goto check_single_block;
       }
 
-      return 0;
-
-    // control group state
-    case SSTACK__CONTROL:
-      // if we had an exec, then abandon: all done
-      if (sd->curr->t1.type == TOKEN_EXEC) {
-        --sd->curr;
 #ifdef DEBUG
-        if (sd->curr->stype != SSTACK__BLOCK) {
-          debugf("control found NOT in block\n");
-          return ERROR__ASSERT;
-        }
-#endif
-        debugf("exec within control all done\n");
-        // repeat if within a single block (NULL pointer)
-        if (sd->curr > sd->stack && !(sd->curr - 1)->t1.p) {
-          debugf("closed control inside ANOTHER control\n");
-          --sd->curr;
-        }
-        return 0;
+      if (sd->curr->t1.type && sd->curr->t1.type != TOKEN_PAREN && !(sd->curr->t1.hash & _MASK_CONTROL)) {
+        debugf("control exec must only start after blank, paren or control\n");
+        return ERROR__ASSERT;
       }
+#endif
 
-      // otherwise, start an exec block
+      // otherwise, start an exec block!
       if (sd->tok.type == TOKEN_BRACE) {
         // ... found e.g., "if {}"
-        printf("started brace in control\n");
         sd->tok.type = TOKEN_EXEC;
         record_walk(sd, 0);
+        stack_inc(sd, SSTACK__BLOCK);
+        // nb. do NOT set init here, it's used to detect 'use strict'
       } else {
-        // ... found e.g. "if something_else"
-        printf("push anon exec block\n");
+        // ... found e.g. "if something_else", push virtual exec block
         yield_virt(sd, TOKEN_EXEC);
+        stack_inc(sd, SSTACK__BLOCK);
+        sd->curr->special = SPECIAL__INIT;  // .. set init here so we can leave
       }
-
-      stack_inc(sd, SSTACK__BLOCK);
-      sd->curr->special = SPECIAL__INIT;
       return 0;
 
     case SSTACK__EXPR:
@@ -943,16 +995,10 @@ static int simple_consume(simpledef *sd) {
       break;
   }
 
-  if ((sd->curr->t1.type && sd->curr->special) || sd->tok.type == TOKEN_CLOSE) {
-    // close pending single block
-    if (sd->curr > sd->stack && !(sd->curr - 1)->t1.p) {
-      --sd->curr;
-      if (sd->curr->stype != SSTACK__CONTROL) {
-        return ERROR__INTERNAL;
-      }
-      // yield back to SSTACK__CONTROL
-      return 0;
-    }
+  if (maybe_close_control(sd, &sd->tok)) {
+    // FIXME: we could call this in outer method
+    // yield back to SSTACK__CONTROL
+    return 0;
   }
 
   // finished our first _anything_ clear initial bit
@@ -969,33 +1015,10 @@ static int simple_consume(simpledef *sd) {
     }
   }
 
-  // check incase at least one statement has occured in DO_WHILE > BLOCK
-  int has_statement = (sd->curr->t1.type == TOKEN_SEMICOLON || sd->curr->t1.type == TOKEN_EXEC);
-  if ((sd->curr - 1)->stype == SSTACK__DO_WHILE && has_statement) {
-    --sd->curr;  // pop to DO_WHILE
-
-    // look for following "while (", fail if not
-    if (sd->next->type == TOKEN_PAREN &&
-        sd->tok.type == TOKEN_LIT &&
-        sd->tok.hash == LIT_WHILE) {
-      sd->tok.type = TOKEN_KEYWORD;
-      record_walk(sd, 0);  // consume while
-      record_walk(sd, 0);  // consume paren
-      stack_inc(sd, SSTACK__EXPR);
-      sd->curr->special = SPECIAL__GROUP;
-      return 0;
-    }
-
-    // couldn't find suffix "while(", retry
-    // FIXME: error case
-    debugf("do-while state without while()\n");
-    --sd->curr;
-    return 0;
-  }
-
   switch (sd->tok.type) {
     case TOKEN_BRACE:
       // anon block
+      debugf("unattached exec block\n");
       sd->tok.type = TOKEN_EXEC;
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__BLOCK);
@@ -1111,6 +1134,7 @@ static int simple_consume(simpledef *sd) {
   // match e.g., "if", "catch"
   if (sd->tok.hash & _MASK_CONTROL) {
     stack_inc(sd, SSTACK__CONTROL);
+    sd->curr->special = (sd->tok.hash == LIT_DO ? SPECIAL__DO_WHILE : 0);
 
     uint32_t hash = sd->tok.hash;
     sd->tok.type = TOKEN_KEYWORD;
@@ -1124,7 +1148,7 @@ static int simple_consume(simpledef *sd) {
     }
 
     // if we need a paren, consume without putting into statement
-    if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
+    if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN && !sd->curr->special) {
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__EXPR);
       sd->curr->special = SPECIAL__GROUP;
@@ -1164,6 +1188,7 @@ void render_token(token *out, char *start) {
 }
 #endif
 
+
 int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
 #ifdef DEBUG
   char *start = td->buf;
@@ -1184,7 +1209,6 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
   sd.curr->special = SPECIAL__INIT;
   record_walk(&sd, 0);
 
-  int pdepth = 0;
   int unchanged = 0;
   int ret = 0;
   while (sd.tok.type) {
@@ -1203,10 +1227,9 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     }
 
     // allow unchanged ptr for some attempts for state machine
-    if (prev == sd.tok.p && depth >= pdepth) {
-      if (unchanged++ < 2) {
-        // we give it two chances (at >= depth) to change something to let the state machine work
-        pdepth = depth;
+    if (prev == sd.tok.p) {
+      if (unchanged++ < 3) {
+        // we give it three chances to change something to let the state machine work
         continue;
       }
       debugf("simple_consume didn't consume: %d %.*s\n", sd.tok.type, sd.tok.len, sd.tok.p);
@@ -1215,7 +1238,6 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     }
 
     // success
-    pdepth = depth;
     prev = sd.tok.p;
     unchanged = 0;
   }
@@ -1224,15 +1246,19 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     return ret;
   }
 
-  // consume fake TOKEN_CLOSE in a few cases for ASI (do-while needs trailer to ASI)
+  // consume fake TOKEN_CLOSE in a few cases for ASI
   int stype = sd.curr->stype;
-  if (stype == SSTACK__DO_WHILE ||
-      (stype == SSTACK__EXPR && (sd.curr - 1)->stype == SSTACK__BLOCK)) {
+  if (stype == SSTACK__EXPR && (sd.curr - 1)->stype == SSTACK__BLOCK) {
     char *held = sd.tok.p;
     sd.tok.type = TOKEN_CLOSE;
     sd.tok.p = 0;
     simple_consume(&sd);
     sd.tok.p = held;
+  }
+
+  // close any open virtual control/exec pairs
+  if (maybe_close_control(&sd, NULL) || sd.curr->stype == SSTACK__CONTROL) {
+    simple_consume(&sd);  // token doesn't matter, SSTACK__CONTROL doesn't consume
   }
 
   // emit 'real' EOF for caller
