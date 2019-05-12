@@ -161,8 +161,10 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_SYMBOL,    // a
     TOKEN_CLOSE,     // )
+    TOKEN_EXEC,      // virt
     TOKEN_REGEXP,    // /123/
     TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // virt
   );
 
   _test("function decl regexp", "function foo(y) {} / 100 /",
@@ -340,7 +342,9 @@ int main() {
     TOKEN_SYMBOL,    // let
     TOKEN_SEMICOLON, // ;
     TOKEN_CLOSE,     // )
+    TOKEN_EXEC,      // virt
     TOKEN_SEMICOLON, // ;
+    TOKEN_CLOSE,     // virt
   );
 
   _test("for await() matches keyword", "for await(let x);",
@@ -350,7 +354,9 @@ int main() {
     TOKEN_KEYWORD,   // let
     TOKEN_SYMBOL,    // x
     TOKEN_CLOSE,     // )
+    TOKEN_EXEC,      // virt
     TOKEN_SEMICOLON, // ;
+    TOKEN_CLOSE,     // virt
   );
 
   _test("for(blah of foo) matches keyword", "for(const x of bar);",
@@ -361,15 +367,30 @@ int main() {
     TOKEN_OP,        // of
     TOKEN_SYMBOL,    // bar
     TOKEN_CLOSE,     // )
+    TOKEN_EXEC,      // virt
+    TOKEN_SEMICOLON, // ;
+    TOKEN_CLOSE,     // virt
+  );
+
+  _test("strict mode", "'use strict'; protected + x;",
+    TOKEN_STRING,    // 'use strict';
+    TOKEN_SEMICOLON, // ;
+    TOKEN_KEYWORD,   // protected
+    TOKEN_OP,        // +
+    TOKEN_SYMBOL,    // x
     TOKEN_SEMICOLON, // ;
   );
 
-  _test("strict mode await", "'use strict'; await x;",
+  _test("strict mode not in control", "if {'use strict';protected+x}",
+    TOKEN_KEYWORD,   // if
+    TOKEN_EXEC,      // {
     TOKEN_STRING,    // 'use strict';
     TOKEN_SEMICOLON, // ;
-    TOKEN_KEYWORD,   // await
+    TOKEN_SYMBOL,   // protected
+    TOKEN_OP,        // +
     TOKEN_SYMBOL,    // x
-    TOKEN_SEMICOLON, // ;
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // }
   );
 
   _test("asi for number", "123\n'zing'",
@@ -382,12 +403,16 @@ int main() {
   // nb. last semi is needed, attached to "while(0)" on its own
   _test("do-while while sanity check", "do while(2) x\nwhile(1) while(0);",
     TOKEN_KEYWORD,   // do
+    TOKEN_EXEC,      // virt
     TOKEN_KEYWORD,   // while
     TOKEN_PAREN,     // (
     TOKEN_NUMBER,    // 2
     TOKEN_CLOSE,     // )
+    TOKEN_EXEC,      // virt
     TOKEN_SYMBOL,    // x
     TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // virt
+    TOKEN_CLOSE,     // virt
     TOKEN_KEYWORD,   // while
     TOKEN_PAREN,     // (
     TOKEN_NUMBER,    // 1
@@ -397,7 +422,9 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_NUMBER,    // 0
     TOKEN_CLOSE,     // )
+    TOKEN_EXEC,      // virt
     TOKEN_SEMICOLON, // ;
+    TOKEN_CLOSE,     // virt
   );
 
   _test("do-while block", "do {} while ();",
@@ -412,8 +439,10 @@ int main() {
 
   _test("do-while ASIs", "do foo\nwhile(0)",
     TOKEN_KEYWORD,   // do
+    TOKEN_EXEC,      // virt
     TOKEN_SYMBOL,    // foo
     TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // virt
     TOKEN_KEYWORD,   // while
     TOKEN_PAREN,     // (
     TOKEN_NUMBER,    // 0
@@ -423,7 +452,9 @@ int main() {
 
   _test("do-while stack", "do;while()bar",
     TOKEN_KEYWORD,   // do
+    TOKEN_EXEC,      // virt
     TOKEN_SEMICOLON, // ;
+    TOKEN_CLOSE,     // virt
     TOKEN_KEYWORD,   // while
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
@@ -434,7 +465,9 @@ int main() {
 
   _test("do-while value-like", "do;while()\n/foo/",
     TOKEN_KEYWORD,   // do
+    TOKEN_EXEC,      // virt
     TOKEN_SEMICOLON, // ;
+    TOKEN_CLOSE,     // virt
     TOKEN_KEYWORD,   // while
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
