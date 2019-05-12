@@ -14,9 +14,6 @@
 // SSTACK__EXPR
 #define SPECIAL__GROUP     1  // was started with a real (), [] etc
 
-// SSTACK__CONTROL
-#define SPECIAL__DO_WHILE  1  // is do-while
-
 // SSTACK__BLOCK
 #define SPECIAL__INIT      1  // is this the first statement in a block?
 
@@ -33,6 +30,7 @@
 typedef struct {
   token t1;
   token t2;
+  uint32_t start;  // FIXME: replace t2 with this?
   uint8_t stype : 3;
   uint8_t context : 3;
   uint8_t special : 1;
@@ -75,6 +73,17 @@ static void yield_virt(simpledef *sd, int type) {
   t->type = type;
 
   sd->cb(sd->arg, t);
+}
+
+
+static void yield_virt_skip(simpledef *sd, int type) {
+  token t;
+  bzero(&t, sizeof(token));
+
+  t.line_no = sd->prev_line_no;
+  t.type = type;
+
+  sd->cb(sd->arg, &t);
 }
 
 
@@ -348,6 +357,28 @@ static int match_decl(simpledef *sd) {
 }
 
 
+// can the current token create a trailing control group from prev
+static inline int may_trail_control(uint32_t prev, uint32_t curr) {
+  if (curr & _MASK_CONTROL) {
+    switch (prev) {
+      case LIT_IF:
+        return curr == LIT_ELSE;
+
+      case LIT_DO:
+        debugf("may_trail_control called with LIT_DO\n");
+        return curr == LIT_WHILE;
+
+      case LIT_TRY:
+        return curr == LIT_CATCH || curr == LIT_FINALLY;
+
+      case LIT_CATCH:
+        return curr == LIT_FINALLY;
+    }
+  }
+  return 0;
+}
+
+
 // consumes an expr (always SSTACK__EXPR)
 static int simple_consume_expr(simpledef *sd) {
   switch (sd->tok.type) {
@@ -568,7 +599,7 @@ static int simple_consume_expr(simpledef *sd) {
 
   // match curious cases inside "for (" (t1=paren, t2=for)
   sstack *up = (sd->curr - 1);
-  if (up->stype == SSTACK__CONTROL && up->t2.hash == LIT_FOR && sd->curr->stype == SSTACK__EXPR) {
+  if (up->stype == SSTACK__CONTROL && up->start == LIT_FOR && sd->curr->stype == SSTACK__EXPR) {
 
     // start of "for (", look for decl (var/let/const) and mark as keyword
     if (!sd->curr->t1.type) {
@@ -911,23 +942,24 @@ static int simple_consume(simpledef *sd) {
         if (!sd->curr->t1.p) {
 restart_control:
           // ... was virtual exec, emit close (real token didn't close us)
-          yield_virt(sd, TOKEN_CLOSE);
+          yield_virt_skip(sd, TOKEN_CLOSE);
         }
 
-        if (sd->curr->special == SPECIAL__DO_WHILE) {
-          // ... special-case do-while: don't leave CONTROL just yet, search for trailer "while ("
-          if (sd->next->type == TOKEN_PAREN &&
-              sd->tok.type == TOKEN_LIT &&
-              sd->tok.hash == LIT_WHILE) {
+        if (sd->curr->start == LIT_DO) {
+          // ... search for trailer "while ("
+          if (sd->next->type == TOKEN_PAREN && sd->tok.hash == LIT_WHILE) {
             sd->tok.type = TOKEN_KEYWORD;
-            record_walk(sd, 0);  // consume while
+            record_walk(sd, -1);  // consume while
             record_walk(sd, 0);  // consume paren
             stack_inc(sd, SSTACK__EXPR);
             sd->curr->special = SPECIAL__GROUP;
             return 0;
           }
-          // ... treats invalid 'do-while' as regular control group
           debugf("invalid do-while, abandoning\n");
+        } else if (may_trail_control(sd->curr->start, sd->tok.hash)) {
+          debugf("control closed but found trailer: %.*s\n", sd->tok.len, sd->tok.p);
+          --sd->curr;  // leave SSTACK__CONTROL but _not_ the parent SSTACK__BLOCK
+          return 0;
         }
 
 check_single_block:
@@ -949,7 +981,8 @@ check_single_block:
       }
 
       // look for close of do-while ()'s
-      if (sd->curr->special == SPECIAL__DO_WHILE && sd->curr->t1.type == TOKEN_PAREN) {
+      if (sd->curr->start == LIT_DO && sd->curr->t1.type == TOKEN_PAREN) {
+        debugf("matching do-while paren end\n");
         // this is end of valid group, emit ASI if there's not one
         // occurs regardless of newline, e.g. "do;while(0)foo" is valid, ASI after close paren
         if (sd->tok.type == TOKEN_SEMICOLON) {
@@ -1134,11 +1167,11 @@ check_single_block:
   // match e.g., "if", "catch"
   if (sd->tok.hash & _MASK_CONTROL) {
     stack_inc(sd, SSTACK__CONTROL);
-    sd->curr->special = (sd->tok.hash == LIT_DO ? SPECIAL__DO_WHILE : 0);
+    sd->curr->start = sd->tok.hash;
 
     uint32_t hash = sd->tok.hash;
     sd->tok.type = TOKEN_KEYWORD;
-    record_walk(sd, 0);
+    skip_walk(sd, 0);
 
     // match "for await"
     if (sd->tok.type == TOKEN_LIT && hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {

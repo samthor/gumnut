@@ -706,15 +706,15 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
-  _test("attach statements", "for()try{}finally{}",
-    TOKEN_SYMBOL,    // if
+  _test("attach statements", "if()try{}finally{}",
+    TOKEN_KEYWORD,   // if
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
     TOKEN_EXEC,      // virt
-    TOKEN_SYMBOL,    // try
+    TOKEN_KEYWORD,   // try
     TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
-    TOKEN_SYMBOL,    // finally
+    TOKEN_KEYWORD,   // finally
     TOKEN_EXEC,      // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // virt
