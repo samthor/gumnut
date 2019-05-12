@@ -427,6 +427,23 @@ int main() {
     TOKEN_CLOSE,     // virt
   );
 
+  _test("do-while inside control", "if do ; while(0) bar",
+    TOKEN_KEYWORD,   // if
+    TOKEN_EXEC,      // virt
+    TOKEN_KEYWORD,   // do
+    TOKEN_EXEC,      // virt
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // virt
+    TOKEN_KEYWORD,   // while
+    TOKEN_PAREN,     // (
+    TOKEN_NUMBER,    // 0
+    TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // virt
+    TOKEN_SYMBOL,    // bar
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("do-while block", "do {} while ();",
     TOKEN_KEYWORD,   // do
     TOKEN_EXEC,      // {
