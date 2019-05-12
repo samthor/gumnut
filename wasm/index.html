@@ -52,7 +52,7 @@ const TOKENS = {
   OP: 4,
   ARROW: 5,
   COLON: 6,
-  BRACE: 7,
+  DICT: 7,
   ARRAY: 8,
   PAREN: 9,
   T_BRACE: 10,
@@ -132,13 +132,19 @@ window.addEventListener('load', (ev) => {
         node.classList.add('_' + mark);
       }
 
-      switch (token.type) {
-      case TOKENS.SEMICOLON:
-        if (!s) {
-          node.textContent = ';';
-          node.classList.add('_asi');
+      if (!s) {
+        node.classList.add('_virt');
+        switch (token.type) {
+          case TOKENS.SEMICOLON:
+            node.textContent = ';'
+            break;
+          case TOKENS.EXEC:
+            node.textContent = '{';
+            break;
+          case TOKENS.CLOSE:
+            node.textContent = '}';
+            break;
         }
-        break;
       }
 
       node.tabIndex = 0;
@@ -285,7 +291,7 @@ document.addEventListener('drop', (ev) => {
     min-width: var(--line-no-width, 1ch);
     text-align: right;
   }
-  pre span._asi {
+  pre span._virt {
     background: green;
     color: white;
   }

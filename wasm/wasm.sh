@@ -23,11 +23,15 @@ fi
 # (Emscripten is dumb and stack would go forever otherwise) and this lets us pass as much memory as
 # we like on creation inside JS.
 
+# use two pages (65536 * 2) for memory, random number for stack
+MEMORY=131072
+STACK=32000
+
 emcc $FLAGS \
   -s EMIT_EMSCRIPTEN_METADATA=1 \
   -s SIDE_MODULE=1 \
-  -s TOTAL_MEMORY=65536 \
-  -s TOTAL_STACK=65536 \
+  -s TOTAL_MEMORY=${MEMORY} \
+  -s TOTAL_STACK=${STACK} \
   -o runner.wasm \
   *.c ../*.c
 
