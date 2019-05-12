@@ -696,6 +696,30 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("control with trailing statement", "if foo\nbar",
+    TOKEN_KEYWORD,   // class
+    TOKEN_EXEC,      // virt
+    TOKEN_SYMBOL,    // foo
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // virt
+    TOKEN_SYMBOL,    // foo
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
+  _test("attach statements", "for()try{}finally{}",
+    TOKEN_SYMBOL,    // if
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_EXEC,      // virt
+    TOKEN_SYMBOL,    // try
+    TOKEN_EXEC,      // {
+    TOKEN_CLOSE,     // }
+    TOKEN_SYMBOL,    // finally
+    TOKEN_EXEC,      // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // virt
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {
