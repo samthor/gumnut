@@ -720,6 +720,14 @@ int main() {
     TOKEN_CLOSE,     // virt
   );
 
+  _test("solo async", "async(a)",
+    TOKEN_SYMBOL,    // async
+    TOKEN_PAREN,     // (
+    TOKEN_SYMBOL,    // a
+    TOKEN_CLOSE,     // )
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {
