@@ -82,7 +82,7 @@ int main() {
   bzero(&context, sizeof(demo_context));
 
   tokendef td = prsr_init_token(buf);
-  int out = prsr_simple(&td, 0, render_callback, &context);
+  int out = prsr_simple(&td, 1, render_callback, &context);
   if (out) {
     fprintf(stderr, "ret=%d\n", out);
   }

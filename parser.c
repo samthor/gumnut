@@ -10,6 +10,7 @@
 #define SSTACK__FUNC     4  // expects upcoming "name () {}"
 #define SSTACK__CLASS    5  // expects "extends X"? "{}"
 #define SSTACK__MODULE   6  // state machine for import/export defs
+#define SSTACK__ASYNC    7  // async arrow function
 
 // SSTACK__EXPR
 #define SPECIAL__GROUP     1  // was started with a real (), [] etc
@@ -379,7 +380,36 @@ static inline int may_trail_control(uint32_t prev, uint32_t curr) {
 }
 
 
+static int simple_start_arrowfunc(simpledef *sd, int async) {
+  if (sd->tok.type != TOKEN_ARROW) {
+    debugf("arrowfunc start without TOKEN_ARROW\n");
+    return ERROR__INTERNAL;
+  }
+
+  uint8_t context = (sd->curr->context & CONTEXT__STRICT);
+  if (async) {
+    context |= CONTEXT__ASYNC;
+  }
+
+  if (sd->td->next.type == TOKEN_BRACE) {
+    // the sensible arrow function case, with a proper body
+    // e.g. "() => { statements }"
+    record_walk(sd, -1);  // consume =>
+    sd->tok.type = TOKEN_EXEC;
+    record_walk(sd, 0);  // consume {
+    stack_inc(sd, SSTACK__BLOCK);
+    sd->curr->special = SPECIAL__INIT;
+  } else {
+    // just change statement's context (e.g. () => async () => () => ...)
+    record_walk(sd, 0);
+  }
+  sd->curr->context = context;
+  return 0;
+}
+
+
 // consumes an expr (always SSTACK__EXPR)
+// MUST NOT assume parent is SSTACK__BLOCK, could be anything
 static int simple_consume_expr(simpledef *sd) {
   switch (sd->tok.type) {
     case TOKEN_SEMICOLON:
@@ -410,26 +440,7 @@ static int simple_consume_expr(simpledef *sd) {
         // not a valid arrow func, treat as op
         return record_walk(sd, 0);
       }
-
-      uint8_t context = (sd->curr->context & CONTEXT__STRICT);
-      if (sd->curr->t2.type == TOKEN_KEYWORD && sd->curr->t2.hash == LIT_ASYNC) {
-        context |= CONTEXT__ASYNC;
-      }
-
-      if (sd->td->next.type == TOKEN_BRACE) {
-        // the sensible arrow function case, with a proper body
-        // e.g. "() => { statements }"
-        record_walk(sd, -1);  // consume =>
-        sd->tok.type = TOKEN_EXEC;
-        record_walk(sd, 0);  // consume {
-        stack_inc(sd, SSTACK__BLOCK);
-        sd->curr->special = SPECIAL__INIT;
-      } else {
-        // just change statement's context (e.g. () => async () => () => ...)
-        record_walk(sd, 0);
-      }
-      sd->curr->context = context;
-      return 0;
+      return simple_start_arrowfunc(sd, 0);
 
     case TOKEN_CLOSE: {
       sstack *prev = sd->curr;
@@ -444,30 +455,25 @@ static int simple_consume_expr(simpledef *sd) {
           return 0;
         }
 
+        case SSTACK__ASYNC:
+          // we're in "async ()", expect arrow next, but if not, we have value
+          skip_walk(sd, 1);
+          return 0;
+
         default:
           // this would be hoisted class/func or control group, not a value after
           if (prev->special == SPECIAL__GROUP) {
             // ... valid group, walk over token
             skip_walk(sd, 0);
           } else {
-            // ... got a close for a statement which doesn't expect one, let parent handle
+            debugf("handing close to parent stype\n");
+            // ... got a close while in expr which isn't in group, let parent handle
+            // probably error, e.g. "{ class extends }"
           }
           return 0;
 
         case SSTACK__EXPR:
           break;
-      }
-
-      // ... look if this is ") =>", and resolve any pending lit async
-      if (sd->curr->t1.type == TOKEN_PAREN) {
-        token *yield = &(sd->curr->t2);
-        if (yield->type == TOKEN_LIT) {
-          yield->type = (sd->next->type == TOKEN_ARROW ? TOKEN_KEYWORD : TOKEN_SYMBOL);
-          yield->mark = MARK_RESOLVE;
-          skip_walk(sd, -1);
-          sd->cb(sd->arg, yield);
-          return 0;
-        }
       }
 
       // value if this places us into a statement/group (but not if this was ternary)
@@ -550,7 +556,10 @@ static int simple_consume_expr(simpledef *sd) {
       if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_INCDEC) {
         // if we had value, but are on new line, insert an ASI: this is a PostfixExpression that
         // disallows LineTerminator
-        if (sd->tok_has_value && sd->tok.line_no != sd->curr->t1.line_no) {
+        if ((sd->curr - 1)->stype == SSTACK__BLOCK &&
+            sd->tok_has_value &&
+            sd->tok.line_no != sd->curr->t1.line_no) {
+          // nb. if we're not inside SSTACK__BLOCK, line changes here are invalid
           sd->tok_has_value = 0;
           int yield = (sd->curr->t1.type);
           --sd->curr;
@@ -642,14 +651,22 @@ static int simple_consume_expr(simpledef *sd) {
 
   // look for async arrow function
   if (sd->tok.hash == LIT_ASYNC) {
-    if (sd->curr->t1.hash == MISC_DOT) {
-      sd->tok.type = TOKEN_SYMBOL;   // ".async" is always a funtion call
-    } else if (sd->next->type == TOKEN_LIT) {
-      sd->tok.type = TOKEN_KEYWORD;  // "async foo" is always a keyword
-    } else if (sd->next->type == TOKEN_PAREN) {
-      // otherwise, actually ambiguous: leave as TOKEN_LIT
-      return record_walk(sd, 0);
+    if (sd->curr->t1.hash != MISC_DOT) {
+      switch (sd->next->type) {
+        case TOKEN_LIT:
+          sd->tok.type = TOKEN_KEYWORD;  // "async foo" is always a keyword
+          // fall-through
+
+        case TOKEN_PAREN:
+          // consume and push SSTACK__ASYNC even if we already know keyword
+          record_walk(sd, -1);
+          stack_inc(sd, SSTACK__ASYNC);
+          return 0;
+      }
     }
+
+    sd->tok.type = TOKEN_SYMBOL;   // ".async" is always a property
+    return record_walk(sd, 1);
   }
 
   // if nothing else known, treat as symbol
@@ -688,6 +705,49 @@ static int maybe_close_control(simpledef *sd, token *t) {
 
 static int simple_consume(simpledef *sd) {
   switch (sd->curr->stype) {
+    // async arrow function state
+    case SSTACK__ASYNC:
+      switch (sd->curr->t1.type) {
+        default:
+          debugf("invalid type in SSTACK__ASYNC: %d\n", sd->curr->t1.type);
+          --sd->curr;
+          return 0;
+
+        case TOKEN_EOF:
+          // start of ambig, insert expr
+          if (sd->tok.type == TOKEN_PAREN) {
+            record_walk(sd, 0);
+            stack_inc(sd, SSTACK__EXPR);
+            sd->curr->special = SPECIAL__GROUP;
+            return 0;
+          } else if (sd->tok.type != TOKEN_LIT) {
+            return ERROR__INTERNAL;
+          }
+
+          // set type of 'x' in "async x =>": keywords are invalid, but allow anyway
+          sd->tok.type = is_always_keyword(sd->tok.hash, sd->curr->context) ? TOKEN_KEYWORD : TOKEN_SYMBOL;
+          record_walk(sd, 0);
+          break;
+
+        case TOKEN_PAREN: {
+          // end of ambig, check whether arrow exists
+          token *yield = &((sd->curr - 1)->t1);
+          yield->type = (sd->tok.type == TOKEN_ARROW ? TOKEN_KEYWORD : TOKEN_SYMBOL);
+          yield->mark = MARK_RESOLVE;
+          sd->cb(sd->arg, yield);
+          break;
+        }
+      }
+
+      if (sd->tok.type != TOKEN_ARROW) {
+        debugf("async starter without arrow, ignoring\n");
+        --sd->curr;
+        return 0;
+      }
+
+      --sd->curr;  // pop SSTACK__ASYNC
+      return simple_start_arrowfunc(sd, 1);
+
     // import state
     case SSTACK__MODULE:
       switch (sd->tok.type) {
@@ -701,6 +761,7 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_T_BRACE:
         case TOKEN_PAREN:
         case TOKEN_ARRAY:
+          record_walk(sd, 0);
           stack_inc(sd, SSTACK__EXPR);
           sd->curr->special = SPECIAL__GROUP;
           return 0;
