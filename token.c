@@ -291,19 +291,30 @@ static eat_out eat_token(char *p) {
 #undef _reth
 }
 
-static int consume_comment(char *p, int *line_no) {
-  if (*p != '/') {
-    return 0;
-  }
+static int consume_comment(char *p, int *line_no, int start) {
+  char *find = "\n";
 
-  char *find;
-  switch (p[1]) {
+  switch (p[0]) {
     case '/':
-      find = "\n";
+      switch (p[1]) {
+        case '*':
+          // match multiline
+          find = "*/";
+          break;
+
+        case '/':
+          break;
+
+        default:
+          return 0;
+      }
       break;
 
-    case '*':
-      find = "*/";
+    case '#':
+      // match "#!comment" only at start of doc
+      if (!(start && p[1] == '!')) {
+        return 0;
+      }
       break;
 
     default:
@@ -318,7 +329,7 @@ static int consume_comment(char *p, int *line_no) {
   }
 
   int len = end - p;
-  if (p[1] == '/') {
+  if (p[1] != '*') {
     return len;
   }
 
@@ -347,43 +358,41 @@ static char *consume_space(char *p, int *line_no) {
   }
 }
 
-static inline char *walk_comments(char *p, int *line_no) {
-  for (;;) {
-    p = consume_space(p, line_no);
-    int len = consume_comment(p, line_no);
-    if (!len) {
-      return p;
+static void eat_next(tokendef *d) {
+  // consume from next, repeat(space, comment [first into pending]) and next token
+  char *from = d->next.p + d->next.len;
+
+  // short-circuit for token state machine
+  if (d->flag) {
+    if (d->flag == FLAG__PENDING_T_BRACE) {
+      d->next.type = TOKEN_T_BRACE;
+      d->next.len = 2;  // "${"
+      d->flag = 0;
+    } else if (d->flag == FLAG__RESUME_LIT) {
+      int litflag = 1;
+      d->next.type = TOKEN_STRING;
+      d->next.len = consume_string(from, &d->line_no, &litflag);
+      d->flag = litflag ? FLAG__PENDING_T_BRACE : 0;
     }
-    p += len;
-  }
-}
-
-static char *eat_hashbang(tokendef *d) {
-  char *p = d->buf;
-  if (*p++ != '#' || *p++ != '!') {
-    return 0;
+    d->next.p = from;
+    return;
   }
 
-  // consume until newline
-  int len;
-  char *newline = strchr(p, '\n');
-  if (!newline) {
-    // ... single line file with only hashbang?!
-    len = strlen(p) + 2;
-  } else {
-    len = newline - d->buf;
-  }
+  // always consume space chars
+  char *p = consume_space(from, &d->line_no);
+  d->pending.p = p;
+  d->pending.line_no = d->line_no;
 
-  d->pending.line_no = d->line_no;  // always 1
-  d->pending.p = d->buf;
+  // match comments (C99 and long), record first in pending
+  int len = consume_comment(p, &d->line_no, p == d->buf);
   d->pending.len = len;
-  d->line_after_pending = 1;
+  d->line_after_pending = d->line_no;
+  while (len) {
+    p += len;
+    p = consume_space(p, &d->line_no);
+    len = consume_comment(p, &d->line_no, 0);
+  }
 
-  // consume whitespace and comments before next token
-  return walk_comments(d->buf + len, &d->line_no);
-}
-
-static void eat_next_internal(tokendef *d, char *p) {
   // match real token
   eat_out eat = eat_token(p);
   d->next.type = eat.type;
@@ -417,42 +426,6 @@ static void eat_next_internal(tokendef *d, char *p) {
   }
 }
 
-static void eat_next(tokendef *d) {
-  // consume from next, repeat(space, comment [first into pending]) and next token
-  char *from = d->next.p + d->next.len;
-
-  // short-circuit for token state machine
-  if (d->flag) {
-    if (d->flag == FLAG__PENDING_T_BRACE) {
-      d->next.type = TOKEN_T_BRACE;
-      d->next.len = 2;  // "${"
-      d->flag = 0;
-    } else if (d->flag == FLAG__RESUME_LIT) {
-      int litflag = 1;
-      d->next.type = TOKEN_STRING;
-      d->next.len = consume_string(from, &d->line_no, &litflag);
-      d->flag = litflag ? FLAG__PENDING_T_BRACE : 0;
-    }
-    d->next.p = from;
-    return;
-  }
-
-  // always consume space chars
-  char *p = consume_space(from, &d->line_no);
-  d->pending.p = p;
-  d->pending.line_no = d->line_no;
-
-  // match comments (C99 and long), record first in pending
-  int len = consume_comment(p, &d->line_no);
-  d->pending.len = len;
-  d->line_after_pending = d->line_no;
-  if (len) {
-    p = walk_comments(p + len, &d->line_no);
-  }
-
-  eat_next_internal(d, p);
-}
-
 int prsr_next_token(tokendef *d, token *out, int has_value) {
   if (d->pending.len) {
     // copy pending comment out, try to yield more
@@ -467,7 +440,7 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
     // queue up upcoming comment
     d->pending.p = p;
     d->pending.line_no = d->line_after_pending;
-    d->pending.len = consume_comment(p, &d->line_after_pending);
+    d->pending.len = consume_comment(p, &d->line_after_pending, 0);
 
     if (!d->pending.len) {
       return ERROR__INTERNAL;
@@ -531,13 +504,6 @@ tokendef prsr_init_token(char *p) {
   d.pending.type = TOKEN_COMMENT;
   d.next.p = p;  // place next cursor
 
-  // prsr state always points to next token, but read a hashbang as a comment if found
-  char *after = eat_hashbang(&d);
-  if (after) {
-    eat_next_internal(&d, after);
-  } else {
-    eat_next(&d);
-  }
-
+  eat_next(&d);
   return d;
 }
