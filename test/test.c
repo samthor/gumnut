@@ -721,10 +721,11 @@ int main() {
   );
 
   _test("solo async", "async(a)",
-    TOKEN_SYMBOL,    // async
+    TOKEN_LIT,       // async
     TOKEN_PAREN,     // (
     TOKEN_SYMBOL,    // a
     TOKEN_CLOSE,     // )
+    TOKEN_SYMBOL,    // MARK async
     TOKEN_SEMICOLON, // ASI ;
   );
 

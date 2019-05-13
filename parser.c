@@ -1339,23 +1339,33 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     return ret;
   }
 
+  char *eof_at = sd.tok.p;
+  sd.tok.p = 0;
+
+  // handle open ASYNC state
+  if (sd.curr->stype == SSTACK__ASYNC) {
+    debugf("end: sending fake TOKEN_EOF\n");
+    sd.tok.type = TOKEN_EOF;
+    simple_consume(&sd);
+  }
+
   // consume fake TOKEN_CLOSE in a few cases for ASI
   int stype = sd.curr->stype;
   if (stype == SSTACK__EXPR && (sd.curr - 1)->stype == SSTACK__BLOCK) {
-    char *held = sd.tok.p;
+    debugf("end: sending fake TOKEN_CLOSE\n");
     sd.tok.type = TOKEN_CLOSE;
-    sd.tok.p = 0;
     simple_consume(&sd);
-    sd.tok.p = held;
   }
 
   // close any open virtual control/exec pairs
   if (maybe_close_control(&sd, NULL) || sd.curr->stype == SSTACK__CONTROL) {
+    debugf("end: closing virtual pairs\n");
     simple_consume(&sd);  // token doesn't matter, SSTACK__CONTROL doesn't consume
   }
 
   // emit 'real' EOF for caller
   sd.tok.type = TOKEN_EOF;
+  sd.tok.p = eof_at;
   skip_walk(&sd, 0);
 
   if (sd.curr != sd.stack) {
@@ -1369,6 +1379,5 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
 #endif
     return ERROR__STACK;
   }
-
   return 0;
 }
