@@ -511,6 +511,15 @@ static int simple_consume_expr(simpledef *sd) {
       // fall-through
 
     case TOKEN_STRING:
+      if (!sd->curr->t1.type &&
+          sd->next->type == TOKEN_SEMICOLON &&
+          (sd->curr - 1)->stype == SSTACK__BLOCK &&
+          (sd->curr - 1)->special &&
+          is_use_strict(&(sd->tok))) {
+        debugf("found single use-strict with semi\n");
+        (sd->curr - 1)->context |= CONTEXT__STRICT;
+      }
+
       if (sd->curr->t1.type == TOKEN_T_BRACE) {
         // if we're a string following ${}, this is part a of a template literal and doesn't have
         // special ASI casing (e.g. '${\n\n}' isn't really causing a newline)
@@ -1037,15 +1046,6 @@ check_single_block:
   // finished our first _anything_ clear initial bit
   if (sd->curr->t1.type && sd->curr->special) {
     sd->curr->special = 0;
-
-    // look for 'use strict' of single statement
-    if (sd->curr->t1.type == TOKEN_SEMICOLON) {
-      sstack *prev = (sd->curr + 1);  // this will be previous statement
-      if (!prev->t2.type && is_use_strict(&(prev->t1))) {
-        sd->curr->context |= CONTEXT__STRICT;
-        debugf("got use strict in single statement\n");
-      }
-    }
   }
 
   switch (sd->tok.type) {
@@ -1085,6 +1085,7 @@ check_single_block:
   // match label
   if (is_label(&(sd->tok), sd->curr->context) && sd->next->type == TOKEN_COLON) {
     sd->tok.type = TOKEN_LABEL;
+    sd->curr->special = 0;  // clear initial bit
     skip_walk(sd, -1);  // consume label
     skip_walk(sd, 0);  // consume colon
     return 0;
@@ -1098,7 +1099,7 @@ check_single_block:
   // match single-only
   if (sd->tok.hash == LIT_DEBUGGER) {
     sd->tok.type = TOKEN_KEYWORD;
-    record_walk(sd, 0);
+    skip_walk(sd, 0);  // nothing looks for this
     yield_restrict_asi(sd);
     return 0;
   }
@@ -1171,7 +1172,7 @@ check_single_block:
 
     uint32_t hash = sd->tok.hash;
     sd->tok.type = TOKEN_KEYWORD;
-    skip_walk(sd, 0);
+    record_walk(sd, 0);
 
     // match "for await"
     if (sd->tok.type == TOKEN_LIT && hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
@@ -1180,7 +1181,7 @@ check_single_block:
       skip_walk(sd, 0);
     }
 
-    // if we need a paren, consume without putting into statement
+    // if we need a paren, consume and create expr group
     if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN && !sd->curr->special) {
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__EXPR);
