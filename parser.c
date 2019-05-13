@@ -29,12 +29,11 @@
 
 
 typedef struct {
-  token t1;
-  token t2;
-  uint32_t start;  // FIXME: replace t2 with this?
-  uint8_t stype : 3;
-  uint8_t context : 3;
-  uint8_t special : 1;
+  token prev;           // previous token
+  uint32_t start;       // hash of stype start (set only for some stypes)
+  uint8_t stype : 3;    // stack type
+  uint8_t context : 3;  // current execution context (strict, async, generator)
+  uint8_t special : 1;  // special bit for stype
 } sstack;
 
 
@@ -66,8 +65,7 @@ static sstack *stack_inc(simpledef *sd, uint8_t stype) {
 
 // stores a virtual token in the stream, and yields it before the current token
 static void yield_virt(simpledef *sd, int type) {
-  token *t = &(sd->curr->t1);
-  sd->curr->t2 = *t;  // move t1 => t2
+  token *t = &(sd->curr->prev);
   bzero(t, sizeof(token));
 
   t->line_no = sd->prev_line_no;
@@ -88,10 +86,10 @@ static void yield_virt_skip(simpledef *sd, int type) {
 }
 
 
-// optionally yields ASI for restrict, assumes sd->curr->t1 is the restricted keyword
+// optionally yields ASI for restrict, assumes sd->curr->prev is the restricted keyword
 // pops to nearby block
 static int yield_restrict_asi(simpledef *sd) {
-  int line_no = sd->curr->t1.line_no;
+  int line_no = sd->curr->prev.line_no;
 
   if (line_no == sd->tok.line_no && sd->tok.type != TOKEN_CLOSE) {
     return 0;  // not new line, not close token
@@ -131,8 +129,7 @@ static int skip_walk(simpledef *sd, int has_value) {
 
 // records/yields the current token, places the next useful token
 static int record_walk(simpledef *sd, int has_value) {
-  sd->curr->t2 = sd->curr->t1;
-  sd->curr->t1 = sd->tok;
+  sd->curr->prev = sd->tok;
   return skip_walk(sd, has_value);
 }
 
@@ -436,7 +433,7 @@ static int simple_consume_expr(simpledef *sd) {
       return record_walk(sd, 0);
 
     case TOKEN_ARROW:
-      if (!(sd->curr->t1.type == TOKEN_PAREN || sd->curr->t1.type == TOKEN_SYMBOL)) {
+      if (!(sd->curr->prev.type == TOKEN_PAREN || sd->curr->prev.type == TOKEN_SYMBOL)) {
         // not a valid arrow func, treat as op
         return record_walk(sd, 0);
       }
@@ -449,7 +446,7 @@ static int simple_consume_expr(simpledef *sd) {
       switch (sd->curr->stype) {
         case SSTACK__BLOCK: {
           // parent is block, maybe yield ASI but pop either way
-          if (prev->t1.type) {
+          if (prev->prev.type) {
             yield_virt(sd, TOKEN_SEMICOLON);
           }
           return 0;
@@ -477,7 +474,7 @@ static int simple_consume_expr(simpledef *sd) {
       }
 
       // value if this places us into a statement/group (but not if this was ternary)
-      int has_value = (sd->curr->stype == SSTACK__EXPR && sd->curr->t1.type != TOKEN_TERNARY);
+      int has_value = (sd->curr->stype == SSTACK__EXPR && sd->curr->prev.type != TOKEN_TERNARY);
       skip_walk(sd, has_value);
       return 0;
     }
@@ -485,8 +482,8 @@ static int simple_consume_expr(simpledef *sd) {
     case TOKEN_BRACE:
       if (sd->tok_has_value && !sd->curr->special) {
         // found an invalid brace, restart as block
-        int yield = (sd->tok.line_no != sd->curr->t1.line_no &&
-            sd->curr->t1.type &&
+        int yield = (sd->tok.line_no != sd->curr->prev.line_no &&
+            sd->curr->prev.type &&
             (sd->curr - 1)->stype == SSTACK__BLOCK);
         --sd->curr;
         if (yield) {
@@ -517,7 +514,7 @@ static int simple_consume_expr(simpledef *sd) {
       // fall-through
 
     case TOKEN_STRING:
-      if (!sd->curr->t1.type &&
+      if (!sd->curr->prev.type &&
           sd->next->type == TOKEN_SEMICOLON &&
           (sd->curr - 1)->stype == SSTACK__BLOCK &&
           (sd->curr - 1)->special &&
@@ -526,7 +523,7 @@ static int simple_consume_expr(simpledef *sd) {
         (sd->curr - 1)->context |= CONTEXT__STRICT;
       }
 
-      if (sd->curr->t1.type == TOKEN_T_BRACE) {
+      if (sd->curr->prev.type == TOKEN_T_BRACE) {
         // if we're a string following ${}, this is part a of a template literal and doesn't have
         // special ASI casing (e.g. '${\n\n}' isn't really causing a newline)
         return record_walk(sd, 1);
@@ -537,9 +534,9 @@ static int simple_consume_expr(simpledef *sd) {
     case TOKEN_NUMBER:
       // basic ASI detection inside statement: value on a new line than before, with value
       if ((sd->curr - 1)->stype == SSTACK__BLOCK &&
-          sd->tok.line_no != sd->curr->t1.line_no &&
+          sd->tok.line_no != sd->curr->prev.line_no &&
           sd->tok_has_value &&
-          sd->curr->t1.type) {
+          sd->curr->prev.type) {
         sd->tok_has_value = 0;
         --sd->curr;
         yield_virt(sd, TOKEN_SEMICOLON);
@@ -558,10 +555,10 @@ static int simple_consume_expr(simpledef *sd) {
         // disallows LineTerminator
         if ((sd->curr - 1)->stype == SSTACK__BLOCK &&
             sd->tok_has_value &&
-            sd->tok.line_no != sd->curr->t1.line_no) {
+            sd->tok.line_no != sd->curr->prev.line_no) {
           // nb. if we're not inside SSTACK__BLOCK, line changes here are invalid
           sd->tok_has_value = 0;
-          int yield = (sd->curr->t1.type);
+          int yield = (sd->curr->prev.type);
           --sd->curr;
           if (yield) {
             yield_virt(sd, TOKEN_SEMICOLON);
@@ -600,7 +597,7 @@ static int simple_consume_expr(simpledef *sd) {
     sd->tok.type = TOKEN_OP;
     record_walk(sd, 0);
 
-    if (sd->curr->t1.hash == LIT_YIELD) {
+    if (sd->curr->prev.hash == LIT_YIELD) {
       // yield is a restricted keyword (this does nothing inside group, but is invalid)
       yield_restrict_asi(sd);
     }
@@ -615,12 +612,12 @@ static int simple_consume_expr(simpledef *sd) {
     return record_walk(sd, 0);
   }
 
-  // match curious cases inside "for (" (t1=paren, t2=for)
+  // match curious cases inside "for ("
   sstack *up = (sd->curr - 1);
   if (up->stype == SSTACK__CONTROL && up->start == LIT_FOR && sd->curr->stype == SSTACK__EXPR) {
 
     // start of "for (", look for decl (var/let/const) and mark as keyword
-    if (!sd->curr->t1.type) {
+    if (!sd->curr->prev.type) {
       if (match_decl(sd) >= 0) {
         return 0;
       }
@@ -638,7 +635,7 @@ static int simple_consume_expr(simpledef *sd) {
 
   // aggressive keyword match inside statement
   if (is_always_keyword(sd->tok.hash, sd->curr->context)) {
-    if (up->stype == SSTACK__BLOCK && sd->curr->t1.type && sd->tok.line_no != sd->curr->t1.line_no) {
+    if (up->stype == SSTACK__BLOCK && sd->curr->prev.type && sd->tok.line_no != sd->curr->prev.line_no) {
       // if a keyword on a new line would make an invalid statement, restart with it
       --sd->curr;
       yield_virt(sd, TOKEN_SEMICOLON);
@@ -651,7 +648,7 @@ static int simple_consume_expr(simpledef *sd) {
 
   // look for async arrow function
   if (sd->tok.hash == LIT_ASYNC) {
-    if (sd->curr->t1.hash != MISC_DOT) {
+    if (sd->curr->prev.hash != MISC_DOT) {
       switch (sd->next->type) {
         case TOKEN_LIT:
           sd->tok.type = TOKEN_KEYWORD;  // "async foo" is always a keyword
@@ -684,18 +681,18 @@ static int maybe_close_control(simpledef *sd, token *t) {
     return 0;  // can't close top or even check above
   } else if (t && t->type == TOKEN_CLOSE) {
     // allowed
-  } else if (c->stype != SSTACK__BLOCK || !c->t1.type || !c->special) {
+  } else if (c->stype != SSTACK__BLOCK || !c->prev.type || !c->special) {
     return 0;
   }
 
-  if ((c - 1)->t1.p) {
+  if ((c - 1)->prev.p) {
     // check for parent NULL: this implies empty TOKEN_EXEC above us
     return 0;
   }
 
   --sd->curr;
 #ifdef DEBUG
-  if (sd->curr->stype != SSTACK__CONTROL || sd->curr->t1.type != TOKEN_EXEC) {
+  if (sd->curr->stype != SSTACK__CONTROL || sd->curr->prev.type != TOKEN_EXEC) {
     return ERROR__ASSERT;
   }
 #endif
@@ -707,9 +704,9 @@ static int simple_consume(simpledef *sd) {
   switch (sd->curr->stype) {
     // async arrow function state
     case SSTACK__ASYNC:
-      switch (sd->curr->t1.type) {
+      switch (sd->curr->prev.type) {
         default:
-          debugf("invalid type in SSTACK__ASYNC: %d\n", sd->curr->t1.type);
+          debugf("invalid type in SSTACK__ASYNC: %d\n", sd->curr->prev.type);
           --sd->curr;
           return 0;
 
@@ -731,7 +728,7 @@ static int simple_consume(simpledef *sd) {
 
         case TOKEN_PAREN: {
           // end of ambig, check whether arrow exists
-          token *yield = &((sd->curr - 1)->t1);
+          token *yield = &((sd->curr - 1)->prev);
           yield->type = (sd->tok.type == TOKEN_ARROW ? TOKEN_KEYWORD : TOKEN_SYMBOL);
           yield->mark = MARK_RESOLVE;
           sd->cb(sd->arg, yield);
@@ -817,7 +814,7 @@ static int simple_consume(simpledef *sd) {
 
       // consume and bail out on "from" if it follows a symbol or close brace
       if ((sd->curr - 1)->stype != SSTACK__MODULE &&
-          sd->curr->t1.type == TOKEN_SYMBOL &&
+          sd->curr->prev.type == TOKEN_SYMBOL &&
           sd->tok.hash == LIT_FROM) {
         --sd->curr;  // close outer
         sd->tok.type = TOKEN_KEYWORD;
@@ -831,7 +828,7 @@ static int simple_consume(simpledef *sd) {
       }
 
       // consume "as" as a keyword if it follows a symbol
-      if (sd->curr->t1.type == TOKEN_SYMBOL && sd->tok.hash == LIT_AS) {
+      if (sd->curr->prev.type == TOKEN_SYMBOL && sd->tok.hash == LIT_AS) {
         sd->tok.type = TOKEN_KEYWORD;
         return record_walk(sd, 0);
       }
@@ -981,7 +978,7 @@ static int simple_consume(simpledef *sd) {
 
     // class state, just insert group (for extends) or dict-like
     case SSTACK__CLASS: {
-      if (!sd->curr->t1.type && sd->tok.hash == LIT_EXTENDS) {
+      if (!sd->curr->prev.type && sd->tok.hash == LIT_EXTENDS) {
         // ... check for extends, valid
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);  // consume "extends" keyword, treat as non-value
@@ -1008,8 +1005,8 @@ static int simple_consume(simpledef *sd) {
     // control group state
     case SSTACK__CONTROL:
       // if we had an exec, then abandon: all done
-      if (sd->curr->t1.type == TOKEN_EXEC) {
-        if (!sd->curr->t1.p) {
+      if (sd->curr->prev.type == TOKEN_EXEC) {
+        if (!sd->curr->prev.p) {
 restart_control:
           // ... was virtual exec, emit close (real token didn't close us)
           yield_virt_skip(sd, TOKEN_CLOSE);
@@ -1042,7 +1039,7 @@ check_single_block:
 #endif
 
         // repeat if within a single block (NULL pointer)
-        if (sd->curr != sd->stack && !(sd->curr - 1)->t1.p) {
+        if (sd->curr != sd->stack && !(sd->curr - 1)->prev.p) {
           debugf("closed control inside ANOTHER control\n");
           --sd->curr;
           goto restart_control;
@@ -1051,7 +1048,7 @@ check_single_block:
       }
 
       // look for close of do-while ()'s
-      if (sd->curr->start == LIT_DO && sd->curr->t1.type == TOKEN_PAREN) {
+      if (sd->curr->start == LIT_DO && sd->curr->prev.type == TOKEN_PAREN) {
         debugf("matching do-while paren end\n");
         // this is end of valid group, emit ASI if there's not one
         // occurs regardless of newline, e.g. "do;while(0)foo" is valid, ASI after close paren
@@ -1065,7 +1062,7 @@ check_single_block:
       }
 
 #ifdef DEBUG
-      if (sd->curr->t1.type && sd->curr->t1.type != TOKEN_PAREN && !(sd->curr->t1.hash & _MASK_CONTROL)) {
+      if (sd->curr->prev.type && sd->curr->prev.type != TOKEN_PAREN && !(sd->curr->prev.hash & _MASK_CONTROL)) {
         debugf("control exec must only start after blank, paren or control\n");
         return ERROR__ASSERT;
       }
@@ -1105,7 +1102,7 @@ check_single_block:
   }
 
   // finished our first _anything_ clear initial bit
-  if (sd->curr->t1.type && sd->curr->special) {
+  if (sd->curr->prev.type && sd->curr->special) {
     sd->curr->special = 0;
   }
 
@@ -1125,7 +1122,7 @@ check_single_block:
       } else {
        --sd->curr;  // pop out of block or dict
  #ifdef DEBUG
-        if (sd->curr->stype == SSTACK__CONTROL && sd->curr->t1.type == TOKEN_EXEC && !sd->curr->t1.p) {
+        if (sd->curr->stype == SSTACK__CONTROL && sd->curr->prev.type == TOKEN_EXEC && !sd->curr->prev.p) {
           debugf("TOKEN_CLOSE inside SSTACK__BLOCK for single block\n");
           return ERROR__ASSERT;
         }
@@ -1367,8 +1364,7 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     sstack *t = sd.stack;
     do {
       debugf("stack=%ld stype=%d\n", t - sd.stack, t->stype);
-      render_token(&(t->t2), start);
-      render_token(&(t->t1), start);
+      render_token(&(t->prev), start);
     } while (t != sd.curr && ++t);
 #endif
     return ERROR__STACK;
