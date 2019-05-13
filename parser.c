@@ -412,8 +412,8 @@ static int simple_consume_expr(simpledef *sd) {
     case TOKEN_SEMICOLON:
       if ((sd->curr - 1)->stype == SSTACK__BLOCK) {
 #ifdef DEBUG
-        if (sd->curr->special) {
-          debugf("block expr must not be special\n");
+        if (sd->curr->start) {
+          debugf("block expr must not have real start token\n");
           return ERROR__ASSERT;
         }
 #endif
@@ -459,8 +459,8 @@ static int simple_consume_expr(simpledef *sd) {
 
         default:
           // this would be hoisted class/func or control group, not a value after
-          if (prev->special == SPECIAL__GROUP) {
-            // ... valid group, walk over token
+          if (prev->start) {
+            // ... had a start token, so walk over close token
             skip_walk(sd, 0);
           } else {
             debugf("handing close to parent stype\n");
@@ -480,7 +480,7 @@ static int simple_consume_expr(simpledef *sd) {
     }
 
     case TOKEN_BRACE:
-      if (sd->tok_has_value && !sd->curr->special) {
+      if (sd->tok_has_value && !sd->curr->start) {
         // found an invalid brace, restart as block
         int yield = (sd->tok.line_no != sd->curr->prev.line_no &&
             sd->curr->prev.type &&
@@ -502,7 +502,7 @@ static int simple_consume_expr(simpledef *sd) {
     case TOKEN_T_BRACE:
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__EXPR);
-      sd->curr->special = SPECIAL__GROUP;
+      sd->curr->start = sd->tok.type;
       return 0;
 
     case TOKEN_LIT:
@@ -681,7 +681,7 @@ static int maybe_close_control(simpledef *sd, token *t) {
     return 0;  // can't close top or even check above
   } else if (t && t->type == TOKEN_CLOSE) {
     // allowed
-  } else if (c->stype != SSTACK__BLOCK || !c->prev.type || !c->special) {
+  } else if (!(c->stype == SSTACK__BLOCK && c->special && c->prev.type != SSTACK__EXPR)) {
     return 0;
   }
 
@@ -715,7 +715,7 @@ static int simple_consume(simpledef *sd) {
           if (sd->tok.type == TOKEN_PAREN) {
             record_walk(sd, 0);
             stack_inc(sd, SSTACK__EXPR);
-            sd->curr->special = SPECIAL__GROUP;
+            sd->curr->start = TOKEN_PAREN;
             return 0;
           } else if (sd->tok.type != TOKEN_LIT) {
             return ERROR__INTERNAL;
@@ -760,7 +760,7 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_ARRAY:
           record_walk(sd, 0);
           stack_inc(sd, SSTACK__EXPR);
-          sd->curr->special = SPECIAL__GROUP;
+          sd->curr->start = sd->tok.type;
           return 0;
 
         case TOKEN_LIT:
@@ -926,7 +926,7 @@ static int simple_consume(simpledef *sd) {
           // allow "function ['name']" (for dict)
           record_walk(sd, 0);
           stack_inc(sd, SSTACK__EXPR);
-          sd->curr->special = SPECIAL__GROUP;
+          sd->curr->start = TOKEN_ARRAY;
 
           // ... but "{async [await 'name']..." doesn't take await from our context
           sd->curr->context = (sd->curr - 2)->context;
@@ -955,7 +955,7 @@ static int simple_consume(simpledef *sd) {
           // allow "function ()"
           record_walk(sd, 0);
           stack_inc(sd, SSTACK__EXPR);
-          sd->curr->special = SPECIAL__GROUP;
+          sd->curr->start = TOKEN_PAREN;
           return 0;
 
         case TOKEN_BRACE: {
@@ -988,7 +988,6 @@ static int simple_consume(simpledef *sd) {
 
       if (sd->tok.type == TOKEN_BRACE) {
         // start dict-like block (pop SSTACK__CLASS)
-        sd->curr->special = 0;
         --sd->curr;
         sd->tok.type = TOKEN_DICT;
         record_walk(sd, 0);
@@ -1019,7 +1018,7 @@ restart_control:
             record_walk(sd, -1);  // consume while
             record_walk(sd, 0);  // consume paren
             stack_inc(sd, SSTACK__EXPR);
-            sd->curr->special = SPECIAL__GROUP;
+            sd->curr->start = TOKEN_PAREN;
             return 0;
           }
           debugf("invalid do-while, abandoning\n");
@@ -1240,10 +1239,10 @@ check_single_block:
     }
 
     // if we need a paren, consume and create expr group
-    if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN && !sd->curr->special) {
+    if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__EXPR);
-      sd->curr->special = SPECIAL__GROUP;
+      sd->curr->start = TOKEN_PAREN;
     }
 
     return 0;
