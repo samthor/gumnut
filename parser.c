@@ -12,9 +12,6 @@
 #define SSTACK__MODULE   6  // state machine for import/export defs
 #define SSTACK__ASYNC    7  // async arrow function
 
-// SSTACK__EXPR
-#define SPECIAL__GROUP     1  // was started with a real (), [] etc
-
 // SSTACK__BLOCK
 #define SPECIAL__INIT      1  // is this the first statement in a block?
 
@@ -1078,7 +1075,11 @@ check_single_block:
         // ... found e.g. "if something_else", push virtual exec block
         yield_virt(sd, TOKEN_EXEC);
         stack_inc(sd, SSTACK__BLOCK);
-        sd->curr->special = SPECIAL__INIT;  // .. set init here so we can leave
+
+        // set init here so we can leave
+        // TODO: this is a bit overloaded; we abuse a virtual TOKEN_EXEC with SPECIAL__INIT to
+        // determine when a single-statement control is done
+        sd->curr->special = SPECIAL__INIT;
       }
       return 0;
 
