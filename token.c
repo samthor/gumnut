@@ -347,6 +347,17 @@ static char *consume_space(char *p, int *line_no) {
   }
 }
 
+static inline char *walk_comments(char *p, int *line_no) {
+  for (;;) {
+    p = consume_space(p, line_no);
+    int len = consume_comment(p, line_no);
+    if (!len) {
+      return p;
+    }
+    p += len;
+  }
+}
+
 static char *eat_hashbang(tokendef *d) {
   char *p = d->buf;
   if (*p++ != '#' || *p++ != '!') {
@@ -357,7 +368,7 @@ static char *eat_hashbang(tokendef *d) {
   int len;
   char *newline = strchr(p, '\n');
   if (!newline) {
-    // ... single line file?!
+    // ... single line file with only hashbang?!
     len = strlen(p) + 2;
   } else {
     len = newline - d->buf;
@@ -368,8 +379,8 @@ static char *eat_hashbang(tokendef *d) {
   d->pending.len = len;
   d->line_after_pending = 1;
 
-  // consume whitespace before next token
-  return consume_space(d->buf + len, &d->line_no);
+  // consume whitespace and comments before next token
+  return walk_comments(d->buf + len, &d->line_no);
 }
 
 static void eat_next_internal(tokendef *d, char *p) {
@@ -435,10 +446,8 @@ static void eat_next(tokendef *d) {
   int len = consume_comment(p, &d->line_no);
   d->pending.len = len;
   d->line_after_pending = d->line_no;
-  while (len) {
-    p += len;
-    p = consume_space(p, &d->line_no);
-    len = consume_comment(p, &d->line_no);
+  if (len) {
+    p = walk_comments(p + len, &d->line_no);
   }
 
   eat_next_internal(d, p);
@@ -490,6 +499,7 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
     case TOKEN_BRACE:
     case TOKEN_T_BRACE:
       if (d->depth == __STACK_SIZE - 1) {
+        eat_next(d);  // consume invalid open but return error
         return ERROR__STACK;
       }
       d->stack[d->depth++] = out->type;

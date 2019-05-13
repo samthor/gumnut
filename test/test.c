@@ -673,6 +673,11 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("hashbang with following comment", "#!hello\n//foo",
+    TOKEN_COMMENT,   // #!hello
+    TOKEN_COMMENT,   // //foo
+  );
+
   _test("class extends op-like", "class X extends foo.bar { if() {} }",
     TOKEN_KEYWORD,   // class
     TOKEN_SYMBOL,    // X
