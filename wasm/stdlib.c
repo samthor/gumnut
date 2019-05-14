@@ -16,17 +16,6 @@ int isspace(int c) {
   return c == ' ' || (c >= '\t' && c <= '\r');  // \t, \n, \v, \f, \r
 }
 
-char *strchr(const char *s, int c) {
-  char *p = (char *) s;
-  while (*p) {
-    if (c == *p) {
-      return p;
-    }
-    ++p;
-  }
-  return NULL;
-}
-
 int memcmp(const void *s1, const void *s2, size_t n) {
   const unsigned char *p1 = s1, *p2 = s2;
   while (n--) {
@@ -35,6 +24,17 @@ int memcmp(const void *s1, const void *s2, size_t n) {
     }
     p1++;
     p2++;
+  }
+  return 0;
+}
+
+void *memchr(const void *s, int c, size_t n) {
+  unsigned char *p = (unsigned char *) s;
+  while (n--) {
+    if (*p == (unsigned char) c) {
+      return p;
+    }
+    ++p;
   }
   return 0;
 }

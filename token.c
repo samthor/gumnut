@@ -173,7 +173,7 @@ static eat_out eat_token(char *p) {
     int len = 0;
     int allowed;  // how many ops of the same type we can safely consume
 
-    if (strchr("=&|^~!%+-", start)) {
+    if (memchr("=&|^~!%+-", start, 9)) {
       allowed = 1;
     } else if (start == '*' || start == '<') {
       allowed = 2;  // exponention operator **, or shift
