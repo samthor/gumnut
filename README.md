@@ -1,8 +1,30 @@
 A fast, permissive JavaScript tokenizer and parser in C.
 
-This is not a polished or documented product.
-It's intended to be used with Web Assembly.
+One primary use case is to compile this to the web itself, with Web Assembly.
 Check out a [live demo](https://t.co/jJuOG1lt7d)!
+
+# Usage
+
+As well as the live demo, you can try out `prsr` in your terminal (with Clang installed).
+Try it out:
+
+```bash
+echo "var x = 123;" | ./demo/debug.sh
+```
+
+## Speed Tests
+
+If you have a large JS file handy, you can pass it to `speed.sh` to check parse time:
+
+```bash
+cat large-js-file | ./demo/speed.sh
+```
+
+## Unit Tests
+
+There's a small unit test suite in `./test/run.sh`.
+
+# Design
 
 ## Goals
 
