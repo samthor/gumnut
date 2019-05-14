@@ -291,28 +291,42 @@ static eat_out eat_token(char *p) {
 #undef _reth
 }
 
+static inline char *internal_consume_multiline_comment(char *p, int *line_no) {
+  for (;;) {
+    char c = *(++p);
+    switch (c) {
+      case '\n':
+        ++(*line_no);
+        break;
+
+      case '*':
+        if (p[1] == '/') {
+          return p + 2;
+        }
+        break;
+
+      case 0:
+        return p;
+    }
+  }
+}
+
 static int consume_comment(char *p, int *line_no, int start) {
-  char *find = "\n";
+  char *from = p;
 
-  switch (p[0]) {
-    case '/':
-      switch (p[1]) {
-        case '*':
-          // match multiline
-          find = "*/";
-          break;
-
-        case '/':
-          break;
-
-        default:
-          return 0;
+  switch (*p) {
+    case '/': {
+      char next = *(++p);
+      if (next == '*') {
+        return internal_consume_multiline_comment(p, line_no) - from;
+      } else if (next != '/') {
+        return 0;
       }
       break;
+    }
 
     case '#':
-      // match "#!comment" only at start of doc
-      if (!(start && p[1] == '!')) {
+      if (!(start && *(++p) == '!')) {
         return 0;
       }
       break;
@@ -321,29 +335,15 @@ static int consume_comment(char *p, int *line_no, int start) {
       return 0;
   }
 
-  const char *search = p + 2;
-  char *end = strstr(search, find);
-  if (!end) {
-    // FIXME: unclosed multiline comments don't update line_no
-    return strlen(p);  // trailing comment goes to EOF
-  }
-
-  int len = end - p;
-  if (p[1] != '*') {
-    return len;
-  }
-
-  // count \n's for multiline comment
-  char *newline = (char *) search;
+  // match single-line comment
   for (;;) {
-    newline = memchr(newline, '\n', end - newline);
-    if (!newline) {
+    char c = *p;
+    if (c == '\n' || !c) {
       break;
     }
-    ++(*line_no);
-    ++newline;
+    ++p;
   }
-  return len + 2;
+  return p - from;
 }
 
 static char *consume_space(char *p, int *line_no) {

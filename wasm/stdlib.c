@@ -9,7 +9,7 @@ int isdigit(int c) {
 }
 
 int isalnum(int c) {
-  return isalpha(c) || (c >= '0' && c <= '9');
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
 }
 
 int isspace(int c) {
@@ -27,24 +27,6 @@ char *strchr(const char *s, int c) {
   return NULL;
 }
 
-size_t strlen(const char *s) {
-  const char *p = s;
-  while (*s) {
-    ++s;
-  }
-  return s - p;
-}
-
-char *strstr(const char *s1, const char *s2) {
-  size_t n = strlen(s2);
-  while (*s1) {
-    if (!memcmp(s1++, s2, n)) {
-      return ((char *) s1) - 1;
-    }
-  }
-  return 0;
-}
-
 int memcmp(const void *s1, const void *s2, size_t n) {
   const unsigned char *p1 = s1, *p2 = s2;
   while (n--) {
@@ -53,17 +35,6 @@ int memcmp(const void *s1, const void *s2, size_t n) {
     }
     p1++;
     p2++;
-  }
-  return 0;
-}
-
-void *memchr(const void *s, int c, size_t n) {
-  unsigned char *p = (unsigned char *) s;
-  while (n--) {
-    if (*p == (unsigned char) c) {
-      return p;
-    }
-    ++p;
   }
   return 0;
 }
