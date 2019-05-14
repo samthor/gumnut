@@ -22,7 +22,6 @@
 
 typedef struct {
   char *buf;
-  int len;
   int line_no;    // after next
   token next;     // next useful token
   token pending;  // pending comment

@@ -498,7 +498,6 @@ tokendef prsr_init_token(char *p) {
   tokendef d;
   bzero(&d, sizeof(d));
   d.buf = p;
-  d.len = strlen(p);
   d.line_no = 1;
 
   d.pending.type = TOKEN_COMMENT;
