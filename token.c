@@ -378,20 +378,13 @@ static char *consume_space(char *p, int *line_no) {
 
   for (;;) {
     if (*words == 0x2020202020202020) {
-      ++words;
       p += 8;
-      continue;
+    } else {
+      #pragma unroll
+      for (int i = 0; i < 8; ++i) {
+        _check();
+      }
     }
-
-    _check();
-    _check();
-    _check();
-    _check();
-    _check();
-    _check();
-    _check();
-    _check();
-
     ++words;
   }
 #endif
