@@ -589,8 +589,10 @@ static int simple_consume_expr(simpledef *sd) {
     return 0;
   }
 
+  uint32_t outer_hash = sd->tok.hash;
+
   // match valid unary ops
-  if (is_unary(sd->tok.hash, sd->curr->context)) {
+  if (is_unary(outer_hash, sd->curr->context)) {
     sd->tok.type = TOKEN_OP;
     record_walk(sd, 0);
 
@@ -603,7 +605,7 @@ static int simple_consume_expr(simpledef *sd) {
 
   // match non-async await: this is valid iff it _looks_ like unary op use (e.g. await value).
   // this is a lookahead for value, rather than what we normally do
-  if (sd->tok.hash == LIT_AWAIT && is_token_valuelike(sd->next)) {
+  if (outer_hash == LIT_AWAIT && is_token_valuelike(sd->next)) {
     // ... to be clear, this is an error, but it IS parsed as a keyword
     sd->tok.type = TOKEN_KEYWORD;
     return record_walk(sd, 0);
@@ -621,8 +623,7 @@ static int simple_consume_expr(simpledef *sd) {
     }
 
     // find "of" between two value-like things
-    if (sd->tok.type == TOKEN_LIT &&
-        sd->tok.hash == LIT_OF &&
+    if (outer_hash == LIT_OF &&
         sd->tok_has_value &&
         is_token_valuelike_keyword(sd->next)) {
       sd->tok.type = TOKEN_OP;
@@ -631,7 +632,7 @@ static int simple_consume_expr(simpledef *sd) {
   }
 
   // aggressive keyword match inside statement
-  if (is_always_keyword(sd->tok.hash, sd->curr->context)) {
+  if (is_always_keyword(outer_hash, sd->curr->context)) {
     if (up->stype == SSTACK__BLOCK && sd->curr->prev.type && sd->tok.line_no != sd->curr->prev.line_no) {
       // if a keyword on a new line would make an invalid statement, restart with it
       --sd->curr;
@@ -644,8 +645,9 @@ static int simple_consume_expr(simpledef *sd) {
   }
 
   // look for async arrow function
-  if (sd->tok.hash == LIT_ASYNC) {
+  if (outer_hash == LIT_ASYNC) {
     if (sd->curr->prev.hash != MISC_DOT) {
+      // ... ".async" is always a property
       switch (sd->next->type) {
         case TOKEN_LIT:
           sd->tok.type = TOKEN_KEYWORD;  // "async foo" is always a keyword
@@ -653,13 +655,14 @@ static int simple_consume_expr(simpledef *sd) {
 
         case TOKEN_PAREN:
           // consume and push SSTACK__ASYNC even if we already know keyword
+          // ... otherwise this explicitly remains as LIT until resolved
           record_walk(sd, -1);
           stack_inc(sd, SSTACK__ASYNC);
           return 0;
       }
     }
 
-    sd->tok.type = TOKEN_SYMBOL;   // ".async" is always a property
+    sd->tok.type = TOKEN_SYMBOL;
     return record_walk(sd, 1);
   }
 
