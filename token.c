@@ -347,15 +347,55 @@ static int consume_comment(char *p, int *line_no, int start) {
 }
 
 static char *consume_space(char *p, int *line_no) {
-  for (;;) {
-    char c = *p;
-    if (!isspace(c)) {
-      return p;
-    } else if (c == '\n') {
-      ++(*line_no);
-    }
+  char c;
+#define _check() \
+    c = *p; \
+    if (!isspace(c)) { \
+      return p; \
+    } else if (c == '\n') { \
+      ++(*line_no); \
+    } \
     ++p;
+
+#if 1
+  for (;;) {
+    _check();
   }
+#else
+// This could potentially be faster but gives no performance gain in native mode (about the same or
+// potentially marginally slower). It's actually worse in 32-bit.
+  int off = ((int) p & 3);
+  switch (off) {
+    case 1: _check();
+    case 2: _check();
+    case 3: _check();
+    case 4: _check();
+    case 5: _check();
+    case 6: _check();
+    case 7: _check();
+  }
+  uint64_t *words = (uint64_t *) p;
+
+  for (;;) {
+    if (*words == 0x2020202020202020) {
+      ++words;
+      p += 8;
+      continue;
+    }
+
+    _check();
+    _check();
+    _check();
+    _check();
+    _check();
+    _check();
+    _check();
+    _check();
+
+    ++words;
+  }
+#endif
+#undef _check
 }
 
 static void eat_next(tokendef *d) {
