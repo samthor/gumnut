@@ -40,7 +40,7 @@ typedef struct {
 #define TOKEN_EOF       0
 
 // fixed: will always be the same, or in the same set
-#define TOKEN_EXEC      1   // block { or empty "" for statement
+#define TOKEN_EXEC      1   // block '{' or blank for statement
 #define TOKEN_SEMICOLON 2   // might be blank for ASI
 #define TOKEN_COMMA     3
 #define TOKEN_OP        4   // can include 'in', 'instanceof'
@@ -51,7 +51,7 @@ typedef struct {
 #define TOKEN_PAREN     9
 #define TOKEN_T_BRACE   10  // '${' within template literal
 #define TOKEN_TERNARY   11  // starts ternary block, "? ... :"
-#define TOKEN_CLOSE     12  // '}', ']', ')' or ':'
+#define TOKEN_CLOSE     12  // '}', ']', ')', ':' or blank for statement close
 
 // variable: could be anything
 #define TOKEN_COMMENT   13
