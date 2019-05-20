@@ -1230,7 +1230,7 @@ check_single_block:
   // match e.g., "if", "catch"
   if (outer_hash & _MASK_CONTROL) {
     stack_inc(sd, SSTACK__CONTROL);
-    sd->curr->start = sd->tok.hash;
+    sd->curr->start = outer_hash;
 
     sd->tok.type = TOKEN_KEYWORD;
     record_walk(sd, 0);
