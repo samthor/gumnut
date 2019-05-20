@@ -1154,8 +1154,10 @@ check_single_block:
     return 0;
   }
 
+  uint32_t outer_hash = sd->tok.hash;
+
   // match single-only
-  if (sd->tok.hash == LIT_DEBUGGER) {
+  if (outer_hash == LIT_DEBUGGER) {
     sd->tok.type = TOKEN_KEYWORD;
     skip_walk(sd, 0);  // nothing looks for this
     yield_restrict_asi(sd);
@@ -1163,13 +1165,12 @@ check_single_block:
   }
 
   // match restricted statement starters
-  if (sd->tok.hash == LIT_RETURN || sd->tok.hash == LIT_THROW) {
-    int hash = sd->tok.hash;
+  if (outer_hash == LIT_RETURN ||outer_hash == LIT_THROW) {
     sd->tok.type = TOKEN_KEYWORD;
     record_walk(sd, 0);
 
     // throw doesn't cause ASI, because it's invalid either way
-    if (hash == LIT_RETURN && yield_restrict_asi(sd)) {
+    if (outer_hash == LIT_RETURN && yield_restrict_asi(sd)) {
       return 0;
     }
 
@@ -1180,7 +1181,7 @@ check_single_block:
   if (sd->curr == sd->stack && sd->is_module) {
 
     // match "import" which starts a sstack special
-    if (sd->tok.hash == LIT_IMPORT) {
+    if (outer_hash == LIT_IMPORT) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
 
@@ -1195,7 +1196,7 @@ check_single_block:
     }
 
     // match "export" which is sort of a no-op, resets to default state
-    if (sd->tok.hash == LIT_EXPORT) {
+    if (outer_hash == LIT_EXPORT) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
 
@@ -1224,23 +1225,22 @@ check_single_block:
   }
 
   // match e.g., "if", "catch"
-  if (sd->tok.hash & _MASK_CONTROL) {
+  if (outer_hash & _MASK_CONTROL) {
     stack_inc(sd, SSTACK__CONTROL);
     sd->curr->start = sd->tok.hash;
 
-    uint32_t hash = sd->tok.hash;
     sd->tok.type = TOKEN_KEYWORD;
     record_walk(sd, 0);
 
     // match "for await"
-    if (sd->tok.type == TOKEN_LIT && hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
+    if (sd->tok.type == TOKEN_LIT && outer_hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
       // even outside strict/async mode, this is valid, but an error
       sd->tok.type = TOKEN_KEYWORD;
       skip_walk(sd, 0);
     }
 
     // if we need a paren, consume and create expr group
-    if ((hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
+    if ((outer_hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
       record_walk(sd, 0);
       stack_inc(sd, SSTACK__EXPR);
       sd->curr->start = TOKEN_PAREN;
