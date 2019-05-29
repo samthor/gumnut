@@ -734,6 +734,15 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("label inside block", "if foo: 1",
+    TOKEN_KEYWORD,   // if
+    TOKEN_LABEL,     // foo
+    TOKEN_EXEC,      // virt
+    TOKEN_COLON,     // :
+    TOKEN_NUMBER,    // 1
+    TOKEN_CLOSE,     // virt
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {
