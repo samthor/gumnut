@@ -365,7 +365,7 @@ ${renderSpecial(specials, true)}
 ${renderDefines(litOnly, '', true)}
 ${renderDefines(extraDefines, '$', true)}
 `;
-  fs.writeFileSync('lit.js', litJSOutput);
+  fs.writeFileSync('lit.mjs', litJSOutput);
 }
 
 main();
