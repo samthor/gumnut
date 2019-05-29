@@ -369,10 +369,16 @@ static inline int may_trail_control(uint32_t prev, uint32_t curr) {
 
 
 static int simple_start_arrowfunc(simpledef *sd, int async) {
+#ifdef DEBUG
   if (sd->tok.type != TOKEN_ARROW) {
     debugf("arrowfunc start without TOKEN_ARROW\n");
-    return ERROR__INTERNAL;
+    return ERROR__ASSERT
   }
+  if (sd->curr->stype != SSTACK__EXPR) {
+    debugf("arrowfunc start not inside EXPR\n");
+    return ERROR__ASSERT;
+  }
+#endif
 
   uint8_t context = (sd->curr->context & CONTEXT__STRICT);
   if (async) {
@@ -390,6 +396,7 @@ static int simple_start_arrowfunc(simpledef *sd, int async) {
   } else {
     // just change statement's context (e.g. () => async () => () => ...)
     record_walk(sd, 0);
+    sd->curr->prev.type = TOKEN_EOF;  // pretend statement finished
   }
   sd->curr->context = context;
   return 0;
@@ -414,14 +421,14 @@ static int simple_consume_expr(simpledef *sd) {
       return 0;
 
     case TOKEN_COMMA:
-      if ((sd->curr - 1)->stype == SSTACK__DICT) {
-        --sd->curr;
+      // restart expr
+      --sd->curr;
+      if (sd->curr->stype == SSTACK__DICT) {
+        // ... unless it's a dict which puts us back on left
         return 0;
       }
-
-      // relevant in "async () => blah, foo", reset from parent
-      sd->curr->context = (sd->curr - 1)->context;
-      return record_walk(sd, 0);
+      stack_inc(sd, SSTACK__EXPR);
+      return skip_walk(sd, 0);
 
     case TOKEN_ARROW:
       if (!(sd->curr->prev.type == TOKEN_PAREN || sd->curr->prev.type == TOKEN_SYMBOL)) {
@@ -631,20 +638,27 @@ static int simple_consume_expr(simpledef *sd) {
 
   // look for async arrow function
   if (outer_hash == LIT_ASYNC) {
-    if (sd->curr->prev.hash != MISC_DOT) {
-      // ... ".async" is always a property
-      switch (sd->next->type) {
-        case TOKEN_LIT:
-          sd->tok.type = TOKEN_KEYWORD;  // "async foo" is always a keyword
-          // fall-through
+    switch (sd->curr->prev.type) {
+      case TOKEN_OP:
+        if (sd->curr->prev.hash != MISC_EQUALS) {
+          // ... "1 + async () => x" is invalid, only "... = async () =>" is fine
+          break;
+        }
+        // fall-through
 
-        case TOKEN_PAREN:
-          // consume and push SSTACK__ASYNC even if we already know keyword
-          // ... otherwise this explicitly remains as LIT until resolved
-          record_walk(sd, -1);
-          stack_inc(sd, SSTACK__ASYNC);
-          return 0;
-      }
+      case TOKEN_EOF:
+        switch (sd->next->type) {
+          case TOKEN_LIT:
+            sd->tok.type = TOKEN_KEYWORD;  // "async foo" always makes keyword
+            // fall-through
+
+          case TOKEN_PAREN:
+            // consume and push SSTACK__ASYNC even if we already know keyword
+            // ... otherwise this explicitly remains as LIT until resolved
+            record_walk(sd, -1);
+            stack_inc(sd, SSTACK__ASYNC);
+            return 0;
+        }
     }
 
     sd->tok.type = TOKEN_SYMBOL;
@@ -732,7 +746,7 @@ static int simple_consume(simpledef *sd) {
       }
 
       if (sd->tok.type != TOKEN_ARROW) {
-        debugf("async starter without arrow, ignoring\n");
+        debugf("async starter without arrow, ignoring (%d)\n", sd->tok.type);
         --sd->curr;
         return 0;
       }

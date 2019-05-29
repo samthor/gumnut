@@ -62,6 +62,7 @@ const extraDefines = {
   INCDEC: '+-',  // nb. this cheats and we use hash of +-
   NOT: '!',
   BITNOT: '~',
+  EQUALS: '=',
 };
 
 // ways of marking up hashes

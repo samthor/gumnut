@@ -1,4 +1,4 @@
-// Generated on Wed May 29 2019 16:24:15 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Wed May 29 2019 18:55:59 GMT+1000 (Australian Eastern Standard Time)
 
 export const _KEYWORD = 1;
 export const _STRICT_KEYWORD = 2;
@@ -68,6 +68,7 @@ export const $BITNOT = 135249920;
 export const $COLON = 134692864;
 export const $COMMA = 134578176;
 export const $DOT = 134594560;
+export const $EQUALS = 134717440;
 export const $INCDEC = 315973632;
 export const $NOT = 134488064;
 export const $SPREAD = 451264512;

@@ -218,6 +218,9 @@ static eat_out eat_token(char *p) {
         if (c == '=' && (start == '=' || start == '!')) {
           ++len;
         }
+      } else if (start == '=') {
+        // match equals specially
+        return _reth(1, TOKEN_OP, MISC_EQUALS);
       }
     }
 
