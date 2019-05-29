@@ -381,12 +381,21 @@ int main() {
     TOKEN_SEMICOLON, // ;
   );
 
+  _test("strict mode not after label", "foo: 'use strict'; protected;",
+    TOKEN_LABEL,     // foo
+    TOKEN_COLON,     // :
+    TOKEN_STRING,    // 'use strict';
+    TOKEN_SEMICOLON, // ;
+    TOKEN_SYMBOL,    // protected
+    TOKEN_SEMICOLON, // ;
+  );
+
   _test("strict mode not in control", "if {'use strict';protected+x}",
     TOKEN_KEYWORD,   // if
     TOKEN_EXEC,      // {
     TOKEN_STRING,    // 'use strict';
     TOKEN_SEMICOLON, // ;
-    TOKEN_SYMBOL,   // protected
+    TOKEN_SYMBOL,    // protected
     TOKEN_OP,        // +
     TOKEN_SYMBOL,    // x
     TOKEN_SEMICOLON, // ASI ;
@@ -736,10 +745,11 @@ int main() {
 
   _test("label inside block", "if foo: 1",
     TOKEN_KEYWORD,   // if
-    TOKEN_LABEL,     // foo
     TOKEN_EXEC,      // virt
+    TOKEN_LABEL,     // foo
     TOKEN_COLON,     // :
     TOKEN_NUMBER,    // 1
+    TOKEN_SEMICOLON, // ASI ;
     TOKEN_CLOSE,     // virt
   );
 

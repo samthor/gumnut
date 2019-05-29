@@ -12,11 +12,6 @@
 #define SSTACK__MODULE   6  // state machine for import/export defs
 #define SSTACK__ASYNC    7  // async arrow function
 
-// SSTACK__BLOCK
-#define SPECIAL__INIT      1  // is this the first statement in a block?
-
-
-
 #ifdef DEBUG
 #include <stdio.h>
 #define debugf(...) fprintf(stderr, __VA_ARGS__)
@@ -30,7 +25,6 @@ typedef struct {
   uint32_t start;       // hash of stype start (set only for some stypes)
   uint8_t stype : 3;    // stack type
   uint8_t context : 3;  // current execution context (strict, async, generator)
-  uint8_t special : 1;  // special bit for stype
 } sstack;
 
 
@@ -392,7 +386,7 @@ static int simple_start_arrowfunc(simpledef *sd, int async) {
     sd->tok.type = TOKEN_EXEC;
     record_walk(sd, 0);  // consume {
     stack_inc(sd, SSTACK__BLOCK);
-    sd->curr->special = SPECIAL__INIT;
+    sd->curr->prev.type = TOKEN_TOP;
   } else {
     // just change statement's context (e.g. () => async () => () => ...)
     record_walk(sd, 0);
@@ -511,15 +505,6 @@ static int simple_consume_expr(simpledef *sd) {
       // fall-through
 
     case TOKEN_STRING:
-      if (!sd->curr->prev.type &&
-          sd->next->type == TOKEN_SEMICOLON &&
-          (sd->curr - 1)->stype == SSTACK__BLOCK &&
-          (sd->curr - 1)->special &&
-          is_use_strict(&(sd->tok))) {
-        debugf("found single use-strict with semi\n");
-        (sd->curr - 1)->context |= CONTEXT__STRICT;
-      }
-
       if (sd->curr->prev.type == TOKEN_T_BRACE) {
         // if we're a string following ${}, this is part a of a template literal and doesn't have
         // special ASI casing (e.g. '${\n\n}' isn't really causing a newline)
@@ -674,21 +659,31 @@ static int simple_consume_expr(simpledef *sd) {
 }
 
 
+// must be called in SSTACK__BLOCK state
 static int maybe_close_control(simpledef *sd, token *t) {
   sstack *c = sd->curr;
+#ifdef DEBUG
+  if (c->stype != SSTACK__BLOCK) {
+    debugf("got maybe_close_control outside SSTACK__BLOCK\n");
+    return ERROR__ASSERT;
+  }
+#endif
 
   if (c == sd->stack) {
     return 0;  // can't close top or even check above
   } else if (t && t->type == TOKEN_CLOSE) {
-    // allowed
-  } else if (!(c->stype == SSTACK__BLOCK && c->special && c->prev.type != SSTACK__EXPR)) {
+    // allowed, this might be e.g. "if { if 1 }"
+  } else if (!c->prev.type || c->prev.type == TOKEN_COLON) {
+    // ... special-cases TOKEN_COLON to allow labels
     return 0;
   }
 
   if ((c - 1)->prev.p) {
-    // check for parent NULL: this implies empty TOKEN_EXEC above us
+    // if parent is non-NULL, then wait for the closing }
+    debugf("but doing nothing\n");
     return 0;
   }
+  // ... otherwise, we have a virtual TOKEN_EXEC!
 
   --sd->curr;
 #ifdef DEBUG
@@ -962,8 +957,8 @@ static int simple_consume(simpledef *sd) {
           sd->tok.type = TOKEN_EXEC;
           record_walk(sd, 0);
           stack_inc(sd, SSTACK__BLOCK);
+          sd->curr->prev.type = TOKEN_TOP;
           sd->curr->context = context;
-          sd->curr->special = SPECIAL__INIT;
           return 0;
         }
       }
@@ -1070,16 +1065,10 @@ check_single_block:
         sd->tok.type = TOKEN_EXEC;
         record_walk(sd, 0);
         stack_inc(sd, SSTACK__BLOCK);
-        // nb. do NOT set init here, it's used to detect 'use strict'
       } else {
         // ... found e.g. "if something_else", push virtual exec block
         yield_virt(sd, TOKEN_EXEC);
         stack_inc(sd, SSTACK__BLOCK);
-
-        // set init here so we can leave
-        // TODO: this is a bit overloaded; we abuse a virtual TOKEN_EXEC with SPECIAL__INIT to
-        // determine when a single-statement control is done
-        sd->curr->special = SPECIAL__INIT;
       }
       return 0;
 
@@ -1099,11 +1088,6 @@ check_single_block:
     // FIXME: we could call this in outer method
     // yield back to SSTACK__CONTROL
     return 0;
-  }
-
-  // finished our first _anything_ clear initial bit
-  if (sd->curr->prev.type && sd->curr->special) {
-    sd->curr->special = 0;
   }
 
   switch (sd->tok.type) {
@@ -1136,6 +1120,41 @@ check_single_block:
     case TOKEN_LIT:
       break;  // only care about lit below
 
+    case TOKEN_STRING:
+      // match 'use strict'
+      do {
+        if (sd->curr->prev.type != TOKEN_TOP) {
+          break;
+        }
+
+        // FIXME: gross, lookahead to confirm that 'use strict' is on its own or generate ASI
+        if (sd->next->type == TOKEN_SEMICOLON) {
+          // great
+        } else {
+          if (sd->next->line_no == sd->tok.line_no) {
+            // ... can't generate ASI
+            break;
+          }
+          if (sd->next->hash & _MASK_REL_OP) {
+            // binary oplike cases ('in', 'instanceof')
+            break;
+          }
+          if (sd->next->type == TOKEN_OP) {
+            if (sd->next->hash != MISC_INCDEC) {
+              // ... ++/-- causes ASI
+              break;
+            }
+          } else if (!is_token_valuelike(sd->next)) {
+            break;
+          }
+        }
+
+        if (is_use_strict(&(sd->tok))) {
+          debugf("setting 'use strict'\n");
+          sd->curr->context |= CONTEXT__STRICT;
+        }
+      } while (0);
+
     default:
       goto block_bail;  // non-lit starts statement
   }
@@ -1143,9 +1162,8 @@ check_single_block:
   // match label
   if (is_label(&(sd->tok), sd->curr->context) && sd->next->type == TOKEN_COLON) {
     sd->tok.type = TOKEN_LABEL;
-    sd->curr->special = 0;  // clear initial bit
-    skip_walk(sd, -1);  // consume label
-    skip_walk(sd, 0);  // consume colon
+    skip_walk(sd, -1);   // consume label
+    record_walk(sd, 0);  // consume colon and record (to prevent bad 'use strict')
     return 0;
   }
 
@@ -1159,13 +1177,13 @@ check_single_block:
   // match single-only
   if (outer_hash == LIT_DEBUGGER) {
     sd->tok.type = TOKEN_KEYWORD;
-    skip_walk(sd, 0);  // nothing looks for this
+    record_walk(sd, 0);
     yield_restrict_asi(sd);
     return 0;
   }
 
   // match restricted statement starters
-  if (outer_hash == LIT_RETURN ||outer_hash == LIT_THROW) {
+  if (outer_hash == LIT_RETURN || outer_hash == LIT_THROW) {
     sd->tok.type = TOKEN_KEYWORD;
     record_walk(sd, 0);
 
@@ -1297,8 +1315,8 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
   sd.arg = arg;
 
   sd.curr->stype = SSTACK__BLOCK;
-  sd.curr->special = SPECIAL__INIT;
   record_walk(&sd, 0);
+  sd.curr->prev.type = TOKEN_TOP;
 
   int unchanged = 0;
   int ret = 0;
@@ -1357,7 +1375,8 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
   }
 
   // close any open virtual control/exec pairs
-  if (maybe_close_control(&sd, NULL) || sd.curr->stype == SSTACK__CONTROL) {
+  if ((sd.curr->stype == SSTACK__BLOCK && maybe_close_control(&sd, NULL)) ||
+      sd.curr->stype == SSTACK__CONTROL) {
     debugf("end: closing virtual pairs\n");
     simple_consume(&sd);  // token doesn't matter, SSTACK__CONTROL doesn't consume
   }
