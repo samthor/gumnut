@@ -547,7 +547,7 @@ static int simple_consume_expr(simpledef *sd) {
 
     case TOKEN_OP: {
       int has_value = 0;
-      if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_INCDEC) {
+      if (sd->tok.hash == MISC_INCDEC) {
         // if we had value, but are on new line, insert an ASI: this is a PostfixExpression that
         // disallows LineTerminator
         if ((sd->curr - 1)->stype == SSTACK__BLOCK &&
@@ -783,7 +783,7 @@ static int simple_consume(simpledef *sd) {
           }
           --sd->curr;  // close outer
 
-          if (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_FROM) {
+          if (sd->tok.hash == LIT_FROM) {
             // ... inner {} must have trailer "from './path'"
             sd->tok.type = TOKEN_KEYWORD;
             record_walk(sd, 0);
@@ -848,16 +848,14 @@ static int simple_consume(simpledef *sd) {
 
       // search for function
       // ... look for 'static' without '(' next
-      if (sd->tok.type == TOKEN_LIT &&
-          sd->td->next.type != TOKEN_PAREN &&
+      if (sd->td->next.type != TOKEN_PAREN &&
           sd->tok.hash == LIT_STATIC) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
       }
 
       // ... look for 'async' without '(' next
-      if (sd->tok.type == TOKEN_LIT &&
-          sd->td->next.type != TOKEN_PAREN &&
+      if (sd->td->next.type != TOKEN_PAREN &&
           sd->tok.hash == LIT_ASYNC) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
@@ -865,14 +863,13 @@ static int simple_consume(simpledef *sd) {
       }
 
       // ... look for '*'
-      if (sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) {
+      if (sd->tok.hash == MISC_STAR) {
         context |= CONTEXT__GENERATOR;
         record_walk(sd, 0);
       }
 
       // ... look for get/set without '(' next
-      if (sd->tok.type == TOKEN_LIT &&
-          sd->td->next.type != TOKEN_PAREN &&
+      if (sd->td->next.type != TOKEN_PAREN &&
           (sd->tok.hash == LIT_GET || sd->tok.hash == LIT_SET)) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
@@ -1203,13 +1200,12 @@ check_single_block:
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
 
-      if ((sd->tok.type == TOKEN_OP && sd->tok.hash == MISC_STAR) ||
-          sd->tok.type == TOKEN_BRACE) {
+      if (sd->tok.hash == MISC_STAR || sd->tok.type == TOKEN_BRACE) {
         stack_inc(sd, SSTACK__MODULE);
         return 0;
       }
 
-      if (sd->tok.type == TOKEN_LIT && sd->tok.hash == LIT_DEFAULT) {
+      if (sd->tok.hash == LIT_DEFAULT) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
       }
@@ -1236,7 +1232,7 @@ check_single_block:
     record_walk(sd, 0);
 
     // match "for await"
-    if (sd->tok.type == TOKEN_LIT && outer_hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
+    if (outer_hash == LIT_FOR && sd->tok.hash == LIT_AWAIT) {
       // even outside strict/async mode, this is valid, but an error
       sd->tok.type = TOKEN_KEYWORD;
       skip_walk(sd, 0);
