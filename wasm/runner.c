@@ -3,11 +3,11 @@
 
 #include <emscripten.h>
 
-extern void token_callback(void *arg, char *p, int len, int line_no, int type, int mark);
+extern void token_callback(void *arg, char *p, int len, int line_no, int type, int mark, int hash);
 
 void internal_callback(void *arg, token *out) {
   // arg is our runnerdef
-  token_callback(arg, out->p, out->len, out->line_no, out->type, out->mark);
+  token_callback(arg, out->p, out->len, out->line_no, out->type, out->mark, out->hash);
 }
 
 typedef struct {

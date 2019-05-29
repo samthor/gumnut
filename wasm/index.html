@@ -25,12 +25,12 @@ const ready = utils.initializeSideModule('runner.wasm', (view) => {
       throw x;
     },
 
-    _token_callback(at, p, len, line_no, type, mark) {
+    _token_callback(at, p, len, line_no, type, mark, hash) {
       const handler = globalHandlers.get(at);
       if (!handler) {
         throw new Error(`unregistered address: ${at}`);
       }
-      handler(p, len, line_no, type, mark);
+      handler(p, len, line_no, type, mark, hash);
     },
   };
 });
@@ -176,7 +176,7 @@ window.addEventListener('load', (ev) => {
       const tokens = [];
       const start = performance.now();
 
-      const handler = (p, len, lineNo, type, mark) => {
+      const handler = (p, len, lineNo, type, mark, hash) => {
         const at = p - bytesAt;
         const token = {at, len, lineNo, type, mark, invalid: false};
 
