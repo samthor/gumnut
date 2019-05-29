@@ -170,18 +170,22 @@ function generateHash(s, bits=0) {
 }
 
 
-function renderDefine(defn, value, prefix) {
+function renderDefine(defn, value, prefix, js=false) {
   let hadValue = value;
   if (value === null) {
     value = defn;
   }
-  const name = (prefix + defn).toUpperCase().padEnd(16);
+  const name = (prefix + defn).toUpperCase().padEnd(js ? 0 : 16);
   const hash = nameToHash.get(value);
   if (!hash) {
     throw new Error(`unhashed name: ${value}`);
   }
-  let out = `#define ${name} ${hash}`;
 
+  if (js) {
+    return `export const ${name} = ${hash};\n`
+  }
+
+  let out = `#define ${name} ${hash}`;
   if (hadValue) {
     return out.padEnd(36) + `// ${hadValue}\n`;
   }
@@ -189,13 +193,13 @@ function renderDefine(defn, value, prefix) {
 }
 
 
-function renderDefines(defines, prefix) {
+function renderDefines(defines, prefix, js=false) {
   let out;
 
   if (defines instanceof Array) {
-    out = defines.map((value) => renderDefine(value, null, prefix));
+    out = defines.map((value) => renderDefine(value, null, prefix, js));
   } else {
-    out = Object.keys(defines).map((defn) => renderDefine(defn, defines[defn], prefix));
+    out = Object.keys(defines).map((defn) => renderDefine(defn, defines[defn], prefix, js));
   }
 
   out.sort();
@@ -297,10 +301,13 @@ ${space}}\n`;
 }
 
 
-function renderSpecial(specials) {
+function renderSpecial(specials, js=false) {
   const lines = specials.map((name, i) => {
     const upper = name.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase();
     const value = bitValueFor(name);
+    if (js) {
+      return `export const _${upper} = ${value};\n`;
+    }
     return `#define _MASK_${upper.padEnd(16)} ${value}\n`;
   });
   return lines.join('');
@@ -350,6 +357,15 @@ ${renderDefines(extraDefines, 'misc_')}
 #endif//_LIT_H
 `;
   fs.writeFileSync('lit.h', litOutput);
+
+
+  const litJSOutput = `// Generated on ${now}
+
+${renderSpecial(specials, true)}
+${renderDefines(litOnly, '', true)}
+${renderDefines(extraDefines, '$', true)}
+`;
+  fs.writeFileSync('lit.js', litJSOutput);
 }
 
 main();
