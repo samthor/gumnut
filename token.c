@@ -307,7 +307,12 @@ static eat_out eat_token(char *p, token *prev) {
 
   // literals
   uint32_t hash = 0;
-  int len = consume_known_lit(p, &hash);
+  int len;
+  if (start == '#') {
+    len = 1;  // allow # at start of literal, for private vars
+  } else {
+    len = consume_known_lit(p, &hash);
+  }
   char c = p[len];
   do {
     // FIXME: escapes aren't valid in literals, but check whether this matches UTF-8
