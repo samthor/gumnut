@@ -24,6 +24,11 @@ cat large-js-file | ./demo/speed.sh
 
 There's a small unit test suite in `./test/run.sh`.
 
+# Remaining Tasks
+
+* Distinguish between class declarations and dictionaries; `prsr` does not correctly identify e.g. "class { x = 123; }"
+* Generate hints useful enough for a full AST; currently most useful as syntax highlighter
+
 # Design
 
 ## Goals
