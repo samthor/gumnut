@@ -217,7 +217,7 @@ static eat_out eat_token(char *p, token *prev) {
       return _ret(1, TOKEN_CLOSE);
   }
 
-  // ops: i.e., anything made up of =<& etc (except '/', handled above)
+  // ops: i.e., anything made up of =<& etc (except '/' and ',', handled above)
   // note: 'in' and 'instanceof' are ops in most cases, but here they are lit
   do {
     char c = start;
