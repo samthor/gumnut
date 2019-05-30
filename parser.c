@@ -533,7 +533,11 @@ static int simple_consume_expr(simpledef *sd) {
       }
 
       if (sd->tok.type == TOKEN_LIT) {
-        break;  // special lit handling
+        if (sd->tok.hash) {
+          break;  // special lit handling
+        }
+        // ... no hash, always just a regular value
+        sd->tok.type = TOKEN_SYMBOL;
       }
       return record_walk(sd, 1);  // otherwise, just a regular value
 
