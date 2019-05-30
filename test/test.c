@@ -266,6 +266,13 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("dict after comma", ",{}",
+    TOKEN_OP,        // ,
+    TOKEN_DICT,      // {
+    TOKEN_CLOSE,     // }
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   _test("ASI for PostfixExpression", "a\n++\nb",
     TOKEN_SYMBOL,    // a
     TOKEN_SEMICOLON, // ASI ;
@@ -544,7 +551,7 @@ int main() {
     TOKEN_OP,        // void
     TOKEN_DICT,      // {
     TOKEN_COLON,     // :
-    TOKEN_COMMA,     // ,
+    TOKEN_OP,        // ,
     TOKEN_KEYWORD,   // get
     TOKEN_SYMBOL,    // x
     TOKEN_PAREN,     // (
@@ -580,7 +587,7 @@ int main() {
   _test("^check import", "import foo, {zing as what} from 'blah'",
     TOKEN_KEYWORD,   // import
     TOKEN_SYMBOL,    // foo
-    TOKEN_COMMA,     // ,
+    TOKEN_OP,        // ,
     TOKEN_DICT,      // {
     TOKEN_SYMBOL,    // zing
     TOKEN_KEYWORD,   // as

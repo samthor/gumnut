@@ -421,16 +421,6 @@ static int simple_consume_expr(simpledef *sd) {
       record_walk(sd, -1);  // semi goes in block
       return 0;
 
-    case TOKEN_COMMA:
-      // restart expr
-      --sd->curr;
-      if (sd->curr->stype == SSTACK__DICT) {
-        // ... unless it's a dict which puts us back on left
-        return 0;
-      }
-      stack_inc(sd, SSTACK__EXPR);
-      return skip_walk(sd, -1);
-
     case TOKEN_ARROW:
       if (!(sd->curr->prev.type == TOKEN_PAREN || sd->curr->prev.type == TOKEN_SYMBOL)) {
         // not a valid arrow func, treat as op
@@ -479,8 +469,8 @@ static int simple_consume_expr(simpledef *sd) {
     }
 
     case TOKEN_BRACE:
-      if (sd->tok_has_value && !sd->curr->start) {
-        // found an invalid brace, restart as block
+      if (sd->curr->prev.type != TOKEN_OP && !sd->curr->start) {
+        // found an invalid brace (not following op, not in group), yield to parent
         int yield = (sd->tok.line_no != sd->curr->prev.line_no &&
             sd->curr->prev.type &&
             (sd->curr - 1)->stype == SSTACK__BLOCK);
@@ -488,6 +478,7 @@ static int simple_consume_expr(simpledef *sd) {
         if (yield) {
           yield_virt(sd, TOKEN_SEMICOLON);
         }
+        debugf("invalid brace in statement, yield to parent\n");
         return 0;
       }
       sd->tok.type = TOKEN_DICT;
@@ -542,29 +533,41 @@ static int simple_consume_expr(simpledef *sd) {
       }
       return record_walk(sd, 1);  // otherwise, just a regular value
 
-    case TOKEN_OP: {
-      int has_value = 0;
-      if (sd->tok.hash == MISC_INCDEC) {
-        // if we had value, but are on new line, insert an ASI: this is a PostfixExpression that
-        // disallows LineTerminator
-        if ((sd->curr - 1)->stype == SSTACK__BLOCK &&
-            sd->tok_has_value &&
-            sd->tok.line_no != sd->curr->prev.line_no) {
-          // nb. if we're not inside SSTACK__BLOCK, line changes here are invalid
-          sd->tok_has_value = 0;
-          int yield = (sd->curr->prev.type);
-          --sd->curr;
-          if (yield) {
-            yield_virt(sd, TOKEN_SEMICOLON);
+    case TOKEN_OP:
+      switch (sd->tok.hash) {
+        case MISC_COMMA:
+          // special-case comma in dict, puts us back on left
+          if ((sd->curr - 1)->stype == SSTACK__DICT) {
+            --sd->curr;
+            return 0;
           }
-          return 0;
+          // clears context (for arrow async weirdness)
+          sd->curr->context = (sd->curr - 1)->context;
+          // fall-through
+
+        default:
+          return record_walk(sd, -1);
+
+        case MISC_INCDEC:
+          break;
+      }
+
+      // if this is operating _on_ something in the statement, then don't record it
+      if (sd->curr->prev.type && sd->curr->prev.type != TOKEN_OP) {
+        if (sd->tok.line_no == sd->curr->prev.line_no) {
+          // ... don't record this, right-side (e.g. "a++")
+          debugf("not recording right-side +/--\n");
+          return skip_walk(sd, 0);
         }
 
-        // ++ or -- don't change value-ness
-        has_value = sd->tok_has_value;
+        // otherwise, it's on a newline (invalid in pure statement, generate ASI otherwise)
+        // ... this is a PostfixExpression that disallows LineTerminator
+        if ((sd->curr - 1)->stype == SSTACK__BLOCK) {
+          yield_virt(sd, TOKEN_SEMICOLON);
+        }
       }
-      return record_walk(sd, has_value);
-    }
+      debugf("got left-side ++/--\n");
+      return record_walk(sd, 0);
 
     case TOKEN_COLON:
       if ((sd->curr - 1)->stype == SSTACK__BLOCK) {
@@ -778,9 +781,6 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_LIT:
           break;
 
-        case TOKEN_COMMA:
-          return record_walk(sd, -1);
-
         case TOKEN_CLOSE:
           if ((sd->curr - 1)->stype != SSTACK__MODULE) {
             debugf("module internal error\n");
@@ -811,6 +811,8 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_OP:
           if (sd->tok.hash == MISC_STAR) {
             sd->tok.type = TOKEN_SYMBOL;  // pretend this is symbol
+            return record_walk(sd, -1);
+          } else if (sd->tok.hash == MISC_COMMA) {
             return record_walk(sd, -1);
           }
           // fall-through
@@ -917,8 +919,11 @@ static int simple_consume(simpledef *sd) {
           skip_walk(sd, (sd->curr->stype == SSTACK__EXPR));
           return 0;
 
-        case TOKEN_COMMA:  // valid
-          return record_walk(sd, -1);
+        case TOKEN_OP:
+          if (sd->tok.hash == MISC_COMMA) {
+            return record_walk(sd, -1);
+          }
+          break;
       }
 
       // if this a single literal, it's valid: e.g. {'abc':def}
@@ -992,6 +997,7 @@ static int simple_consume(simpledef *sd) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);  // consume "extends" keyword, treat as non-value
         stack_inc(sd, SSTACK__EXPR);
+        sd->curr->prev.type = TOKEN_OP;
         return 0;
       }
 

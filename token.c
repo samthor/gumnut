@@ -144,7 +144,8 @@ static eat_out eat_token(char *p, token *prev) {
         return _ret(consume_slash_op(p), TOKEN_OP);
 
       case MISC_COLON:
-        // "? ... :", no value, always regexp
+        // a) "? ... :", no value, always regexp
+        // b) post-label, always regexp
         return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
     }
 
@@ -158,7 +159,6 @@ static eat_out eat_token(char *p, token *prev) {
       case TOKEN_EOF:
       case TOKEN_EXEC:     // not generated
       case TOKEN_SEMICOLON:
-      case TOKEN_COMMA:
       case TOKEN_ARROW:
       case TOKEN_COLON:    // matched above
       case TOKEN_DICT:     // not generated
@@ -198,7 +198,7 @@ static eat_out eat_token(char *p, token *prev) {
       return _reth(1, TOKEN_COLON, MISC_COLON);  // nb. might change to TOKEN_CLOSE in parent
 
     case ',':
-      return _reth(1, TOKEN_COMMA, MISC_COMMA);
+      return _reth(1, TOKEN_OP, MISC_COMMA);
 
     case '(':
       return _ret(1, TOKEN_PAREN);

@@ -42,7 +42,6 @@ typedef struct {
 // fixed: will always be the same, or in the same set
 #define TOKEN_EXEC      1   // block '{' or blank for statement
 #define TOKEN_SEMICOLON 2   // might be blank for ASI
-#define TOKEN_COMMA     3
 #define TOKEN_OP        4   // can include 'in', 'instanceof'
 #define TOKEN_ARROW     5
 #define TOKEN_COLON     6   // used in label or dict
