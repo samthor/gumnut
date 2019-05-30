@@ -1,4 +1,4 @@
-// Generated on Wed May 29 2019 18:55:59 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Thu May 30 2019 11:09:47 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -74,6 +74,7 @@
 #define MISC_EQUALS      134717440  // =
 #define MISC_INCDEC      315973632  // +-
 #define MISC_NOT         134488064  // !
+#define MISC_RARRAY      134979584  // ]
 #define MISC_SPREAD      451264512  // ...
 #define MISC_STAR        134561792  // *
 

@@ -57,6 +57,7 @@ const extraDefines = {
   SPREAD: '...',
   ARROW: '=>',
   COLON: ':',
+  RARRAY: ']',
   DOT: '.',
   STAR: '*',
   INCDEC: '+-',  // nb. this cheats and we use hash of +-

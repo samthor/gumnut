@@ -124,7 +124,7 @@ static int consume_string(char *p, int *line_no, int *litflag) {
   return len;
 }
 
-static eat_out eat_token(char *p) {
+static eat_out eat_token(char *p, token *prev) {
 #define _ret(_len, _type) ((eat_out) {_len, _type, 0});
 #define _reth(_len, _type, _hash) ((eat_out) {_len, _type, _hash});
 
@@ -134,11 +134,60 @@ static eat_out eat_token(char *p) {
     return _ret(0, TOKEN_EOF);
   }
 
+  // try to resolve regexp/op if we can
+  if (start == '/') {
+    // FIXME: this could be range checks
+
+    switch (prev->hash) {
+      case MISC_RARRAY:
+        // end of array [], always op
+        return _ret(consume_slash_op(p), TOKEN_OP);
+
+      case MISC_COLON:
+        // "? ... :", no value, always regexp
+        return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
+    }
+
+    switch (prev->type) {
+      case TOKEN_OP:
+        if (prev->hash == MISC_INCDEC) {
+          break;  // weird attachment rules
+        }
+        // fall-through
+
+      case TOKEN_EOF:
+      case TOKEN_EXEC:     // not generated
+      case TOKEN_SEMICOLON:
+      case TOKEN_COMMA:
+      case TOKEN_ARROW:
+      case TOKEN_COLON:    // matched above
+      case TOKEN_DICT:     // not generated
+      case TOKEN_ARRAY:
+      case TOKEN_PAREN:
+      case TOKEN_T_BRACE:
+      case TOKEN_TERNARY:
+      case TOKEN_BRACE:
+        return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
+
+      case TOKEN_STRING:
+      case TOKEN_REGEXP:
+      case TOKEN_NUMBER:
+      case TOKEN_SYMBOL:   // not generated
+        return _ret(consume_slash_op(p), TOKEN_OP);
+
+      case TOKEN_CLOSE:
+      case TOKEN_KEYWORD:  // not generated
+      case TOKEN_LABEL:    // not generated (and invalid)
+      case TOKEN_LIT:
+        break;  // ambiguous
+    }
+
+    // unkown, return ambiguous
+    return _ret(1, TOKEN_SLASH);  // return ambig, handled elsewhere
+  }
+
   // simple ascii characters
   switch (start) {
-    case '/':
-      return _ret(1, TOKEN_SLASH);  // return ambig, handled elsewhere
-
     case ';':
       return _ret(1, TOKEN_SEMICOLON);
 
@@ -160,8 +209,10 @@ static eat_out eat_token(char *p) {
     case '{':
       return _ret(1, TOKEN_BRACE);
 
-    case ')':
     case ']':
+      return _reth(1, TOKEN_CLOSE, MISC_RARRAY);
+
+    case ')':
     case '}':
       return _ret(1, TOKEN_CLOSE);
   }
@@ -284,7 +335,6 @@ static eat_out eat_token(char *p) {
   } while (c);
 
   if (len) {
-    // we don't care what this is, give to caller
     return _reth(len, TOKEN_LIT, hash);
   }
 
@@ -430,7 +480,7 @@ static void eat_next(tokendef *d) {
   }
 
   // match real token
-  eat_out eat = eat_token(p);
+  eat_out eat = eat_token(p, &(d->next));
   d->next.type = eat.type;
   d->next.hash = eat.hash;
   d->next.line_no = d->line_no;
@@ -444,7 +494,7 @@ static void eat_next(tokendef *d) {
       break;
 
     case TOKEN_STRING: {
-      // consume string (assume eat.len is zero)
+      // consume string
       int litflag = 0;
       d->next.len = consume_string(p, &d->line_no, &litflag);
       if (litflag) {

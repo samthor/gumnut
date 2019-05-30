@@ -194,7 +194,7 @@ static int match_function(simpledef *sd) {
   if (sd->tok.hash == LIT_ASYNC) {
     context |= CONTEXT__ASYNC;
     sd->tok.type = TOKEN_KEYWORD;
-    skip_walk(sd, 0);  // consume "async"
+    skip_walk(sd, -1);  // consume "async"
   }
   sd->tok.type = TOKEN_KEYWORD;
   record_walk(sd, 0);  // consume "function"
@@ -271,7 +271,7 @@ static int match_label_keyword(simpledef *sd) {
 
   // e.g. "break\n" or "break foo\n"
   if (!yield_restrict_asi(sd) && sd->tok.type == TOKEN_SEMICOLON) {
-    skip_walk(sd, 0);  // emit or consume valid semicolon
+    skip_walk(sd, -1);  // emit or consume valid semicolon
   }
   return 0;
 }
@@ -372,7 +372,7 @@ static int simple_start_arrowfunc(simpledef *sd, int async) {
 #ifdef DEBUG
   if (sd->tok.type != TOKEN_ARROW) {
     debugf("arrowfunc start without TOKEN_ARROW\n");
-    return ERROR__ASSERT
+    return ERROR__ASSERT;
   }
   if (sd->curr->stype != SSTACK__EXPR) {
     debugf("arrowfunc start not inside EXPR\n");
@@ -385,17 +385,17 @@ static int simple_start_arrowfunc(simpledef *sd, int async) {
     context |= CONTEXT__ASYNC;
   }
 
-  if (sd->td->next.type == TOKEN_BRACE) {
+  if (sd->next->type == TOKEN_BRACE) {
     // the sensible arrow function case, with a proper body
     // e.g. "() => { statements }"
     record_walk(sd, -1);  // consume =>
     sd->tok.type = TOKEN_EXEC;
-    record_walk(sd, 0);  // consume {
+    record_walk(sd, -1);  // consume {
     stack_inc(sd, SSTACK__BLOCK);
     sd->curr->prev.type = TOKEN_TOP;
   } else {
     // just change statement's context (e.g. () => async () => () => ...)
-    record_walk(sd, 0);
+    record_walk(sd, -1);  // consume =>
     sd->curr->prev.type = TOKEN_EOF;  // pretend statement finished
   }
   sd->curr->context = context;
@@ -417,7 +417,7 @@ static int simple_consume_expr(simpledef *sd) {
 #endif
         --sd->curr;
       }
-      record_walk(sd, 0);  // semi goes in block
+      record_walk(sd, -1);  // semi goes in block
       return 0;
 
     case TOKEN_COMMA:
@@ -428,12 +428,12 @@ static int simple_consume_expr(simpledef *sd) {
         return 0;
       }
       stack_inc(sd, SSTACK__EXPR);
-      return skip_walk(sd, 0);
+      return skip_walk(sd, -1);
 
     case TOKEN_ARROW:
       if (!(sd->curr->prev.type == TOKEN_PAREN || sd->curr->prev.type == TOKEN_SYMBOL)) {
         // not a valid arrow func, treat as op
-        return record_walk(sd, 0);
+        return record_walk(sd, -1);
       }
       return simple_start_arrowfunc(sd, 0);
 
@@ -490,7 +490,7 @@ static int simple_consume_expr(simpledef *sd) {
         return 0;
       }
       sd->tok.type = TOKEN_DICT;
-      record_walk(sd, 0);
+      record_walk(sd, -1);
       stack_inc(sd, SSTACK__DICT);
       return 0;
 
@@ -498,7 +498,7 @@ static int simple_consume_expr(simpledef *sd) {
     case TOKEN_ARRAY:
     case TOKEN_PAREN:
     case TOKEN_T_BRACE:
-      record_walk(sd, 0);
+      record_walk(sd, -1);
       stack_inc(sd, SSTACK__EXPR);
       sd->curr->start = sd->tok.type;
       return 0;
@@ -515,7 +515,7 @@ static int simple_consume_expr(simpledef *sd) {
       if (sd->curr->prev.type == TOKEN_T_BRACE) {
         // if we're a string following ${}, this is part a of a template literal and doesn't have
         // special ASI casing (e.g. '${\n\n}' isn't really causing a newline)
-        return record_walk(sd, 1);
+        return record_walk(sd, -1);
       }
       // fall-through
 
@@ -571,7 +571,7 @@ static int simple_consume_expr(simpledef *sd) {
       } else {
         // does nothing here (invalid)
       }
-      return record_walk(sd, 0);
+      return record_walk(sd, -1);
 
     default:
       // nb. This is likely because we haven't resolved a TOKEN_SLASH somewhere.
@@ -726,7 +726,7 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_EOF:
           // start of ambig, insert expr
           if (sd->tok.type == TOKEN_PAREN) {
-            record_walk(sd, 0);
+            record_walk(sd, -1);
             stack_inc(sd, SSTACK__EXPR);
             sd->curr->start = TOKEN_PAREN;
             return 0;
@@ -763,7 +763,7 @@ static int simple_consume(simpledef *sd) {
       switch (sd->tok.type) {
         case TOKEN_BRACE:
           sd->tok.type = TOKEN_DICT;
-          record_walk(sd, 0);
+          record_walk(sd, -1);
           stack_inc(sd, SSTACK__MODULE);
           return 0;
 
@@ -771,7 +771,7 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_T_BRACE:
         case TOKEN_PAREN:
         case TOKEN_ARRAY:
-          record_walk(sd, 0);
+          record_walk(sd, -1);
           stack_inc(sd, SSTACK__EXPR);
           sd->curr->start = sd->tok.type;
           return 0;
@@ -780,7 +780,7 @@ static int simple_consume(simpledef *sd) {
           break;
 
         case TOKEN_COMMA:
-          return record_walk(sd, 0);
+          return record_walk(sd, -1);
 
         case TOKEN_CLOSE:
           if ((sd->curr - 1)->stype != SSTACK__MODULE) {
@@ -812,7 +812,7 @@ static int simple_consume(simpledef *sd) {
         case TOKEN_OP:
           if (sd->tok.hash == MISC_STAR) {
             sd->tok.type = TOKEN_SYMBOL;  // pretend this is symbol
-            return record_walk(sd, 0);
+            return record_walk(sd, -1);
           }
           // fall-through
 
@@ -878,7 +878,7 @@ static int simple_consume(simpledef *sd) {
       // ... look for '*'
       if (sd->tok.hash == MISC_STAR) {
         context |= CONTEXT__GENERATOR;
-        record_walk(sd, 0);
+        record_walk(sd, -1);
       }
 
       // ... look for get/set without '(' next
@@ -907,7 +907,7 @@ static int simple_consume(simpledef *sd) {
           return 0;
 
         case TOKEN_COLON:
-          record_walk(sd, 0);
+          record_walk(sd, -1);
           stack_inc(sd, SSTACK__EXPR);
           debugf("pushing stmt for colon\n");
           return 0;
@@ -919,7 +919,7 @@ static int simple_consume(simpledef *sd) {
           return 0;
 
         case TOKEN_COMMA:  // valid
-          return record_walk(sd, 0);
+          return record_walk(sd, -1);
       }
 
       // if this a single literal, it's valid: e.g. {'abc':def}
@@ -934,7 +934,7 @@ static int simple_consume(simpledef *sd) {
       switch (sd->tok.type) {
         case TOKEN_ARRAY:
           // allow "function ['name']" (for dict)
-          record_walk(sd, 0);
+          record_walk(sd, -1);
           stack_inc(sd, SSTACK__EXPR);
           sd->curr->start = TOKEN_ARRAY;
 
@@ -947,7 +947,7 @@ static int simple_consume(simpledef *sd) {
           if (sd->tok.p[0] == '`') {
             break;  // don't allow template literals
           }
-          return record_walk(sd, 0);
+          return record_walk(sd, -1);
 
         case TOKEN_LIT: {
           sstack *p = (sd->curr - 1);  // use context from parent, "async function await() {}" is valid :(
@@ -963,7 +963,7 @@ static int simple_consume(simpledef *sd) {
 
         case TOKEN_PAREN:
           // allow "function ()"
-          record_walk(sd, 0);
+          record_walk(sd, -1);
           stack_inc(sd, SSTACK__EXPR);
           sd->curr->start = TOKEN_PAREN;
           return 0;
@@ -973,7 +973,7 @@ static int simple_consume(simpledef *sd) {
           uint8_t context = sd->curr->context;
           --sd->curr;
           sd->tok.type = TOKEN_EXEC;
-          record_walk(sd, 0);
+          record_walk(sd, -1);
           stack_inc(sd, SSTACK__BLOCK);
           sd->curr->prev.type = TOKEN_TOP;
           sd->curr->context = context;
@@ -1000,7 +1000,7 @@ static int simple_consume(simpledef *sd) {
         // start dict-like block (pop SSTACK__CLASS)
         --sd->curr;
         sd->tok.type = TOKEN_DICT;
-        record_walk(sd, 0);
+        record_walk(sd, -1);
         stack_inc(sd, SSTACK__DICT);
         return 0;
       }
@@ -1026,7 +1026,7 @@ restart_control:
           if (sd->next->type == TOKEN_PAREN && sd->tok.hash == LIT_WHILE) {
             sd->tok.type = TOKEN_KEYWORD;
             record_walk(sd, -1);  // consume while
-            record_walk(sd, 0);  // consume paren
+            record_walk(sd, -1);  // consume paren
             stack_inc(sd, SSTACK__EXPR);
             sd->curr->start = TOKEN_PAREN;
             return 0;
@@ -1062,7 +1062,7 @@ check_single_block:
         // this is end of valid group, emit ASI if there's not one
         // occurs regardless of newline, e.g. "do;while(0)foo" is valid, ASI after close paren
         if (sd->tok.type == TOKEN_SEMICOLON) {
-          skip_walk(sd, 0);
+          skip_walk(sd, -1);
         } else {
           yield_virt(sd, TOKEN_SEMICOLON);
         }
@@ -1081,7 +1081,7 @@ check_single_block:
       if (sd->tok.type == TOKEN_BRACE) {
         // ... found e.g., "if {}"
         sd->tok.type = TOKEN_EXEC;
-        record_walk(sd, 0);
+        record_walk(sd, -1);
         stack_inc(sd, SSTACK__BLOCK);
       } else {
         // ... found e.g. "if something_else", push virtual exec block
@@ -1113,7 +1113,7 @@ check_single_block:
       // anon block
       debugf("unattached exec block\n");
       sd->tok.type = TOKEN_EXEC;
-      record_walk(sd, 0);
+      record_walk(sd, -1);
       stack_inc(sd, SSTACK__BLOCK);
       return 0;
 
@@ -1180,8 +1180,8 @@ check_single_block:
   // match label
   if (is_label(&(sd->tok), sd->curr->context) && sd->next->type == TOKEN_COLON) {
     sd->tok.type = TOKEN_LABEL;
-    skip_walk(sd, -1);   // consume label
-    record_walk(sd, 0);  // consume colon and record (to prevent bad 'use strict')
+    skip_walk(sd, -1);    // consume label
+    record_walk(sd, -1);  // consume colon and record (to prevent bad 'use strict')
     return 0;
   }
 
@@ -1276,7 +1276,7 @@ check_single_block:
 
     // if we need a paren, consume and create expr group
     if ((outer_hash & _MASK_CONTROL_PAREN) && sd->tok.type == TOKEN_PAREN) {
-      record_walk(sd, 0);
+      record_walk(sd, -1);
       stack_inc(sd, SSTACK__EXPR);
       sd->curr->start = TOKEN_PAREN;
     }
@@ -1333,7 +1333,7 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
   sd.arg = arg;
 
   sd.curr->stype = SSTACK__BLOCK;
-  record_walk(&sd, 0);
+  record_walk(&sd, -1);
   sd.curr->prev.type = TOKEN_TOP;
 
   int unchanged = 0;
@@ -1402,7 +1402,7 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
   // emit 'real' EOF for caller
   sd.tok.type = TOKEN_EOF;
   sd.tok.p = eof_at;
-  skip_walk(&sd, 0);
+  skip_walk(&sd, -1);
 
   if (sd.curr != sd.stack) {
 #ifdef DEBUG
