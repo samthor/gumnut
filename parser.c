@@ -195,7 +195,7 @@ static int match_function(simpledef *sd) {
     skip_walk(sd, -1);  // consume "async"
   }
   sd->tok.type = TOKEN_KEYWORD;
-  record_walk(sd, 0);  // consume "function"
+  record_walk(sd, -1);  // consume "function"
 
   // optionally consume generator star
   if (sd->tok.hash == MISC_STAR) {
@@ -410,13 +410,9 @@ static int simple_consume_expr(simpledef *sd) {
   switch (sd->tok.type) {
     case TOKEN_SEMICOLON:
       if ((sd->curr - 1)->stype == SSTACK__BLOCK) {
-#ifdef DEBUG
-        if (sd->curr->start) {
-          debugf("block expr must not have real start token\n");
-          return ERROR__ASSERT;
-        }
-#endif
         --sd->curr;
+      } else {
+        // invalid
       }
       record_walk(sd, -1);  // semi goes in block
       return 0;
@@ -476,6 +472,10 @@ static int simple_consume_expr(simpledef *sd) {
           yield_virt(sd, TOKEN_SEMICOLON);
         }
         debugf("invalid brace in statement, yield to parent\n");
+        return 0;
+      } else if (sd->curr->start == LIT_EXTENDS && ptype) {
+        // ... special-case finding the class decl after an extends block
+        --sd->curr;
         return 0;
       }
       sd->tok.type = TOKEN_DICT;
@@ -790,13 +790,12 @@ static int simple_consume(simpledef *sd) {
             // ... inner {} must have trailer "from './path'"
             sd->tok.type = TOKEN_KEYWORD;
             record_walk(sd, 0);
-            if (sd->tok.type == TOKEN_STRING) {
-              sd->tok.mark = MARK_IMPORT;
-            }
-          } else if (sd->tok.type != TOKEN_SEMICOLON && sd->tok.line_no != line_no) {
-            // ... or just abandon, generating semi if needed (valid in export case)
-            yield_virt(sd, TOKEN_SEMICOLON);
           }
+
+          // nb. same as normal bail path below
+          stack_inc(sd, SSTACK__EXPR);
+          sd->curr->start = LIT_IMPORT;
+          sd->curr->prev.type = TOKEN_OP;   // pretend something was here so a semi is inserted
           return 0;
 
         case TOKEN_OP:
@@ -825,10 +824,9 @@ static int simple_consume(simpledef *sd) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);
 
-        // restart as regular statement, marking as import name
-        if (sd->tok.type == TOKEN_STRING) {
-          sd->tok.mark = MARK_IMPORT;
-        }
+        stack_inc(sd, SSTACK__EXPR);
+        sd->curr->start = LIT_IMPORT;
+        sd->curr->prev.type = TOKEN_OP;   // pretend something was here so a semi is inserted
         return 0;
       }
 
@@ -988,7 +986,7 @@ static int simple_consume(simpledef *sd) {
         sd->tok.type = TOKEN_KEYWORD;
         record_walk(sd, 0);  // consume "extends" keyword, treat as non-value
         stack_inc(sd, SSTACK__EXPR);
-        sd->curr->prev.type = TOKEN_OP;  // pretend we start with op to prevent block-as-exec
+        sd->curr->start = LIT_EXTENDS;
         return 0;
       }
 
@@ -1118,7 +1116,7 @@ check_single_block:
         // ... top-level, invalid CLOSE
         debugf("invalid close\n");
       } else {
-       --sd->curr;  // pop out of block or dict
+       --sd->curr;  // pop out of block
  #ifdef DEBUG
         if (sd->curr->stype == SSTACK__CONTROL && sd->curr->prev.type == TOKEN_EXEC && !sd->curr->prev.p) {
           debugf("TOKEN_CLOSE inside SSTACK__BLOCK for single block\n");
@@ -1206,7 +1204,9 @@ check_single_block:
       return 0;
     }
 
-    goto block_bail;  // e.g. "return ..." or "throw ..." starts a statement
+    stack_inc(sd, SSTACK__EXPR);
+    sd->curr->start = LIT_RETURN;
+    return 0;
   }
 
   // module valid cases at top-level
@@ -1219,8 +1219,9 @@ check_single_block:
 
       // short-circuit for "import 'foo'"
       if (sd->tok.type == TOKEN_STRING) {
-        sd->tok.mark = MARK_IMPORT;
-        goto block_bail;  // starts a statement containing at least one string
+        stack_inc(sd, SSTACK__EXPR);
+        sd->curr->start = LIT_IMPORT;
+        return 0;
       }
 
       stack_inc(sd, SSTACK__MODULE);
@@ -1252,7 +1253,9 @@ check_single_block:
 
   // match "var", "let" and "const"
   if (match_decl(sd) >= 0) {
-    goto block_bail;  // matched, now rest is regular statement
+    stack_inc(sd, SSTACK__EXPR);
+    sd->curr->start = outer_hash;  // var, let or const
+    return 0;
   }
 
   // match e.g., "if", "catch"

@@ -68,7 +68,6 @@ typedef struct {
 #define TOKEN_SLASH     31  // ambigous slash that is op or regexp
 
 // special marks
-#define MARK_IMPORT     1   // this is the name inside static import
 #define MARK_RESOLVE    2   // resolving a prior lit (always "async")
 
 #endif//_TYPES_H

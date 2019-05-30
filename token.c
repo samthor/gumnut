@@ -127,67 +127,62 @@ static int consume_string(char *p, int *line_no, int *litflag) {
 static eat_out eat_token(char *p, token *prev) {
 #define _ret(_len, _type) ((eat_out) {_len, _type, 0});
 #define _reth(_len, _type, _hash) ((eat_out) {_len, _type, _hash});
-
-  // look for EOF
   const char start = p[0];
-  if (!start) {
-    return _ret(0, TOKEN_EOF);
-  }
 
-  // try to resolve regexp/op if we can
-  if (start == '/') {
-    // FIXME: this could be range checks
-
-    switch (prev->hash) {
-      case MISC_RARRAY:
-        // end of array [], always op
-        return _ret(consume_slash_op(p), TOKEN_OP);
-
-      case MISC_COLON:
-        // a) "? ... :", no value, always regexp
-        // b) post-label, always regexp
-        return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
-    }
-
-    switch (prev->type) {
-      case TOKEN_OP:
-        if (prev->hash == MISC_INCDEC) {
-          break;  // weird attachment rules
-        }
-        // fall-through
-
-      case TOKEN_EOF:
-      case TOKEN_EXEC:     // not generated
-      case TOKEN_SEMICOLON:
-      case TOKEN_ARROW:
-      case TOKEN_COLON:    // matched above
-      case TOKEN_DICT:     // not generated
-      case TOKEN_ARRAY:
-      case TOKEN_PAREN:
-      case TOKEN_T_BRACE:
-      case TOKEN_TERNARY:
-      case TOKEN_BRACE:
-        return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
-
-      case TOKEN_STRING:
-      case TOKEN_REGEXP:
-      case TOKEN_NUMBER:
-      case TOKEN_SYMBOL:   // not generated
-        return _ret(consume_slash_op(p), TOKEN_OP);
-
-      case TOKEN_CLOSE:
-      case TOKEN_KEYWORD:  // not generated
-      case TOKEN_LABEL:    // not generated (and invalid)
-      case TOKEN_LIT:
-        break;  // ambiguous
-    }
-
-    // unkown, return ambiguous
-    return _ret(1, TOKEN_SLASH);  // return ambig, handled elsewhere
-  }
-
-  // simple ascii characters
+  // simple cases
   switch (start) {
+    case 0:
+      return _ret(0, TOKEN_EOF);
+
+    case '/':
+      switch (prev->hash) {
+        case MISC_RARRAY:
+          // end of array [], always op
+          return _ret(consume_slash_op(p), TOKEN_OP);
+
+        case MISC_COLON:
+          // a) "? ... :", no value, always regexp
+          // b) post-label, always regexp
+          return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
+      }
+
+      switch (prev->type) {
+        case TOKEN_OP:
+          if (prev->hash == MISC_INCDEC) {
+            break;  // weird attachment rules
+          }
+          // fall-through
+
+        case TOKEN_EOF:
+        case TOKEN_EXEC:
+        case TOKEN_SEMICOLON:
+        case TOKEN_ARROW:
+        case TOKEN_COLON:    // matched above
+        case TOKEN_DICT:     // not generated (and invalid)
+        case TOKEN_ARRAY:
+        case TOKEN_PAREN:
+        case TOKEN_T_BRACE:
+        case TOKEN_TERNARY:
+          return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
+
+        case TOKEN_STRING:
+        case TOKEN_REGEXP:
+        case TOKEN_NUMBER:
+        case TOKEN_SYMBOL:   // not generated
+          return _ret(consume_slash_op(p), TOKEN_OP);
+
+#ifdef DEBUG
+        case TOKEN_CLOSE:
+        case TOKEN_KEYWORD:  // not generated
+        case TOKEN_LABEL:    // not generated (and invalid)
+        case TOKEN_LIT:
+          break;  // ambiguous
+#endif
+      }
+
+      // unkown, return ambiguous
+      return _ret(1, TOKEN_SLASH);  // return ambig, handled elsewhere
+
     case ';':
       return _ret(1, TOKEN_SEMICOLON);
 
@@ -200,14 +195,14 @@ static eat_out eat_token(char *p, token *prev) {
     case ',':
       return _reth(1, TOKEN_OP, MISC_COMMA);
 
+    case '{':
+      return _ret(1, TOKEN_BRACE);
+
     case '(':
       return _ret(1, TOKEN_PAREN);
 
     case '[':
       return _ret(1, TOKEN_ARRAY);
-
-    case '{':
-      return _ret(1, TOKEN_BRACE);
 
     case ']':
       return _reth(1, TOKEN_CLOSE, MISC_RARRAY);
@@ -215,6 +210,12 @@ static eat_out eat_token(char *p, token *prev) {
     case ')':
     case '}':
       return _ret(1, TOKEN_CLOSE);
+
+    case '\'':
+    case '"':
+    case '`':
+      return _ret(0, TOKEN_STRING);  // consumed by parent
+
   }
 
   // ops: i.e., anything made up of =<& etc (except '/' and ',', handled above)
@@ -278,11 +279,6 @@ static eat_out eat_token(char *p, token *prev) {
     return _ret(len, TOKEN_OP);
   } while (0);
 
-  // strings (handled by parent)
-  if (start == '\'' || start == '"' || start == '`') {
-    return _ret(0, TOKEN_STRING);
-  }
-
   // number: "0", ".01", "0x100"
   const char next = p[1];
   if (isdigit(start) || (start == '.' && isdigit(next))) {
@@ -297,7 +293,7 @@ static eat_out eat_token(char *p, token *prev) {
     return _ret(len, TOKEN_NUMBER);
   }
 
-  // dot notation
+  // dot notation (not a number)
   if (start == '.') {
     if (next == '.' && p[2] == '.') {
       return _reth(3, TOKEN_OP, MISC_SPREAD);  // '...' operator
