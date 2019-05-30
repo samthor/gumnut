@@ -165,13 +165,13 @@ static eat_out eat_token(char *p, token *prev) {
         case TOKEN_TERNARY:
           return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
 
-        case TOKEN_STRING:
         case TOKEN_REGEXP:
         case TOKEN_NUMBER:
         case TOKEN_SYMBOL:   // not generated
           return _ret(consume_slash_op(p), TOKEN_OP);
 
 #ifdef DEBUG
+        case TOKEN_STRING:   // .. "import 'foo' /123/" is allowed
         case TOKEN_CLOSE:
         case TOKEN_KEYWORD:  // not generated
         case TOKEN_LABEL:    // not generated (and invalid)

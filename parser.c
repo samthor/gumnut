@@ -752,7 +752,9 @@ static int simple_consume(simpledef *sd) {
       return simple_start_arrowfunc(sd, 1);
 
     // import state
-    case SSTACK__MODULE:
+    case SSTACK__MODULE: {
+      int line_no = sd->tok.line_no;
+
       switch (sd->tok.type) {
         case TOKEN_BRACE:
           sd->tok.type = TOKEN_DICT;
@@ -769,7 +771,18 @@ static int simple_consume(simpledef *sd) {
           sd->curr->start = sd->tok.type;
           return 0;
 
+        case TOKEN_STRING:
+          if (!sd->curr->prev.type) {
+            goto finalize_module;
+          }
+          goto abandon_module;
+
         case TOKEN_LIT:
+          if ((sd->curr - 1)->stype != SSTACK__MODULE &&
+              sd->curr->prev.type == TOKEN_SYMBOL &&
+              sd->tok.hash == LIT_FROM) {
+            goto finalize_module;
+          }
           break;
 
         case TOKEN_CLOSE:
@@ -777,25 +790,29 @@ static int simple_consume(simpledef *sd) {
             debugf("module internal error\n");
             return ERROR__INTERNAL;  // impossible, we're at top-level
           }
-          int line_no = sd->tok.line_no;
           skip_walk(sd, 0);
           --sd->curr;  // close inner
 
           if ((sd->curr - 1)->stype == SSTACK__MODULE) {
             return 0;  // invalid several descendant case
           }
+finalize_module:
           --sd->curr;  // close outer
 
           if (sd->tok.hash == LIT_FROM) {
             // ... inner {} must have trailer "from './path'"
             sd->tok.type = TOKEN_KEYWORD;
-            record_walk(sd, 0);
+            record_walk(sd, -1);
+          }
+          if (sd->tok.type == TOKEN_STRING) {
+            record_walk(sd, 0);  // "import blah from 'foo'\n/123/" is regexp
           }
 
-          // nb. same as normal bail path below
-          stack_inc(sd, SSTACK__EXPR);
-          sd->curr->start = LIT_IMPORT;
-          sd->curr->prev.type = TOKEN_OP;   // pretend something was here so a semi is inserted
+          if (sd->tok.type == TOKEN_SEMICOLON) {
+            record_walk(sd, -1);
+          } else if (sd->tok.line_no != line_no) {
+            yield_virt(sd, TOKEN_SEMICOLON);
+          }
           return 0;
 
         case TOKEN_OP:
@@ -808,26 +825,13 @@ static int simple_consume(simpledef *sd) {
           // fall-through
 
         default:
+abandon_module:
           if ((sd->curr - 1)->stype != SSTACK__MODULE) {
             debugf("abandoning module for reasons: %d\n", sd->tok.type);
             --sd->curr;
             return 0;  // not inside submodule, just give up
           }
           return record_walk(sd, 0);
-      }
-
-      // consume and bail out on "from" if it follows a symbol or close brace
-      if ((sd->curr - 1)->stype != SSTACK__MODULE &&
-          sd->curr->prev.type == TOKEN_SYMBOL &&
-          sd->tok.hash == LIT_FROM) {
-        --sd->curr;  // close outer
-        sd->tok.type = TOKEN_KEYWORD;
-        record_walk(sd, 0);
-
-        stack_inc(sd, SSTACK__EXPR);
-        sd->curr->start = LIT_IMPORT;
-        sd->curr->prev.type = TOKEN_OP;   // pretend something was here so a semi is inserted
-        return 0;
       }
 
       // consume "as" as a keyword if it follows a symbol
@@ -844,6 +848,7 @@ static int simple_consume(simpledef *sd) {
         sd->tok.type = TOKEN_KEYWORD;
       }
       return record_walk(sd, 0);
+    }
 
     // dict state (left)
     case SSTACK__DICT: {
@@ -940,7 +945,7 @@ static int simple_consume(simpledef *sd) {
           if (sd->tok.p[0] == '`') {
             break;  // don't allow template literals
           }
-          return record_walk(sd, -1);
+          return record_walk(sd, 0);
 
         case TOKEN_LIT: {
           sstack *p = (sd->curr - 1);  // use context from parent, "async function await() {}" is valid :(
@@ -1216,15 +1221,8 @@ check_single_block:
     if (outer_hash == LIT_IMPORT) {
       sd->tok.type = TOKEN_KEYWORD;
       record_walk(sd, 0);
-
-      // short-circuit for "import 'foo'"
-      if (sd->tok.type == TOKEN_STRING) {
-        stack_inc(sd, SSTACK__EXPR);
-        sd->curr->start = LIT_IMPORT;
-        return 0;
-      }
-
       stack_inc(sd, SSTACK__MODULE);
+      sd->curr->start = LIT_IMPORT;
       return 0;
     }
 
@@ -1235,6 +1233,7 @@ check_single_block:
 
       if (sd->tok.hash == MISC_STAR || sd->tok.type == TOKEN_BRACE) {
         stack_inc(sd, SSTACK__MODULE);
+        sd->curr->start = LIT_EXPORT;
         return 0;
       }
 
