@@ -760,6 +760,13 @@ int main() {
     TOKEN_CLOSE,     // virt
   );
 
+  _test("return dict", "return {}",
+    TOKEN_KEYWORD,   // return
+    TOKEN_DICT,      // {
+    TOKEN_CLOSE,     // }
+    TOKEN_SEMICOLON, // ASI ;
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {
