@@ -840,13 +840,9 @@ abandon_module:
         return record_walk(sd, 0);
       }
 
-      // otherwise just mask as symbol or keyword
-      if (is_valid_name(sd->tok.hash, sd->curr->context)) {
-        sd->tok.type = TOKEN_SYMBOL;
-      } else {
-        // ... invalid, of course
-        sd->tok.type = TOKEN_KEYWORD;
-      }
+      // otherwise just mask as symbol (we try to place into global namespace always, even for
+      // "bad" tokens)
+      sd->tok.type = TOKEN_SYMBOL;
       return record_walk(sd, 0);
     }
 
