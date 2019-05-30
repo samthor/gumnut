@@ -320,6 +320,7 @@ static int is_token_valuelike_keyword(token *t) {
     case TOKEN_ARRAY:
     case TOKEN_BRACE:
     case TOKEN_SLASH:
+    case TOKEN_REGEXP:
       return 1;
   }
   return 0;
@@ -574,10 +575,8 @@ static int simple_consume_expr(simpledef *sd) {
       return record_walk(sd, -1);
 
     default:
-      // nb. This is likely because we haven't resolved a TOKEN_SLASH somewhere.
       debugf("unhandled token=%d `%.*s`\n", sd->tok.type, sd->tok.len, sd->tok.p);
       return ERROR__INTERNAL;
-
   }
 
   // match function or class as value
