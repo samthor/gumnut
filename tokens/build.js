@@ -117,7 +117,7 @@ const hashToName = new Map();
 queue(alwaysKeyword, 'keyword', 'strictKeyword');
 queue(alwaysStrictKeyword, 'strictKeyword');
 queue(unaryOp, 'keyword', 'unaryOp');
-queue(optionalUnaryOp, 'unaryOp');
+queue(optionalUnaryOp);
 queue(relOp, 'keyword', 'relOp');
 queue(neverLabel, 'masquerade');
 queue(optionalKeyword);

@@ -1,4 +1,4 @@
-// Generated on Thu May 30 2019 11:09:47 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Sat Jun 01 2019 23:33:41 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -15,7 +15,7 @@
 
 #define LIT_AS           389816320
 #define LIT_ASYNC        792469504
-#define LIT_AWAIT        796663816
+#define LIT_AWAIT        796663808
 #define LIT_BREAK        791429123
 #define LIT_CASE         639393795
 #define LIT_CATCH        773611971
@@ -64,7 +64,7 @@
 #define LIT_VOID         654229513
 #define LIT_WHILE        781115587
 #define LIT_WITH         647946435
-#define LIT_YIELD        782180362
+#define LIT_YIELD        782180354
 
 #define MISC_ARROW       333946880  // =>
 #define MISC_BITNOT      135249920  // ~
