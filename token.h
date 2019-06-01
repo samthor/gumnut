@@ -34,6 +34,7 @@ typedef struct {
 } tokendef;
 
 int prsr_next_token(tokendef *d, token *out, int has_value);
+void prsr_close_op_next(tokendef *d);
 tokendef prsr_init_token(char *p);
 
 #endif//_TOKEN_H

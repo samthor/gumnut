@@ -134,8 +134,9 @@ static eat_out eat_token(char *p, token *prev) {
     case 0:
       return _ret(0, TOKEN_EOF);
 
-    case '/':
-      switch (prev->hash) {
+    case '/': {
+      uint32_t hash = prev->hash;
+      switch (hash) {
         case MISC_RARRAY:
           // end of array [], always op
           return _ret(consume_slash_op(p), TOKEN_OP);
@@ -165,23 +166,32 @@ static eat_out eat_token(char *p, token *prev) {
         case TOKEN_TERNARY:
           return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
 
+        case TOKEN_LIT:
+          if (hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
+            // "in", "delete" etc always take arg on right
+            return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
+          } else if (hash) {
+            break;  // who knows
+          }
+          // fall-through
+
         case TOKEN_REGEXP:
         case TOKEN_NUMBER:
+        case TOKEN_STRING:
         case TOKEN_SYMBOL:   // not generated
           return _ret(consume_slash_op(p), TOKEN_OP);
 
 #ifdef DEBUG
-        case TOKEN_STRING:   // .. "import 'foo' /123/" is allowed
         case TOKEN_CLOSE:
         case TOKEN_KEYWORD:  // not generated
         case TOKEN_LABEL:    // not generated (and invalid)
-        case TOKEN_LIT:
           break;  // ambiguous
 #endif
       }
 
       // unkown, return ambiguous
       return _ret(1, TOKEN_SLASH);  // return ambig, handled elsewhere
+    }
 
     case ';':
       return _ret(1, TOKEN_SEMICOLON);
@@ -579,6 +589,15 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
 
   eat_next(d);
   return 0;
+}
+
+void prsr_close_op_next(tokendef *d) {
+  if (d->next.type == TOKEN_OP && d->next.p[0] == '/') {
+    // change to TOKEN_REGEXP
+    char *p = d->next.p - d->next.len;
+    d->next.len = consume_slash_regexp(p);
+    d->next.type = TOKEN_REGEXP;
+  }
 }
 
 tokendef prsr_init_token(char *p) {

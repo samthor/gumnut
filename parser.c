@@ -607,7 +607,7 @@ static int simple_consume_expr(simpledef *sd) {
 
   // match curious cases inside "for ("
   sstack *up = (sd->curr - 1);
-  if (up->stype == SSTACK__CONTROL && up->start == LIT_FOR && sd->curr->stype == SSTACK__EXPR) {
+  if (up->stype == SSTACK__CONTROL && up->start == LIT_FOR) {
     // start of "for (", look for decl (var/let/const) and mark as keyword
     if (!ptype) {
       if (match_decl(sd) >= 0) {
@@ -805,7 +805,9 @@ finalize_module:
             record_walk(sd, -1);
           }
           if (sd->tok.type == TOKEN_STRING) {
-            record_walk(sd, 0);  // "import blah from 'foo'\n/123/" is regexp
+            // this ends import, ensure "... 'foo' /123/" is regexp
+            prsr_close_op_next(sd->td);
+            record_walk(sd, 0);
           }
 
           if (sd->tok.type == TOKEN_SEMICOLON) {
@@ -900,7 +902,7 @@ abandon_module:
         case TOKEN_COLON:
           record_walk(sd, -1);
           stack_inc(sd, SSTACK__EXPR);
-          debugf("pushing stmt for colon\n");
+          debugf("pushing expr for colon\n");
           return 0;
 
         case TOKEN_CLOSE:
@@ -1101,6 +1103,11 @@ check_single_block:
     // FIXME: we could call this in outer method
     // yield back to SSTACK__CONTROL
     return 0;
+  }
+
+  // TODO: yield start token
+  if (sd->tok.type != TOKEN_CLOSE) {
+    // yield_virt(sd, TOKEN_START);
   }
 
   switch (sd->tok.type) {
