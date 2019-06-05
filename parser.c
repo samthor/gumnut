@@ -424,6 +424,13 @@ static int simple_consume_expr(simpledef *sd) {
       }
       return simple_start_arrowfunc(sd, 0);
 
+    case TOKEN_EOF:
+      if ((sd->curr - 1)->stype != SSTACK__BLOCK) {
+        // EOF only closes statement within block
+        return 0;
+      }
+      // fall-through
+
     case TOKEN_CLOSE:
       --sd->curr;  // always valid to close here (SSTACK__BLOCK catches invalid close)
 
@@ -1375,43 +1382,26 @@ int prsr_simple(tokendef *td, int is_module, prsr_callback cb, void *arg) {
     return ret;
   }
 
-  char *eof_at = sd.tok.p;
-  sd.tok.p = 0;
-
-  // handle open ASYNC state
-  if (sd.curr->stype == SSTACK__ASYNC) {
-    debugf("end: sending fake TOKEN_EOF\n");
-    sd.tok.type = TOKEN_EOF;
+  int depth = (sd.curr - sd.stack);
+  while (depth) {
+    debugf("end: sending TOKEN_EOF at depth=%d\n", depth);
     simple_consume(&sd);
-  }
 
-  // consume fake TOKEN_CLOSE in a few cases for ASI
-  int stype = sd.curr->stype;
-  if (stype == SSTACK__EXPR && (sd.curr - 1)->stype == SSTACK__BLOCK) {
-    debugf("end: sending fake TOKEN_CLOSE\n");
-    sd.tok.type = TOKEN_CLOSE;
-    simple_consume(&sd);
+    int update = (sd.curr - sd.stack);
+    if (update >= depth) {
+      break;  // only allow state pop
+    }
+    depth = update;
   }
-
-  // close any open virtual control/exec pairs
-  if ((sd.curr->stype == SSTACK__BLOCK && maybe_close_control(&sd, NULL)) ||
-      sd.curr->stype == SSTACK__CONTROL) {
-    debugf("end: closing virtual pairs\n");
-    simple_consume(&sd);  // token doesn't matter, SSTACK__CONTROL doesn't consume
-  }
-
-  // emit 'real' EOF for caller
-  sd.tok.type = TOKEN_EOF;
-  sd.tok.p = eof_at;
-  skip_walk(&sd, -1);
+  skip_walk(&sd, -1);  // emit 'real' EOF
 
   if (sd.curr != sd.stack) {
 #ifdef DEBUG
-    debugf("stack is %ld too high\n", sd.curr - sd.stack);
+    debugf("err: stack is %ld too high\n", sd.curr - sd.stack);
     sstack *t = sd.stack;
     do {
-      debugf("stack=%ld stype=%d\n", t - sd.stack, t->stype);
-      render_token(&(t->prev), start);
+      debugf("...[%ld] stype=%d\n", t - sd.stack, t->stype);
+      cb(sd.arg, &(t->prev));
     } while (t != sd.curr && ++t);
 #endif
     return ERROR__STACK;
