@@ -151,11 +151,6 @@ static int is_label(token *t, uint8_t context) {
 
 
 static int is_valid_name(uint32_t hash, uint8_t context) {
-  uint32_t mask = _MASK_KEYWORD | _MASK_MASQUERADE;
-  if (context & CONTEXT__STRICT) {
-    mask |= _MASK_STRICT_KEYWORD;
-  }
-
   if ((context & CONTEXT__ASYNC) && hash == LIT_AWAIT) {
     // await is a keyword inside async function
     return 0;
@@ -166,6 +161,10 @@ static int is_valid_name(uint32_t hash, uint8_t context) {
     return 0;
   }
 
+  uint32_t mask = _MASK_KEYWORD | _MASK_MASQUERADE;
+  if (context & CONTEXT__STRICT) {
+    mask |= _MASK_STRICT_KEYWORD;
+  }
   return !(hash & mask);
 }
 
@@ -566,7 +565,9 @@ static int simple_consume_expr(simpledef *sd) {
         // otherwise, it's on a newline (invalid in pure statement, generate ASI otherwise)
         // ... this is a PostfixExpression that disallows LineTerminator
         if ((sd->curr - 1)->stype == SSTACK__BLOCK) {
+          --sd->curr;
           yield_virt(sd, TOKEN_SEMICOLON);
+          return 0;
         }
       }
       debugf("got left-side ++/--\n");

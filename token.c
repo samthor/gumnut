@@ -29,7 +29,7 @@ typedef struct {
   uint32_t hash;
 } eat_out;
 
-static int consume_slash_op(char *p) {
+static inline int consume_slash_op(char *p) {
   // can match "/" or "/="
   if (p[1] == '=') {
     return 2;
@@ -164,13 +164,15 @@ static eat_out eat_token(char *p, token *prev) {
         case TOKEN_PAREN:
         case TOKEN_T_BRACE:
         case TOKEN_TERNARY:
+        case TOKEN_KEYWORD:  // not generated
           return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
 
         case TOKEN_LIT:
-          if (hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
-            // "in", "delete" etc always take arg on right
-            return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
-          } else if (hash) {
+          if (hash) {
+            if (hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
+              // "in", "delete" etc always take arg on right
+              return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
+            }
             break;  // who knows
           }
           // fall-through
@@ -183,7 +185,6 @@ static eat_out eat_token(char *p, token *prev) {
 
 #ifdef DEBUG
         case TOKEN_CLOSE:
-        case TOKEN_KEYWORD:  // not generated
         case TOKEN_LABEL:    // not generated (and invalid)
           break;  // ambiguous
 #endif
