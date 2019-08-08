@@ -107,6 +107,8 @@ static int consume_string(char *p, int *line_no, int *litflag) {
 
       case '\\':
         c = p[++len];
+        if (c == '\r')
+          c = p[++len];
         if (c == '\n') {
           ++(*line_no);  // record if newline (this is valid in all string types)
         }
