@@ -388,7 +388,7 @@ static int simple_start_arrowfunc(simpledef *sd, int async) {
     // e.g. "() => { statements }"
     record_walk(sd, -1);  // consume =>
     sd->tok.type = TOKEN_EXEC;
-    record_walk(sd, -1);  // consume {
+    record_walk(sd, 0);  // consume {
     stack_inc(sd, SSTACK__BLOCK);
     sd->curr->prev.type = TOKEN_TOP;
   } else {
@@ -977,7 +977,7 @@ abandon_module:
           uint8_t context = sd->curr->context;
           --sd->curr;
           sd->tok.type = TOKEN_EXEC;
-          record_walk(sd, -1);
+          record_walk(sd, 0);
           stack_inc(sd, SSTACK__BLOCK);
           sd->curr->prev.type = TOKEN_TOP;
           sd->curr->context = context;
@@ -1086,7 +1086,7 @@ check_single_block:
       if (sd->tok.type == TOKEN_BRACE) {
         // ... found e.g., "if {}"
         sd->tok.type = TOKEN_EXEC;
-        record_walk(sd, -1);
+        record_walk(sd, 0);
         stack_inc(sd, SSTACK__BLOCK);
       } else {
         // ... found e.g. "if something_else", push virtual exec block
@@ -1123,7 +1123,7 @@ check_single_block:
       // anon block
       debugf("unattached exec block\n");
       sd->tok.type = TOKEN_EXEC;
-      record_walk(sd, -1);
+      record_walk(sd, 0);
       stack_inc(sd, SSTACK__BLOCK);
       return 0;
 

@@ -767,6 +767,13 @@ int main() {
     TOKEN_SEMICOLON, // ASI ;
   );
 
+  _test("regexp as start of block", "{/f/}",
+    TOKEN_EXEC,      // {
+    TOKEN_REGEXP,    // /f/
+    TOKEN_SEMICOLON, // ASI ;
+    TOKEN_CLOSE,     // }
+  );
+
   // restate all errors
   testdef *p = &fail;
   if (ecount) {
