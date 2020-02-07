@@ -134,17 +134,10 @@ static eat_out eat_token(char *p, token *prev) {
     case 0:
       return _ret(0, TOKEN_EOF);
 
-    case '/': {
-      uint32_t hash = prev->hash;
-      switch (hash) {
-        case MISC_RARRAY:
-          // end of array [], always op
-          return _ret(consume_slash_op(p), TOKEN_OP);
-
-        case MISC_COLON:
-          // a) "? ... :", no value, always regexp
-          // b) post-label, always regexp
-          return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
+    case '/':
+      if (prev->hash == MISC_RARRAY) {
+        // end of array [], always op
+        return _ret(consume_slash_op(p), TOKEN_OP);
       }
 
       switch (prev->type) {
@@ -155,10 +148,10 @@ static eat_out eat_token(char *p, token *prev) {
           // fall-through
 
         case TOKEN_EOF:
-        case TOKEN_EXEC:
+        case TOKEN_EXEC:     // not generated
         case TOKEN_SEMICOLON:
         case TOKEN_ARROW:
-        case TOKEN_COLON:    // matched above
+        case TOKEN_COLON:    // label or ternary, both imply regexp
         case TOKEN_DICT:     // not generated (and invalid)
         case TOKEN_ARRAY:
         case TOKEN_PAREN:
@@ -168,9 +161,10 @@ static eat_out eat_token(char *p, token *prev) {
           return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
 
         case TOKEN_LIT:
-          if (hash) {
-            if (hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
+          if (prev->hash) {
+            if (prev->hash & (_MASK_REL_OP | _MASK_UNARY_OP | _MASK_KEYWORD)) {
               // "in", "delete" etc always take arg on right
+              // always keyword is invalid, but treat as regexp
               return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
             }
             break;  // who knows
@@ -192,7 +186,6 @@ static eat_out eat_token(char *p, token *prev) {
 
       // unkown, return ambiguous
       return _ret(1, TOKEN_SLASH);  // return ambig, handled elsewhere
-    }
 
     case ';':
       return _ret(1, TOKEN_SEMICOLON);
@@ -396,6 +389,7 @@ static int consume_comment(char *p, int *line_no, int start) {
     }
 
     case '#':
+      // consume #! at top of file
       if (!(start && *(++p) == '!')) {
         return 0;
       }
