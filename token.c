@@ -198,6 +198,11 @@ static eat_out eat_token(char *p, token *prev) {
       return _ret(1, TOKEN_SEMICOLON);
 
     case '?':
+      switch (p[1]) {
+        case '.':
+        case '?':
+          return _ret(2, TOKEN_OP);
+      }
       return _ret(1, TOKEN_TERNARY);
 
     case ':':
