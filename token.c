@@ -344,12 +344,17 @@ static eat_out eat_token(char *p, token *prev) {
     c = p[++len];
   } while (c);
 
-  if (len) {
-    return _reth(len, TOKEN_LIT, hash);
+  if (!len) {
+    // found nothing :(
+    return _ret(0, -1);
   }
 
-  // found nothing :(
-  return _ret(0, -1);
+  int type = TOKEN_LIT;
+  if (prev->hash == MISC_DOT) {
+    // in foo.bar, bar is always a symbol (even if it's a reserved word)
+    type = TOKEN_SYMBOL;
+  }
+  return _reth(len, type, hash);
 #undef _ret
 #undef _reth
 }
