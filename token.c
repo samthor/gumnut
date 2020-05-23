@@ -193,6 +193,7 @@ static eat_out eat_token(char *p, token *prev) {
     case '?':
       switch (p[1]) {
         case '.':
+          return _reth(2, TOKEN_OP, MISC_CHAIN);
         case '?':
           return _ret(2, TOKEN_OP);
       }
@@ -350,7 +351,7 @@ static eat_out eat_token(char *p, token *prev) {
   }
 
   int type = TOKEN_LIT;
-  if (prev->hash == MISC_DOT) {
+  if (prev->hash == MISC_DOT || prev->hash == MISC_CHAIN) {
     // in foo.bar, bar is always a symbol (even if it's a reserved word)
     type = TOKEN_SYMBOL;
   }
