@@ -26,6 +26,10 @@ const relOp =
 const neverLabel = 
     " false import null super this true ";
 
+// like variables (this is neverLabel plus undefined)
+const variableLike =
+    " false import null super this true undefined ";
+
 // these act like symbols in most cases, but hash so we can find them
 const optionalKeyword =
     " as async await from get of set ";
@@ -74,6 +78,7 @@ const specials = [
   'relOp',
   'unaryOp',
   'masquerade',
+  'variable',
   'decl',
   'control',
   'controlParen',
@@ -121,6 +126,7 @@ queue(unaryOp, 'keyword', 'unaryOp');
 queue(optionalUnaryOp);
 queue(relOp, 'keyword', 'relOp');
 queue(neverLabel, 'masquerade');
+queue(variableLike, 'variable');
 queue(optionalKeyword);
 queue(declKeyword, 'decl');
 queue(controlKeyword, 'control');

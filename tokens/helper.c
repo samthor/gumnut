@@ -1,10 +1,10 @@
-// Generated on Sat May 23 2020 21:48:31 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Sun May 24 2020 00:05:35 GMT+1000 (Australian Eastern Standard Time)
 
 #include "lit.h"
 #include "helper.h"
 
-// 52 candidates:
-//   as async await break case catch class const continue debugger default delete do else enum export extends false finally for from function get if implements import in instanceof interface let new null of package private protected public return set static super switch this throw true try typeof var void while with yield
+// 53 candidates:
+//   as async await break case catch class const continue debugger default delete do else enum export extends false finally for from function get if implements import in instanceof interface let new null of package private protected public return set static super switch this throw true try typeof undefined var void while with yield
 int consume_known_lit(char *p, uint32_t *out) {
   char *start = p;
 #define _done(len, _out) {*out=_out;return len;}
@@ -311,6 +311,11 @@ int consume_known_lit(char *p, uint32_t *out) {
       _done(6, LIT_TYPEOF);
     }
     return 1;  // t...
+  case 'u':
+    if (*p++ != 'n' || *p++ != 'd' || *p++ != 'e' || *p++ != 'f' || *p++ != 'i' || *p++ != 'n' || *p++ != 'e' || *p++ != 'd') {
+      return p - start - 1;
+    }
+    _done(9, LIT_UNDEFINED);
   case 'v':
     switch (*p++) {
     case 'a':
