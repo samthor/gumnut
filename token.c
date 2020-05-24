@@ -161,20 +161,18 @@ static eat_out eat_token(char *p, token *prev) {
           return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
 
         case TOKEN_LIT:
-          if (prev->hash) {
-            if (prev->hash & (_MASK_REL_OP | _MASK_UNARY_OP | _MASK_KEYWORD)) {
-              // "in", "delete" etc always take arg on right
-              // always keyword is invalid, but treat as regexp
-              return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
-            }
-            break;  // who knows
+          if (prev->hash & (_MASK_REL_OP | _MASK_UNARY_OP | _MASK_KEYWORD)) {
+            // ops always precede regexp
+            // keywords always precede regexp
+            return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
           }
-          // fall-through
+          // the only effective ambiguity here is "await", as it is a valid name in non-async
+          break;
 
         case TOKEN_REGEXP:
         case TOKEN_NUMBER:
         case TOKEN_STRING:
-        case TOKEN_SYMBOL:   // not generated
+        case TOKEN_SYMBOL:
           return _ret(consume_slash_op(p), TOKEN_OP);
 
 #ifdef DEBUG
@@ -351,7 +349,8 @@ static eat_out eat_token(char *p, token *prev) {
   }
 
   int type = TOKEN_LIT;
-  if (prev->hash == MISC_DOT || prev->hash == MISC_CHAIN) {
+  if (!hash || hash & _MASK_VARIABLE || prev->hash == MISC_DOT || prev->hash == MISC_CHAIN) {
+    // non-hash is always symbol
     // in foo.bar, bar is always a symbol (even if it's a reserved word)
     type = TOKEN_SYMBOL;
   }
