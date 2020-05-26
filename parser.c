@@ -10,6 +10,8 @@ static void *arg;
 
 int consume_statement(int);
 int consume_expr_group(int);
+int consume_optional_expr(int);
+int consume_class(int);
 
 static inline void internal_next_find() {
   for (;;) {
@@ -40,6 +42,8 @@ int consume_function(int context) {
   if (td.cursor.hash == LIT_ASYNC) {
     statement_context |= CONTEXT__ASYNC;
     internal_next_update(TOKEN_KEYWORD);
+  } else {
+    statement_context &= ~(CONTEXT__ASYNC);
   }
 
   // expect function literal
@@ -64,7 +68,7 @@ int consume_function(int context) {
   }
 
   // consume function body
-  return consume_statement(context);
+  return consume_statement(statement_context);
 }
 
 int consume_async_expr(int context) {
@@ -101,13 +105,97 @@ int consume_async_expr(int context) {
   // internal_next_update()
 }
 
+int consume_dict(int context) {
+  if (td.cursor.type != TOKEN_BRACE) {
+    return ERROR__UNEXPECTED;
+  }
+  internal_next();
+
+  for (;;) {
+    int method_context = context;
+
+    // "async" prefix
+    if (td.cursor.hash == LIT_ASYNC && prsr_peek(&td) != TOKEN_PAREN) {
+      // "async(" is a valid function name, sigh
+      method_context |= CONTEXT__ASYNC;
+      internal_next_update(TOKEN_KEYWORD);
+    } else {
+      method_context &= ~(CONTEXT__ASYNC);
+    }
+
+    // generator
+    if (td.cursor.hash == MISC_STAR) {
+      internal_next();
+    }
+
+    // get/set without bracket
+    if ((td.cursor.hash == LIT_GET || td.cursor.hash == LIT_SET) && prsr_peek(&td) != TOKEN_PAREN) {
+      internal_next_update(TOKEN_KEYWORD);
+    }
+
+    // name or bracketed name
+    if (td.cursor.type == TOKEN_LIT) {
+      internal_next_update(TOKEN_SYMBOL);
+    } else if (td.cursor.type == TOKEN_ARRAY) {
+      _check(consume_expr_group(context));
+    } else {
+      // ignore missing name, whatever
+    }
+
+    switch (td.cursor.type) {
+      case TOKEN_PAREN:
+        // method
+        _check(consume_expr_group(context));
+
+        if (td.cursor.type != TOKEN_BRACE) {
+          return ERROR__UNEXPECTED;
+        }
+        _check(consume_statement(method_context));
+        break;
+
+      case TOKEN_COLON:
+        // value
+        // nb. this allows "async * foo:" which is nonsensical
+        internal_next();
+        _check(consume_optional_expr(context));
+        break;
+
+      case TOKEN_CLOSE:
+        // close, handled below
+        break;
+
+      case TOKEN_OP:
+        if (td.cursor.hash == MISC_COMMA) {
+          // single value (e.g. "{foo,bar}")
+          internal_next();
+          continue;
+        }
+        // fall-through
+
+      default:
+        return ERROR__UNEXPECTED;
+    }
+
+    // keep going, more data
+    if (td.cursor.hash == MISC_COMMA) {
+      internal_next();
+      continue;
+    }
+
+    // closed
+    if (td.cursor.type == TOKEN_CLOSE) {
+      internal_next();
+      return 0;
+    }
+
+    return ERROR__UNEXPECTED;
+  }
+}
+
 int consume_optional_expr(int context) {
   int value_line = 0;  // line_no of last value
   int seen_any = 0;
 #define _transition_to_value() { if (value_line) { return 0; } value_line = td.cursor.line_no; seen_any = 1; }
-
-  int top_context = context;
-  context &= (CONTEXT__ASYNC);
 
   for (;;) {
     switch (td.cursor.type) {
@@ -116,15 +204,26 @@ int consume_optional_expr(int context) {
         continue;  // restart without move
 
       case TOKEN_BRACE:
-        if (!value_line) {
-
+        if (seen_any && value_line) {
+          // e.g. "(foo {})" is invalid, but "(foo + {})" is ok
+          return ERROR__UNEXPECTED;
         }
-        return ERROR__TODO;
+        return consume_dict(context);
+
+      case TOKEN_ARRAY:
+        _transition_to_value();
+        _check(consume_expr_group(context));
+        continue;
 
       case TOKEN_PAREN:
+        // nb. technically, non-method calls need contents inside (), but eh.
+        _check(consume_expr_group(context));
+        continue;
+
       case TOKEN_TERNARY:
-        _transition_to_value();
-        // fall-through
+        // nb. needs value on left (and contents!), but nonsensical otherwise
+        _check(consume_expr_group(context));
+        continue;
 
       case TOKEN_T_BRACE:
         _check(consume_expr_group(context));
@@ -137,6 +236,7 @@ int consume_optional_expr(int context) {
           internal_next();
           continue;
         }
+        // fall-through
 
       case TOKEN_SYMBOL:  // for calling again via async
       case TOKEN_REGEXP:
@@ -207,8 +307,12 @@ int consume_optional_expr(int context) {
 
       case TOKEN_OP:
         switch (td.cursor.hash) {
+          case MISC_COMMA:
+            return 0;
+
           case MISC_NOT:
           case MISC_BITNOT:
+            // TODO: "await, new, etc" fall into this bucket?
             if (seen_any && value_line) {
               // explicitly only takes right arg, so e.g.:
               //   "var x = 123 !foo"
@@ -250,21 +354,22 @@ int consume_optional_expr(int context) {
 #undef _transition_to_value
 }
 
-// consume required expr (must find something)
-int consume_expr(int context) {
-  char *p = td.cursor.p;
-
-  int ret = consume_optional_expr(context);
-  if (p == td.cursor.p) {
-    return ERROR__UNEXPECTED;
+// consumes a compound expr separated by ,'s
+int consume_expr_compound(int context) {
+  for (;;) {
+    _check(consume_optional_expr(context));
+    if (td.cursor.hash != MISC_COMMA) {
+      break;
+    }
+    internal_next();
   }
-
-  return ret;
+  return 0;
 }
 
 int consume_expr_group(int context) {
   switch (td.cursor.type) {
     case TOKEN_PAREN:
+    case TOKEN_ARRAY:
     case TOKEN_TERNARY:
     case TOKEN_T_BRACE:
       break;
@@ -274,18 +379,16 @@ int consume_expr_group(int context) {
   }
 
   internal_next();
-  int inner_context = context & (CONTEXT__ASYNC);
 
   for (;;) {
-    _check(consume_optional_expr(inner_context));
+    _check(consume_optional_expr(context));
 
     // nb. not really good practice, but handles for-loop-likes
-    if (td.cursor.type != TOKEN_SEMICOLON) {
+    if (td.cursor.type != TOKEN_SEMICOLON && td.cursor.hash != MISC_COMMA) {
       break;
     }
 
     internal_next();
-    inner_context &= CONTEXT__ASYNC;
   }
 
   if (td.cursor.type != TOKEN_CLOSE) {
@@ -307,7 +410,9 @@ int consume_class(int context) {
     }
     if (td.cursor.hash == LIT_EXTENDS) {
       internal_next_update(TOKEN_KEYWORD);
-      _check(consume_expr(context));
+
+      // nb. something must be here (but if it's not, that's an error, as we expect a '{' following)
+      _check(consume_optional_expr(context));
     }
   }
 
@@ -424,7 +529,7 @@ int consume_statement(int context) {
       if (line_no != td.cursor.line_no) {
         return 0;
       }
-      return consume_expr(context);
+      return consume_expr_compound(context);
       // TODO: what does semi attach to?
     }
 
@@ -477,7 +582,12 @@ int consume_statement(int context) {
     }
   }
 
-  return consume_expr(context | CONTEXT__NAKED);
+  char *p = td.cursor.p;
+  int ret = consume_expr_compound(context);
+  if (p == td.cursor.p) {
+    return ERROR__UNEXPECTED;
+  }
+  return ret;
 }
 
 int prsr_run(char *p, int context, prsr_callback _callback, void *_arg) {

@@ -451,7 +451,7 @@ int prsr_update(tokendef *d, int type) {
       return 0;
 
     case TOKEN_LIT:
-      if (!(type == TOKEN_SYMBOL || type == TOKEN_KEYWORD || type == TOKEN_LABEL)) {
+      if (!(type == TOKEN_SYMBOL || type == TOKEN_KEYWORD || type == TOKEN_LABEL || type == TOKEN_OP)) {
         return ERROR__INTERNAL;
       }
       d->cursor.type = type;
