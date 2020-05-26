@@ -4,6 +4,14 @@
 
 #define _check(v) { int _ret = v; if (_ret) { return _ret; }};
 
+#ifdef DEBUG
+#include <stdio.h>
+#define debugf(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define debugf (void)sizeof
+#endif
+
+
 static tokendef td; 
 static prsr_callback callback;
 static void *arg;
@@ -48,6 +56,7 @@ int consume_function(int context) {
 
   // expect function literal
   if (td.cursor.hash != LIT_FUNCTION) {
+    debugf("could not consume 'function'\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
@@ -74,6 +83,7 @@ int consume_function(int context) {
 // consumes something starting with async (might be function)
 int consume_async_expr(int context) {
   if (td.cursor.hash != LIT_ASYNC) {
+    debugf("could not match 'async'\n");
     return ERROR__UNEXPECTED;
   }
 
@@ -85,6 +95,7 @@ int consume_async_expr(int context) {
       internal_next_update(TOKEN_SYMBOL);
 
       if (td.cursor.type != TOKEN_ARROW) {
+        debugf("could not match arrow after 'async foo'\n");
         return ERROR__UNEXPECTED;
       }
       break;
@@ -117,14 +128,28 @@ int consume_async_expr(int context) {
   return 0;
 }
 
+// consumes dict or class (allows either)
 int consume_dict(int context) {
   if (td.cursor.type != TOKEN_BRACE) {
+    debugf("could not find starting { of dict\n");
     return ERROR__UNEXPECTED;
   }
+  debugf(">> dict\n");
   internal_next();
 
   for (;;) {
     int method_context = context;
+
+    if (td.cursor.hash == MISC_SPREAD) {
+      internal_next();
+      _check(consume_optional_expr(context));
+      continue;
+    }
+
+    // static prefix
+    if (td.cursor.hash == LIT_STATIC && prsr_peek(&td) != TOKEN_PAREN) {
+      internal_next_update(TOKEN_KEYWORD);
+    }
 
     // "async" prefix
     if (td.cursor.hash == LIT_ASYNC && prsr_peek(&td) != TOKEN_PAREN) {
@@ -160,6 +185,7 @@ int consume_dict(int context) {
         _check(consume_expr_group(context));
 
         if (td.cursor.type != TOKEN_BRACE) {
+          debugf("did not find brace after dict paren\n");
           return ERROR__UNEXPECTED;
         }
         _check(consume_statement(method_context));
@@ -185,7 +211,9 @@ int consume_dict(int context) {
         // fall-through
 
       default:
-        return ERROR__UNEXPECTED;
+        // nb. this should fail, but who cares
+        _check(consume_optional_expr(context));
+        continue;
     }
 
     // keep going, more data
@@ -200,6 +228,7 @@ int consume_dict(int context) {
       return 0;
     }
 
+    debugf("got to end of dict\n");
     return ERROR__UNEXPECTED;
   }
 }
@@ -218,28 +247,31 @@ int consume_optional_expr(int context) {
       case TOKEN_BRACE:
         if (seen_any && value_line) {
           // e.g. "(foo {})" is invalid, but "(foo + {})" is ok
-          return ERROR__UNEXPECTED;
+          return 0;
         }
-        return consume_dict(context);
-
-      case TOKEN_ARRAY:
-        _transition_to_value();
-        _check(consume_expr_group(context));
-        continue;
-
-      case TOKEN_PAREN:
-        // nb. technically, non-method calls need contents inside (), but eh.
-        _check(consume_expr_group(context));
+        _check(consume_dict(context));
+        value_line = td.cursor.line_no;
+        seen_any = 1;
         continue;
 
       case TOKEN_TERNARY:
         // nb. needs value on left (and contents!), but nonsensical otherwise
         _check(consume_expr_group(context));
+        value_line = 0;
+        seen_any = 1;
         continue;
 
       case TOKEN_T_BRACE:
         _check(consume_expr_group(context));
-        value_line = 0;  // not true, but allows string to continue
+        value_line = 0;  // allows string to continue
+        seen_any = 1;
+        continue;
+
+      case TOKEN_ARRAY:
+      case TOKEN_PAREN:
+        _check(consume_expr_group(context));
+        value_line = td.cursor.line_no;
+        seen_any = 1;
         continue;
 
       case TOKEN_STRING:
@@ -265,6 +297,7 @@ int consume_optional_expr(int context) {
         } else {
           _check(consume_optional_expr(normal_context));
         }
+        // nb. this has value, but always ends with ) or , etc
         continue;
       }
 
@@ -355,10 +388,11 @@ int consume_optional_expr(int context) {
             // nb. this needs has_value, but it's nonsensical otherwise
             internal_next();
             if (td.cursor.type != TOKEN_LIT) {
-              return ERROR__UNEXPECTED;
+              return 0;
             }
             internal_next_update(TOKEN_SYMBOL);
             value_line = td.cursor.line_no;
+            seen_any = 1;
             continue;
 
           case MISC_INCDEC:
@@ -396,6 +430,7 @@ int consume_expr_compound(int context) {
 }
 
 int consume_expr_group(int context) {
+  int start = td.cursor.type;
   switch (td.cursor.type) {
     case TOKEN_PAREN:
     case TOKEN_ARRAY:
@@ -406,7 +441,6 @@ int consume_expr_group(int context) {
     default:
       return ERROR__UNEXPECTED;
   }
-
   internal_next();
 
   for (;;) {
@@ -446,8 +480,7 @@ int consume_class(int context) {
     }
   }
 
-  // TODO: consume class body
-  return ERROR__TODO;
+  return consume_dict(context);
 }
 
 int consume_statement(int context) {
@@ -535,11 +568,19 @@ int consume_statement(int context) {
 
     // special-case trailing "while(...)" for a 'do-while'
     if (control_hash == LIT_DO) {
+      // TODO: in case the statement hasn't closed properly
+      if (td.cursor.type == TOKEN_SEMICOLON) {
+        internal_next();
+      }
+
       if (td.cursor.hash != LIT_WHILE) {
+        debugf("could not find while of do-while\n");
         return ERROR__UNEXPECTED;
       }
       internal_next();
+
       if (td.cursor.type != TOKEN_PAREN) {
+        debugf("could not find do-while parens\n");
         return ERROR__UNEXPECTED;
       }
       _check(consume_expr_group(context));
@@ -560,7 +601,7 @@ int consume_statement(int context) {
         return 0;
       }
       return consume_expr_compound(context);
-      // TODO: what does semi attach to?
+      // nb. should look for semi here, just ignore
     }
 
     case LIT_IMPORT:
@@ -580,10 +621,8 @@ int consume_statement(int context) {
       if (line_no != td.cursor.line_no) {
         return 0;
       }
-      if (td.cursor.type != TOKEN_SEMICOLON) {
-        return ERROR__UNEXPECTED;
-      }
-      internal_next();
+
+      // nb. should look for semi here, ignore
       return 0;
     }
 
@@ -603,11 +642,7 @@ int consume_statement(int context) {
         }
       }
 
-      // "break foo;" (; is on same line)
-      if (td.cursor.type != TOKEN_SEMICOLON) {
-        return ERROR__UNEXPECTED;
-      }
-      internal_next();
+      // nb. should look for semi here, ignore
       return 0;
     }
   }
@@ -615,6 +650,7 @@ int consume_statement(int context) {
   char *p = td.cursor.p;
   int ret = consume_expr_compound(context);
   if (p == td.cursor.p) {
+    debugf("expr did not get consumed\n");
     return ERROR__UNEXPECTED;
   }
   return ret;
