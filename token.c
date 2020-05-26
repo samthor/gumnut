@@ -389,6 +389,7 @@ int prsr_next(tokendef *d) {
       // inside ternary stack, close it
       if (d->depth && d->stack[d->depth - 1] == TOKEN_TERNARY) {
         cursor.type = TOKEN_CLOSE;
+        --d->depth;
       }
       break;
 
