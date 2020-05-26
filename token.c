@@ -1,33 +1,33 @@
-/*
- * Copyright 2019 Sam Thorogood. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not
- * use this file except in compliance with the License. You may obtain a copy of
- * the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations under
- * the License.
- */
 
 #include <ctype.h>
 #include <string.h>
+#include "token2.h"
 #include "tokens/lit.h"
 #include "tokens/helper.h"
-#include "token.h"
 
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
-typedef struct {
-  int len;
-  int type;
-  uint32_t hash;
-} eat_out;
+// expects pointer to be on first character of comment (after "/*")
+static inline char *internal_consume_multiline_comment(char *p, int *line_no) {
+  for (;;) {
+    char c = *(++p);
+    switch (c) {
+      case '\n':
+        ++(*line_no);
+        break;
+
+      case '*':
+        if (p[1] == '/') {
+          return p + 2;
+        }
+        break;
+
+      case 0:
+        return p;
+    }
+  }
+}
 
 static inline int consume_slash_op(char *p) {
   // can match "/" or "/="
@@ -75,6 +75,19 @@ static int consume_slash_regexp(char *p) {
   }
 }
 
+static char *consume_space(char *p, int *line_no) {
+  char c;
+  for (;;) {
+    c = *p;
+    if (!isspace(c)) {
+      return p;
+    } else if (c == '\n') {
+      ++(*line_no);
+    }
+    ++p;
+  }
+}
+
 static int consume_string(char *p, int *line_no, int *litflag) {
   int len;
   char start;
@@ -95,7 +108,7 @@ static int consume_string(char *p, int *line_no, int *litflag) {
     }
 
     switch (c) {
-      case 0:
+      case '\0':
         return len;
 
       case '$':
@@ -113,9 +126,7 @@ static int consume_string(char *p, int *line_no, int *litflag) {
         break;
 
       case '\n':
-        if (start != '`') {
-          return len;  // invalid, but we consumed partial string until newline
-        }
+        // invalid in non-` but not much else we can do
         ++(*line_no);
         break;
     }
@@ -124,106 +135,78 @@ static int consume_string(char *p, int *line_no, int *litflag) {
   return len;
 }
 
-static eat_out eat_token(char *p, token *prev) {
-#define _ret(_len, _type) ((eat_out) {_len, _type, 0});
-#define _reth(_len, _type, _hash) ((eat_out) {_len, _type, _hash});
+static void eat_token(token *t, int *line_no) {
+#define _ret(_len, _type) {t->type = _type; t->len = _len; return;};
+#define _reth(_len, _type, _hash) {t->type = _type; t->len = _len; t->hash = _hash; return;};
+  char *p = t->p;
   const char start = p[0];
 
   // simple cases
   switch (start) {
-    case 0:
-      return _ret(0, TOKEN_EOF);
+    case '\0':
+      _ret(0, TOKEN_EOF);
 
-    case '/':
-      if (prev->hash == MISC_RARRAY) {
-        // end of array [], always op
-        return _ret(consume_slash_op(p), TOKEN_OP);
-      }
+    case '/': {
+      char *end;
 
-      switch (prev->type) {
-        case TOKEN_OP:
-          if (prev->hash == MISC_INCDEC) {
-            break;  // weird attachment rules
+      switch (p[1]) {
+        case '/':
+          end = strchr(p, '\n');
+          int len;
+          if (end) {
+            len = end - p;
+          } else {
+            len = strlen(p);
           }
-          // fall-through
-
-        case TOKEN_EOF:
-        case TOKEN_EXEC:     // not generated
-        case TOKEN_SEMICOLON:
-        case TOKEN_ARROW:
-        case TOKEN_COLON:    // label or ternary, both imply regexp
-        case TOKEN_DICT:     // not generated (and invalid)
-        case TOKEN_ARRAY:
-        case TOKEN_PAREN:
-        case TOKEN_T_BRACE:
-        case TOKEN_TERNARY:
-        case TOKEN_KEYWORD:  // not generated
-          return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
-
-        case TOKEN_LIT:
-          if (prev->hash & (_MASK_REL_OP | _MASK_UNARY_OP | _MASK_KEYWORD)) {
-            // ops always precede regexp
-            // keywords always precede regexp
-            return _ret(consume_slash_regexp(p), TOKEN_REGEXP);
-          }
-          // the only effective ambiguity here is "await", as it is a valid name in non-async
-          break;
-
-        case TOKEN_REGEXP:
-        case TOKEN_NUMBER:
-        case TOKEN_STRING:
-        case TOKEN_SYMBOL:
-          return _ret(consume_slash_op(p), TOKEN_OP);
-
-#ifdef DEBUG
-        case TOKEN_CLOSE:
-        case TOKEN_LABEL:    // not generated (and invalid)
-          break;  // ambiguous
-#endif
+          _ret(len, TOKEN_COMMENT);
+        case '*':
+          end = internal_consume_multiline_comment(p + 2, line_no);
+          _ret(end - p, TOKEN_COMMENT);
       }
-
-      // unkown, return ambiguous
-      return _ret(1, TOKEN_SLASH);  // return ambig, handled elsewhere
+      _ret(1, TOKEN_SLASH);  // ambigious
+    }
 
     case ';':
-      return _ret(1, TOKEN_SEMICOLON);
+      _ret(1, TOKEN_SEMICOLON);
 
     case '?':
       switch (p[1]) {
         case '.':
-          return _reth(2, TOKEN_OP, MISC_CHAIN);
+          _reth(2, TOKEN_OP, MISC_CHAIN);
         case '?':
-          return _ret(2, TOKEN_OP);
+          _ret(2, TOKEN_OP);
       }
-      return _ret(1, TOKEN_TERNARY);
+      _ret(1, TOKEN_TERNARY);
 
     case ':':
-      return _reth(1, TOKEN_COLON, MISC_COLON);  // nb. might change to TOKEN_CLOSE in parent
+      _reth(1, TOKEN_COLON, MISC_COLON);  // nb. might change to TOKEN_CLOSE in parent
 
     case ',':
-      return _reth(1, TOKEN_OP, MISC_COMMA);
+      _reth(1, TOKEN_OP, MISC_COMMA);
 
     case '{':
-      return _ret(1, TOKEN_BRACE);
+      _ret(1, TOKEN_BRACE);
 
     case '(':
-      return _ret(1, TOKEN_PAREN);
+      _ret(1, TOKEN_PAREN);
 
     case '[':
-      return _ret(1, TOKEN_ARRAY);
+      _ret(1, TOKEN_ARRAY);
 
     case ']':
-      return _reth(1, TOKEN_CLOSE, MISC_RARRAY);
+      _reth(1, TOKEN_CLOSE, MISC_RARRAY);
 
     case ')':
     case '}':
-      return _ret(1, TOKEN_CLOSE);
+      _ret(1, TOKEN_CLOSE);
 
     case '\'':
     case '"':
-    case '`':
-      return _ret(0, TOKEN_STRING);  // consumed by parent
-
+    case '`': {
+      int litflag = 0;  // TODO: not used
+      int len = consume_string(p, line_no, &litflag);
+      _ret(len, TOKEN_STRING);
+    }
   }
 
   // ops: i.e., anything made up of =<& etc (except '/' and ',', handled above)
@@ -254,22 +237,22 @@ static eat_out eat_token(char *p, token *prev) {
       // simple cases that are hashed
       switch (start) {
         case '*':
-          return _reth(1, TOKEN_OP, MISC_STAR);
+          _reth(1, TOKEN_OP, MISC_STAR);
         case '~':
-          return _reth(1, TOKEN_OP, MISC_BITNOT);
+          _reth(1, TOKEN_OP, MISC_BITNOT);
         case '!':
           if (c != '=') {
-            return _reth(1, TOKEN_OP, MISC_NOT);
+            _reth(1, TOKEN_OP, MISC_NOT);
           }
           break;
       }
 
       // nb. these are all allowed=1, so len=1 even though we're consuming more
       if (start == '=' && c == '>') {
-        return _reth(2, TOKEN_ARROW, MISC_ARROW);  // arrow for arrow function
+        _reth(2, TOKEN_ARROW, MISC_ARROW);  // arrow for arrow function
       } else if (c == start && (c == '+' || c == '-')) {
         // nb. we don't actaully care which one this is?
-        return _reth(2, TOKEN_OP, MISC_INCDEC);
+        _reth(2, TOKEN_OP, MISC_INCDEC);
       } else if (c == start && (c == '|' || c == '&')) {
         ++len;  // eat || or &&: but no more
       } else if (c == '=') {
@@ -280,11 +263,11 @@ static eat_out eat_token(char *p, token *prev) {
         }
       } else if (start == '=') {
         // match equals specially
-        return _reth(1, TOKEN_OP, MISC_EQUALS);
+        _reth(1, TOKEN_OP, MISC_EQUALS);
       }
     }
 
-    return _ret(len, TOKEN_OP);
+    _ret(len, TOKEN_OP);
   } while (0);
 
   // number: "0", ".01", "0x100"
@@ -298,15 +281,15 @@ static eat_out eat_token(char *p, token *prev) {
       }
       c = p[++len];
     }
-    return _ret(len, TOKEN_NUMBER);
+    _ret(len, TOKEN_NUMBER);
   }
 
   // dot notation (not a number)
   if (start == '.') {
     if (next == '.' && p[2] == '.') {
-      return _reth(3, TOKEN_OP, MISC_SPREAD);  // '...' operator
+      _reth(3, TOKEN_OP, MISC_SPREAD);  // '...' operator
     }
-    return _reth(1, TOKEN_OP, MISC_DOT);  // it's valid to say e.g., "foo . bar", so separate token
+    _reth(1, TOKEN_OP, MISC_DOT);  // it's valid to say e.g., "foo . bar", so separate token
   }
 
   // literals
@@ -345,245 +328,85 @@ static eat_out eat_token(char *p, token *prev) {
 
   if (!len) {
     // found nothing :(
-    return _ret(0, -1);
+    _ret(0, -1);
   }
 
-  int type = TOKEN_LIT;
-  if (hash & _MASK_MASQUERADE || prev->hash == MISC_DOT || prev->hash == MISC_CHAIN) {
-    // these are never labels (false, import etc)
-    // in foo.bar, bar is always a symbol (even if it's a reserved word)
-    type = TOKEN_SYMBOL;
-  }
-  return _reth(len, type, hash);
+  _reth(len, TOKEN_LIT, hash);
 #undef _ret
 #undef _reth
 }
 
-static inline char *internal_consume_multiline_comment(char *p, int *line_no) {
-  for (;;) {
-    char c = *(++p);
-    switch (c) {
-      case '\n':
-        ++(*line_no);
-        break;
-
-      case '*':
-        if (p[1] == '/') {
-          return p + 2;
-        }
-        break;
-
-      case 0:
-        return p;
-    }
-  }
-}
-
-static int consume_comment(char *p, int *line_no, int start) {
-  char *from = p;
-
-  switch (*p) {
-    case '/': {
-      char next = *(++p);
-      if (next == '*') {
-        return internal_consume_multiline_comment(p, line_no) - from;
-      } else if (next != '/') {
-        return 0;
-      }
-      break;
-    }
-
-    case '#':
-      // consume #! at top of file
-      if (!(start && *(++p) == '!')) {
-        return 0;
-      }
-      break;
-
-    default:
-      return 0;
-  }
-
-  // match single-line comment
-  for (;;) {
-    char c = *p;
-    if (c == '\n' || !c) {
-      break;
-    }
-    ++p;
-  }
-  return p - from;
-}
-
-static char *consume_space(char *p, int *line_no) {
-  char c;
-#define _check() \
-    c = *p; \
-    if (!isspace(c)) { \
-      return p; \
-    } else if (c == '\n') { \
-      ++(*line_no); \
-    } \
-    ++p;
-
-#if 1
-  for (;;) {
-    _check();
-  }
-#else
-// This could potentially be faster but gives no performance gain in native mode (about the same or
-// potentially marginally slower). It's actually worse in 32-bit.
-  int off = ((int) p & 3);
-  switch (off) {
-    case 1: _check();
-    case 2: _check();
-    case 3: _check();
-    case 4: _check();
-    case 5: _check();
-    case 6: _check();
-    case 7: _check();
-  }
-  uint64_t *words = (uint64_t *) p;
-
-  for (;;) {
-    if (*words == 0x2020202020202020) {
-      p += 8;
-    } else {
-      #pragma unroll
-      for (int i = 0; i < 8; ++i) {
-        _check();
-      }
-    }
-    ++words;
-  }
-#endif
-#undef _check
-}
-
-static void eat_next(tokendef *d) {
-  // consume from next, repeat(space, comment [first into pending]) and next token
-  char *from = d->next.p + d->next.len;
-
-  // short-circuit for token state machine
-  if (d->flag) {
-    if (d->flag == FLAG__PENDING_T_BRACE) {
-      d->next.type = TOKEN_T_BRACE;
-      d->next.len = 2;  // "${"
+int prsr_next(tokendef *d) {
+  switch (d->flag) {
+    case FLAG__PENDING_T_BRACE:
+      d->cursor.p += d->cursor.len;  // move past string
+      d->cursor.type = TOKEN_T_BRACE;
+      d->cursor.len = 2;
+      d->cursor.hash = 0;
       d->flag = 0;
-    } else if (d->flag == FLAG__RESUME_LIT) {
+
+      if (d->depth == __STACK_SIZE - 1) {
+        return ERROR__STACK;
+      }
+      d->stack[d->depth++] = TOKEN_T_BRACE;
+
+      return TOKEN_T_BRACE;
+    case FLAG__RESUME_LIT: {
       int litflag = 1;
-      d->next.type = TOKEN_STRING;
-      d->next.len = consume_string(from, &d->line_no, &litflag);
+      ++d->cursor.p;  // move past '}'
+      d->cursor.type = TOKEN_STRING;
+      d->cursor.len = consume_string(d->cursor.p, &d->line_no, &litflag);
+      d->cursor.hash = 0;
       d->flag = litflag ? FLAG__PENDING_T_BRACE : 0;
+      return TOKEN_STRING;
     }
-    d->next.p = from;
-    return;
   }
 
-  // always consume space chars
-  char *p = consume_space(from, &d->line_no);
-  d->pending.p = p;
-  d->pending.line_no = d->line_no;
-
-  // match comments (C99 and long), record first in pending
-  int len = consume_comment(p, &d->line_no, p == d->buf);
-  d->pending.len = len;
-  d->line_after_pending = d->line_no;
-  while (len) {
-    p += len;
-    p = consume_space(p, &d->line_no);
-    len = consume_comment(p, &d->line_no, 0);
+  if (d->cursor.len == 0 && d->cursor.type != TOKEN_UNKNOWN) {
+    // TODO: this could also be "TOKEN_OP" check
+    return ERROR__VALUE;
   }
 
-  // match real token
-  eat_out eat = eat_token(p, &(d->next));
-  d->next.type = eat.type;
-  d->next.hash = eat.hash;
-  d->next.line_no = d->line_no;
-  d->next.p = p;
-  d->next.len = eat.len;
+  token cursor;
+  cursor.hash = 0;
 
-  // special-case token
-  switch (eat.type) {
-    case TOKEN_EOF:
-      d->next.line_no = 0;  // always change line_no for EOF
-      break;
+  // consume space chars after previous, until next token
+  char *p = consume_space(d->cursor.p + d->cursor.len, &d->line_no);
+  cursor.p = p;
+  cursor.line_no = d->line_no;
 
-    case TOKEN_STRING: {
-      // consume string
-      int litflag = 0;
-      d->next.len = consume_string(p, &d->line_no, &litflag);
-      if (litflag) {
+  eat_token(&cursor, &(d->line_no));
+  int ret = cursor.type;
+
+  switch (cursor.type) {
+    case TOKEN_STRING:
+      if (p[0] == '`' && (cursor.len == 1 || p[cursor.len - 1] != '`')) {
         d->flag = FLAG__PENDING_T_BRACE;
       }
       break;
-    }
 
     case TOKEN_COLON:
       // inside ternary stack, close it
       if (d->depth && d->stack[d->depth - 1] == TOKEN_TERNARY) {
-        d->next.type = TOKEN_CLOSE;
+        cursor.type = TOKEN_CLOSE;
       }
-      break;
-  }
-}
-
-int prsr_next_token(tokendef *d, token *out, int has_value) {
-  if (d->pending.len) {
-    // copy pending comment out, try to yield more
-    memcpy(out, &d->pending, sizeof(token));
-
-    char *p = consume_space(d->pending.p + d->pending.len, &d->line_after_pending);
-    if (p == d->next.p) {
-      d->pending.len = 0;
-      return 0;  // nothing to do, reached real token
-    }
-
-    // queue up upcoming comment
-    d->pending.p = p;
-    d->pending.line_no = d->line_after_pending;
-    d->pending.len = consume_comment(p, &d->line_after_pending, 0);
-
-    if (!d->pending.len) {
-      return ERROR__INTERNAL;
-    }
-    return 0;
-  }
-
-  memcpy(out, &d->next, sizeof(token));
-
-  // actually enact token
-  switch (out->type) {
-    case TOKEN_SLASH:
-      // consume this token as lookup can't know what it was
-      if (out->p[0] != '/' || has_value < 0) {
-        return ERROR__VALUE;
-      } else if (has_value) {
-        out->type = TOKEN_OP;
-        out->len = consume_slash_op(out->p);
-      } else {
-        out->type = TOKEN_REGEXP;
-        out->len = consume_slash_regexp(out->p);
-      }
-      d->next.len = out->len;
       break;
 
     case TOKEN_TERNARY:
     case TOKEN_PAREN:
     case TOKEN_ARRAY:
     case TOKEN_BRACE:
-    case TOKEN_T_BRACE:
       if (d->depth == __STACK_SIZE - 1) {
-        eat_next(d);  // consume invalid open but return error
-        return ERROR__STACK;
+        ret = ERROR__STACK;
+        break;
       }
-      d->stack[d->depth++] = out->type;
+      d->stack[d->depth++] = cursor.type;
       break;
 
     case TOKEN_CLOSE:
       if (!d->depth) {
-        eat_next(d);  // consume invalid close but return error
-        return ERROR__STACK;
+        ret = ERROR__STACK;
+        break;
       }
       uint8_t type = d->stack[--d->depth];
       if (type == TOKEN_T_BRACE) {
@@ -592,17 +415,9 @@ int prsr_next_token(tokendef *d, token *out, int has_value) {
       break;
   }
 
-  eat_next(d);
-  return 0;
-}
-
-void prsr_close_op_next(tokendef *d) {
-  if (d->next.type == TOKEN_OP && d->next.p[0] == '/') {
-    // change to TOKEN_REGEXP
-    char *p = d->next.p - d->next.len;
-    d->next.len = consume_slash_regexp(p);
-    d->next.type = TOKEN_REGEXP;
-  }
+  d->cursor = cursor;
+  d->peek.type = TOKEN_UNKNOWN;
+  return ret;
 }
 
 tokendef prsr_init_token(char *p) {
@@ -611,9 +426,74 @@ tokendef prsr_init_token(char *p) {
   d.buf = p;
   d.line_no = 1;
 
-  d.pending.type = TOKEN_COMMENT;
-  d.next.p = p;  // place next cursor
+  d.cursor.type = TOKEN_UNKNOWN;
+  d.cursor.p = p;
+  d.peek.type = TOKEN_UNKNOWN;
+  d.peek.p = p;
 
-  eat_next(&d);
   return d;
+}
+
+int prsr_update(tokendef *d, int type) {
+  switch (d->cursor.type) {
+    case TOKEN_SLASH:
+      switch (type) {
+        case TOKEN_OP:
+          d->cursor.len = consume_slash_op(d->cursor.p);
+          break;
+        case TOKEN_REGEXP:
+          d->cursor.len = consume_slash_regexp(d->cursor.p);
+          break;
+        default:
+          return ERROR__INTERNAL;
+      }
+      d->cursor.type = type;
+      return 0;
+
+    case TOKEN_LIT:
+      if (!(type == TOKEN_SYMBOL || type == TOKEN_KEYWORD || type == TOKEN_LABEL || type == TOKEN_OP)) {
+        return ERROR__INTERNAL;
+      }
+      d->cursor.type = type;
+      return 0;
+
+    default:
+      return ERROR__INTERNAL;
+  }
+}
+
+int prsr_peek(tokendef *d) {
+  if (d->peek.type != TOKEN_UNKNOWN) {
+    return d->peek.type;
+  } else if (d->cursor.len == 0) {
+    return TOKEN_UNKNOWN;
+  }
+
+  char *p = d->cursor.p + d->cursor.len;
+  d->peek.line_no = d->line_no;
+  d->peek.hash = 0;
+
+  switch (d->flag) {
+    case FLAG__PENDING_T_BRACE:
+      d->peek.p = p;
+      d->peek.len = 2;
+      d->peek.type = TOKEN_T_BRACE;
+      return TOKEN_T_BRACE;
+
+    case FLAG__RESUME_LIT:
+      d->peek.p = p;
+      d->peek.len = 0;  // TODO: we don't bother in peek
+      d->peek.type = TOKEN_STRING;
+      return TOKEN_STRING;
+  }
+
+  for (;;) {
+    d->peek.p = consume_space(p, &(d->peek.line_no));
+    eat_token(&(d->peek), &(d->peek.line_no));
+
+    int type = d->peek.type;
+    if (type != TOKEN_COMMENT) {
+      return type;
+    }
+  }
 }
