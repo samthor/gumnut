@@ -203,17 +203,26 @@ int consume_dict(int context) {
         break;
 
       case TOKEN_OP:
-        if (td.cursor.hash == MISC_COMMA) {
-          // single value (e.g. "{foo,bar}")
-          internal_next();
-          continue;
+        switch (td.cursor.hash) {
+          case MISC_COMMA:
+            // single value (e.g. "{foo,bar}")
+            internal_next();
+            continue;
+
+          case MISC_EQUALS:
+            // class-like private variable declaration
+            internal_next();
+            _check(consume_optional_expr(context));
+
+            if (td.cursor.type == TOKEN_SEMICOLON) {
+              internal_next();
+            }
+            continue;
         }
         // fall-through
 
       default:
-        // nb. this should fail, but who cares
-        _check(consume_optional_expr(context));
-        continue;
+        return ERROR__UNEXPECTED;
     }
 
     // keep going, more data
