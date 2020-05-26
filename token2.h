@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Sam Thorogood. All rights reserved.
+ * Copyright 2020 Sam Thorogood.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -22,27 +22,26 @@
 
 typedef struct {
   char *buf;
-  int line_no;    // after next
-  token next;     // next useful token
-  token pending;  // pending comment
-  int line_after_pending;
+  token cursor; // focused here
+  token peek;   // peeked token, not available unless prsr_peek() called
+  int line_no;  // after cursor
 
   // depth/flag used to record ${} state (resume literal once brace done)
-  uint8_t flag : 2;
+  uint8_t flag;
   uint16_t depth : __STACK_SIZE_BITS;
   uint8_t stack[__STACK_SIZE];
 } tokendef;
 
-// Reads the next token into *out.
-int prsr_next_token(tokendef *d, token *out, int has_value);
+// Prepares tokendef. Provides an initial zero token.
+tokendef prsr_init_token(char *);
 
-// Closes the current statement and asserts that the following starts anew.
-// This is needed as:
-//    import x from 'foo' /hello/
-// is valid, and otherwise we assume / is an op.
-void prsr_close_op_next(tokendef *d);
+// Moves the current cursor to the next token. This includes comments.
+int prsr_next(tokendef *);
 
-// Prepares tokendef.
-tokendef prsr_init_token(char *p);
+// Updates the current cursor as a different type. Important for TOKEN_SLASH.
+int prsr_update(tokendef *, int);
+
+// Peeks to the next non-comment token. Returns type and fills .peek field.
+int prsr_peek(tokendef *);
 
 #endif//_TOKEN_H

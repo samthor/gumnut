@@ -19,10 +19,12 @@
 #ifndef _TYPES_H
 #define _TYPES_H
 
-#define ERROR__INTERNAL -1  // internal error
-#define ERROR__STACK    -2  // stack didn't balance
-#define ERROR__VALUE    -3  // ambiguous slash (internal error)
-#define ERROR__ASSERT   -4
+#define ERROR__INTERNAL   -1  // internal error
+#define ERROR__STACK      -2  // stack didn't balance
+#define ERROR__VALUE      -3  // ambiguous slash (internal error)
+#define ERROR__ASSERT     -4
+#define ERROR__TODO       -5
+#define ERROR__UNEXPECTED -6
 
 #define __STACK_SIZE      256  // stack size used by token
 #define __STACK_SIZE_BITS 8    // bits needed for __STACK_SIZE
@@ -31,23 +33,22 @@ typedef struct {
   char *p;
   int len;
   int line_no;
-  uint8_t type : 5;
-  uint8_t mark : 3;
+  int type;
   uint32_t hash;
 } token;
 
 // empty: will not contain text
 #define TOKEN_EOF       0
+#define TOKEN_UNKNOWN   1   // valid but unknown/unresolved token
 
 // fixed: will always be the same, or in the same set
-#define TOKEN_EXEC      1   // block '{' or blank for statement
-#define TOKEN_SEMICOLON 2   // might be blank for ASI
-#define TOKEN_OP        4   // can include 'in', 'instanceof'
-#define TOKEN_ARROW     5
+#define TOKEN_SEMICOLON 3   // ;
+#define TOKEN_OP        4   // can include 'in', 'instanceof', 'of'
+#define TOKEN_ARROW     5   // =>
 #define TOKEN_COLON     6   // used in label or dict
-#define TOKEN_DICT      7   // dict-like {
-#define TOKEN_ARRAY     8
-#define TOKEN_PAREN     9
+#define TOKEN_BRACE     7   // {
+#define TOKEN_ARRAY     8   // [
+#define TOKEN_PAREN     9   // (
 #define TOKEN_T_BRACE   10  // '${' within template literal
 #define TOKEN_TERNARY   11  // starts ternary block, "? ... :"
 #define TOKEN_CLOSE     12  // '}', ']', ')', ':' or blank for statement close
@@ -62,13 +63,8 @@ typedef struct {
 #define TOKEN_LABEL     19  // to the left of a ':', e.g. 'foo:'
 
 // internal/ambiguous tokens
-#define TOKEN_TOP       28  // never reported, top of function or program
-#define TOKEN_BRACE     29  // ambig brace
 #define TOKEN_LIT       30  // symbol, keyword or label
 #define TOKEN_SLASH     31  // ambigous slash that is op or regexp
-
-// special marks
-#define MARK_RESOLVE    2   // resolving a prior lit (always "async")
 
 #endif//_TYPES_H
 

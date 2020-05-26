@@ -1,4 +1,4 @@
-// Generated on Sun May 24 2020 00:05:35 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Tue May 26 2020 15:30:57 GMT+1000 (Australian Eastern Standard Time)
 
 export const _KEYWORD = 1;
 export const _STRICT_KEYWORD = 2;
@@ -15,13 +15,13 @@ export const AS = 389816320;
 export const ASYNC = 792469504;
 export const AWAIT = 796663808;
 export const BREAK = 791429123;
-export const CASE = 639393795;
+export const CASE = 639393811;
 export const CATCH = 773612419;
 export const CLASS = 785145859;
 export const CONST = 788291651;
 export const CONTINUE = 1190944771;
 export const DEBUGGER = 1180467203;
-export const DEFAULT = 1046249475;
+export const DEFAULT = 1046249491;
 export const DELETE = 912031753;
 export const DO = 385646723;
 export const ELSE = 650944643;
@@ -36,7 +36,7 @@ export const FUNCTION = 1197260803;
 export const GET = 509403136;
 export const IF = 376250755;
 export const IMPLEMENTS = 1457332226;
-export const IMPORT = 920461328;
+export const IMPORT = 920461360;
 export const IN = 384638981;
 export const INSTANCEOF = 1458380805;
 export const INTERFACE = 1324163074;

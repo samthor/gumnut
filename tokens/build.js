@@ -24,7 +24,7 @@ const relOp =
 // => 'import' can also start special statements
 // => "undefined" is NOT here, even in strict mode
 const neverLabel = 
-    " false import null super this true ";
+    " case default false import null super this true ";
 
 // like variables (this is neverLabel plus undefined)
 const variableLike =

@@ -1,4 +1,4 @@
-// Generated on Sun May 24 2020 00:05:35 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Tue May 26 2020 15:30:57 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -18,13 +18,13 @@
 #define LIT_ASYNC        792469504
 #define LIT_AWAIT        796663808
 #define LIT_BREAK        791429123
-#define LIT_CASE         639393795
+#define LIT_CASE         639393811
 #define LIT_CATCH        773612419
 #define LIT_CLASS        785145859
 #define LIT_CONST        788291651
 #define LIT_CONTINUE     1190944771
 #define LIT_DEBUGGER     1180467203
-#define LIT_DEFAULT      1046249475
+#define LIT_DEFAULT      1046249491
 #define LIT_DELETE       912031753
 #define LIT_DO           385646723
 #define LIT_ELSE         650944643
@@ -39,7 +39,7 @@
 #define LIT_GET          509403136
 #define LIT_IF           376250755
 #define LIT_IMPLEMENTS   1457332226
-#define LIT_IMPORT       920461328
+#define LIT_IMPORT       920461360
 #define LIT_IN           384638981
 #define LIT_INSTANCEOF   1458380805
 #define LIT_INTERFACE    1324163074

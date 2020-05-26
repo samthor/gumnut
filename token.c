@@ -349,8 +349,8 @@ static eat_out eat_token(char *p, token *prev) {
   }
 
   int type = TOKEN_LIT;
-  if (!hash || hash & _MASK_VARIABLE || prev->hash == MISC_DOT || prev->hash == MISC_CHAIN) {
-    // non-hash is always symbol
+  if (hash & _MASK_MASQUERADE || prev->hash == MISC_DOT || prev->hash == MISC_CHAIN) {
+    // these are never labels (false, import etc)
     // in foo.bar, bar is always a symbol (even if it's a reserved word)
     type = TOKEN_SYMBOL;
   }

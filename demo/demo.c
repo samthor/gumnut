@@ -51,21 +51,10 @@ typedef struct {
 void render_callback(void *arg, token *out) {
   demo_context *context = (demo_context *) arg;
   ++context->tokens;
-  if (out->type == TOKEN_SEMICOLON && !out->len) {
-    ++context->asi;
-  }
 #ifndef SPEED
   char c = ' ';
   if (out->hash) {
     c = '#';  // has a hash
-  } else if (!out->len) {
-    if (out->type == TOKEN_SEMICOLON) {
-      c = ';';  // this is an ASI
-    } else if (out->type == TOKEN_EXEC) {
-      c = '{';
-    } else if (out->type == TOKEN_CLOSE) {
-      c = '}';
-    }
   }
   printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
 #endif
@@ -81,8 +70,7 @@ int main() {
   demo_context context;
   bzero(&context, sizeof(demo_context));
 
-  tokendef td = prsr_init_token(buf);
-  int out = prsr_simple(&td, 1, render_callback, &context);
+  int out = prsr_run(buf, 0, render_callback, &context);
   if (out) {
     fprintf(stderr, "ret=%d\n", out);
   }
