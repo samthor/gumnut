@@ -12,10 +12,10 @@ const alwaysStrictKeyword =
 
 // act like unary ops
 const unaryOp =
-    " delete new typeof void ";
+    " delete new typeof void yield ";
 
 const optionalUnaryOp =
-    " await yield ";
+    " await ";
 
 const relOp =
     " in instanceof ";

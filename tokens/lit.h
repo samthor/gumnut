@@ -1,4 +1,4 @@
-// Generated on Tue May 26 2020 15:30:57 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Tue May 26 2020 23:01:50 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -66,7 +66,7 @@
 #define LIT_VOID         654229513
 #define LIT_WHILE        781115779
 #define LIT_WITH         647946627
-#define LIT_YIELD        782180354
+#define LIT_YIELD        782180363
 
 #define MISC_ARROW       333946880  // =>
 #define MISC_BITNOT      135249920  // ~

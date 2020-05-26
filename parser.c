@@ -292,7 +292,7 @@ int consume_optional_expr(int context) {
             break;
 
           default:
-            if (td.cursor.hash & _MASK_REL_OP) {
+            if (td.cursor.hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
               type = TOKEN_OP;
             } else if (td.cursor.hash & _MASK_KEYWORD) {
               return 0;
@@ -306,6 +306,13 @@ int consume_optional_expr(int context) {
       }
 
       case TOKEN_OP:
+        if (td.cursor.hash & _MASK_UNARY_OP) {
+          if (seen_any && value_line) {
+            // e.g., "var x = 123 new foo" is invalid
+            return 0;
+          }
+        }
+
         switch (td.cursor.hash) {
           case MISC_COMMA:
             return 0;
@@ -381,10 +388,11 @@ int consume_expr_group(int context) {
   internal_next();
 
   for (;;) {
-    _check(consume_optional_expr(context));
+    _check(consume_expr_compound(context));
 
     // nb. not really good practice, but handles for-loop-likes
-    if (td.cursor.type != TOKEN_SEMICOLON && td.cursor.hash != MISC_COMMA) {
+    // TODO(samthor): allow more things
+    if (td.cursor.type != TOKEN_SEMICOLON) {
       break;
     }
 
