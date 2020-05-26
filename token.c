@@ -1,7 +1,7 @@
 
 #include <ctype.h>
 #include <string.h>
-#include "token2.h"
+#include "token.h"
 #include "tokens/lit.h"
 #include "tokens/helper.h"
 

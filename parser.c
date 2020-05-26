@@ -1,6 +1,6 @@
 #include "parser.h"
 #include "tokens/lit.h"
-#include "token2.h"
+#include "token.h"
 
 #define _check(v) { int _ret = v; if (_ret) { return _ret; }};
 
@@ -71,38 +71,50 @@ int consume_function(int context) {
   return consume_statement(statement_context);
 }
 
+// consumes something starting with async (might be function)
 int consume_async_expr(int context) {
-  return ERROR__TODO;
-  // if (td.cursor.hash != LIT_ASYNC) {
-  //   return ERROR__UNEXPECTED;
-  // }
+  if (td.cursor.hash != LIT_ASYNC) {
+    return ERROR__UNEXPECTED;
+  }
 
-  // int peek_type = prsr_peek(&td);
-  // switch (peek_type) {
-  //   case TOKEN_LIT:
-  //     // function
+  int peek_type = prsr_peek(&td);
+  switch (peek_type) {
+    case TOKEN_LIT:
+      // function, this is a variable name
+      internal_next_update(TOKEN_KEYWORD);
+      internal_next_update(TOKEN_SYMBOL);
 
-  //   case TOKEN_PAREN:
-  //     // _maybe_ function
-  //     _check(consume_expr_group(context));
+      if (td.cursor.type != TOKEN_ARROW) {
+        return ERROR__UNEXPECTED;
+      }
+      break;
 
-  //     if (td.cursor.type == TOKEN_ARROW) {
+    case TOKEN_PAREN:
+      internal_next();  // nb. we explicitly yield TOKEN_LIT here
 
-  //     }
-  // }
+      // _maybe_ function
+      _check(consume_expr_group(context));
 
-  // if (peek_type == TOKEN_LIT) {
-  //   // is function
-  //   internal_next_update(TOKEN_KEYWORD);
-  //   internal_next_update(TOKEN_SYMBOL);  // nb. reserved keywords
+      if (td.cursor.type != TOKEN_ARROW) {
+        return 0;  // not a function, just bail (has value)
+      }
+      break;
 
-  //   if (td.cursor.hash != TOKEN_ARROW) {
-  //     return ERROR__UNEXPECTED;
-  //   }
-  //   internal_next();
-  // }
+    default:
+      internal_next_update(TOKEN_SYMBOL);
+      return 0;  // unhandled
+  }
 
-  // internal_next_update()
+  internal_next();  // consume arrow
+
+  int async_context = context | CONTEXT__ASYNC;
+  if (td.cursor.type == TOKEN_BRACE) {
+    _check(consume_statement(async_context));
+  } else {
+    _check(consume_optional_expr(async_context));
+  }
+
+  return 0;
 }
 
 int consume_dict(int context) {
@@ -245,8 +257,18 @@ int consume_optional_expr(int context) {
         internal_next();
         continue;
 
+      case TOKEN_ARROW: {
+        internal_next();
+        int normal_context = context & ~(CONTEXT__ASYNC);
+        if (td.cursor.type == TOKEN_BRACE) {
+          _check(consume_statement(normal_context));
+        } else {
+          _check(consume_optional_expr(normal_context));
+        }
+        continue;
+      }
+
       case TOKEN_LIT: {
-        // TODO: look for "of" inside for
         int type = TOKEN_SYMBOL;
 
         switch (td.cursor.hash) {
