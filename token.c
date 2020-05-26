@@ -8,7 +8,7 @@
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
-// expects pointer to be on first character of comment (after "/*")
+// expects pointer to be on first "*"
 static inline char *internal_consume_multiline_comment(char *p, int *line_no) {
   for (;;) {
     char c = *(++p);
@@ -160,7 +160,7 @@ static void eat_token(token *t, int *line_no) {
           }
           _ret(len, TOKEN_COMMENT);
         case '*':
-          end = internal_consume_multiline_comment(p + 2, line_no);
+          end = internal_consume_multiline_comment(p + 1, line_no);
           _ret(end - p, TOKEN_COMMENT);
       }
       _ret(1, TOKEN_SLASH);  // ambigious
