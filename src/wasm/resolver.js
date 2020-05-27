@@ -59,22 +59,23 @@ export default async function resolver(resolve) {
       // bump to high water mark
       stream.write(buffer.subarray(sent, p));
 
-      // const c = String.fromCharCode(buffer[p]);
-      // process.stderr.write('got: ' + c + '\n');
+      let view = buffer.subarray(p + 1, p + len - 1);
 
-      const view = buffer.subarray(p + 1, p + len - 1);
-      let s;
-
+      // Filter out slashes.
       if (view.some((c) => c === 92)) {
         // take the slow train, choo choo
-        console.warn('got slash', s);
-
-        
-
-      } else {
-        s = decoder.decode(view);
+        let skip = false;
+        view = view.filter((c, index) => {
+          if (skip) {
+            skip = false;
+            return true;  // always allow
+          }
+          skip = (c === 92);
+          return !skip;
+        });
       }
 
+      const s = decoder.decode(view);
       const out = resolve(s, f);
 
       stream.write(JSON.stringify(out), 'utf-8');
