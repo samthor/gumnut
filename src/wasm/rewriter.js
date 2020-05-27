@@ -17,6 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import build from './wrap.js';
+import stream from 'stream';
 
 const PENDING_BUFFER_MAX = 1024 * 16;
 
@@ -27,7 +28,7 @@ const decoder = new TextDecoder('utf-8');
  *
  * @param {function(string, string): string} resolve passed importee and importer, return new import
  * @param {number=} pages of wasm memory to allocate
- * @return {function(string, !WritableStream): void}
+ * @return {function(string): !ReadableStream}
  */
 export default async function rewriter(resolve, pages = 128) {
   const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
@@ -35,9 +36,10 @@ export default async function rewriter(resolve, pages = 128) {
 
   const run = await build(wasm, pages);
 
-  return (f, stream) => {
+  return (f) => {
     const fd = fs.openSync(f);
     const stat = fs.fstatSync(fd);
+    const readable = new stream.Readable();
 
     let buffer = null;
     const prepare = (b) => {
@@ -54,7 +56,7 @@ export default async function rewriter(resolve, pages = 128) {
       if (special === 0) {
         if (p - sent > PENDING_BUFFER_MAX) {
           // send some data, we've gone through a lot
-          stream.write(buffer.subarray(sent, p));
+          readable.push(buffer.subarray(sent, p));
           sent = p;
         }
         return;
@@ -67,17 +69,19 @@ export default async function rewriter(resolve, pages = 128) {
       }
 
       // bump to high water mark
-      stream.write(buffer.subarray(sent, p));
+      readable.push(buffer.subarray(sent, p));
 
       // write new import
-      stream.write(JSON.stringify(out), 'utf-8');
+      readable.push(JSON.stringify(out), 'utf-8');
 
       // move past the "original" string
       sent = p + len;
     });
 
     // send rest
-    stream.write(buffer.subarray(sent, buffer.length));
+    readable.push(buffer.subarray(sent, buffer.length));
+    readable.push(null);
+    return readable;
   };
 }
 

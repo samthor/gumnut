@@ -24,5 +24,6 @@ const resolve = (importee, importer) => {
 };
 
 build(resolve).then((rewriter) => {
-  rewriter('demo.js', process.stdout);
+  const s = rewriter(process.argv[2] || 'demo.js');
+  s.pipe(process.stdout);
 });
