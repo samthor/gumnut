@@ -1,3 +1,12 @@
 {
-  "type": "module"
+  "name": "module-rewriter",
+  "version": "0.1.0",
+  "description": "Rewrites ESM import paths",
+  "type": "module",
+  "sideEffects": false,
+  "module": "rewriter.js",
+  "main": "rewriter.js",
+  "license": "Apache-2.0",
+  "author": "Sam Thorogood <sam.thorogood@gmail.com>",
+  "homepage": "https://github.com/samthor/prsr"
 }

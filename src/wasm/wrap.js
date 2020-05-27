@@ -89,7 +89,10 @@ export default async function build(modulePromise) {
     }
 
     const inner = view.subarray(writeAt, writeAt + size);
-    const written = prepare(inner) ?? size;
+    let written = prepare(inner);
+    if (written == null) {
+      written = size;
+    }
     if (written > inner.length) {
       throw new Error(`got too many bytes: ${written}`);
     }

@@ -4,3 +4,4 @@ dist/
 *.js
 *.mjs
 _*
+yarn-error.log

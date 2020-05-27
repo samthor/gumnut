@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /*
  * Copyright 2020 Sam Thorogood.
  *
@@ -21,12 +20,20 @@ import build from './wrap.js';
 
 const PENDING_BUFFER_MAX = 1024 * 16;
 
-export default async function resolver(resolve) {
+const decoder = new TextDecoder('utf-8');
+
+/**
+ * Builds a method which rewrites imports from a passed filename.
+ *
+ * @param {function(string, string): string} resolve passed importee and importer, return new import
+ * @param {number=} pages of wasm memory to allocate
+ * @return {function(string, !WritableStream): void}
+ */
+export default async function rewriter(resolve, pages = 128) {
   const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
   const wasm = fs.readFileSync(source);
 
-  const decoder = new TextDecoder('utf-8');
-  const run = await build(wasm);
+  const run = await build(wasm, pages);
 
   return (f, stream) => {
     const fd = fs.openSync(f);
@@ -44,42 +51,29 @@ export default async function resolver(resolve) {
     let sent = 0;
 
     run(stat.size, prepare, (p, len, line_no, type, special) => {
-
       if (special === 0) {
-
         if (p - sent > PENDING_BUFFER_MAX) {
           // send some data, we've gone through a lot
           stream.write(buffer.subarray(sent, p));
           sent = p;
         }
-
         return;
+      }
+
+      const s = parseStringLiteralInner(buffer.subarray(p + 1, p + len - 1));
+      const out = resolve(s, f);
+      if (out == null || typeof out !== 'string') {
+        return;  // do nothing, data will be sent later
       }
 
       // bump to high water mark
       stream.write(buffer.subarray(sent, p));
 
-      let view = buffer.subarray(p + 1, p + len - 1);
-
-      // Filter out slashes.
-      if (view.some((c) => c === 92)) {
-        // take the slow train, choo choo
-        let skip = false;
-        view = view.filter((c, index) => {
-          if (skip) {
-            skip = false;
-            return true;  // always allow
-          }
-          skip = (c === 92);
-          return !skip;
-        });
-      }
-
-      const s = decoder.decode(view);
-      const out = resolve(s, f);
-
+      // write new import
       stream.write(JSON.stringify(out), 'utf-8');
-      sent = p + len;  // we've moved past the "original" string here
+
+      // move past the "original" string
+      sent = p + len;
     });
 
     // send rest
@@ -88,10 +82,24 @@ export default async function resolver(resolve) {
 }
 
 
-(async function () {
-  const r = await resolver((importee, importer) => {
-    return `:blah:${importee}`;
-  });
-  r(process.argv[2], process.stdout);
-}());
+/**
+ * @param {!Uint8Array} view
+ * @return {string}
+ */
+function parseStringLiteralInner(view) {
+  if (view.some((c) => c === 92)) {
+    // take the slow train, choo choo, filter out slashes
+    let skip = false;
+    view = view.filter((c, index) => {
+      if (skip) {
+        skip = false;
+        return true;  // always allow
+      }
+      skip = (c === 92);
+      return !skip;
+    });
+  }
+
+  return decoder.decode(view);
+}
 
