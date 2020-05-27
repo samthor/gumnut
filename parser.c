@@ -133,8 +133,8 @@ int consume_export(int context) {
       return consume_function(context);
   }
 
-  // "export {..." or "export *"
-  if (td.cursor.type == TOKEN_BRACE || td.cursor.hash == MISC_STAR) {
+  // "export {..." or "export *" or "export default *"
+  if ((!is_default && td.cursor.type == TOKEN_BRACE) || td.cursor.hash == MISC_STAR) {
     _check(consume_module_list(context));
 
     // consume optional "from"
@@ -675,6 +675,9 @@ int consume_class(int context) {
 
 int consume_statement(int context) {
   switch (td.cursor.type) {
+    case TOKEN_EOF:
+      return 0;
+
     case TOKEN_BRACE:
       internal_next();  // consume brace, get next
 
