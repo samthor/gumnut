@@ -18,6 +18,8 @@
  * @fileoverview Provides a builder for the module rewriter.
  */
 
+const STACK_PAGES = 4;
+
 async function initialize(modulePromise, callback, pages = 128) {
   const memory = new WebAssembly.Memory({initial: pages, maximum: pages});
   const table = new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'});
@@ -25,7 +27,7 @@ async function initialize(modulePromise, callback, pages = 128) {
 
   const env = {
     memory,
-    __memory_base: (pages - 1) * 65536,  // put Emscripten stack at end of memory
+    __memory_base: (pages - STACK_PAGES) * 65536,  // put Emscripten 'stack' at end of memory
     table,
     __table_base: 0,
   };
@@ -79,10 +81,10 @@ export default async function build(modulePromise) {
   /**
    * @param {number} size
    * @param {function(!Uint8Array): void} prepare
-   * @param {!Function} callback
+   * @param {function(number, number, number, number, number): void} callback
    */
   const run = (size, prepare, callback) => {
-    if (size >= view.length - writeAt - 1) {
+    if (size >= view.length - (STACK_PAGES * 65536) - writeAt - 1) {
       throw new Error(`can't parse huge file: ${size}`);
     }
 
