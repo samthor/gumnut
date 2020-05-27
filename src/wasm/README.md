@@ -13,9 +13,11 @@ const resolve = (importee, importer) => {
 };
 
 build(resolve).then((rewriter) => {
-  rewriter('input.js', process.stdout);
+  const s = rewriter('input.js');
+  s.pipe(process.stdout);
 });
 
 ```
 
-Currently just reads a file from disk and writes it to a stream.
+Try out `demo.js` in the repo or NPM install.
+
