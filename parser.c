@@ -1,3 +1,19 @@
+/*
+ * Copyright 2020 Sam Thorogood.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ */
+
 #include "parser.h"
 #include "tokens/lit.h"
 #include "token.h"
@@ -20,6 +36,9 @@ int consume_statement(int);
 int consume_expr_group(int);
 int consume_optional_expr(int);
 int consume_class(int);
+int consume_module_list(int);
+int consume_function(int);
+int consume_expr_compound(int);
 
 static inline void internal_next_find() {
   for (;;) {
@@ -38,8 +57,99 @@ static void internal_next() {
 }
 
 static void internal_next_update(int type) {
+  // TODO: we don't care about return type here
   prsr_update(&td, type);
   internal_next();
+}
+
+int consume_import(int context) {
+  if (td.cursor.hash != LIT_IMPORT) {
+    return ERROR__UNEXPECTED;
+  }
+  internal_next_update(TOKEN_KEYWORD);
+
+  if (td.cursor.type != TOKEN_STRING) {
+    _check(consume_module_list(context));
+
+    // consume "from"
+    if (td.cursor.hash != LIT_FROM) {
+      return ERROR__UNEXPECTED;
+    }
+    internal_next_update(TOKEN_KEYWORD);
+
+    // check for trailing string from
+    if (td.cursor.type != TOKEN_STRING) {
+      return ERROR__UNEXPECTED;
+    }
+  }
+
+  // match string (but not if `${}`)
+  internal_next();
+  if (td.cursor.type == TOKEN_T_BRACE) {
+    return ERROR__UNEXPECTED;
+  }
+
+  return 0;
+}
+
+int consume_export(int context) {
+  if (td.cursor.hash != LIT_EXPORT) {
+    return ERROR__UNEXPECTED;
+  }
+  internal_next_update(TOKEN_KEYWORD);
+
+  int is_default = 0;
+  if (td.cursor.hash == LIT_DEFAULT) {
+    internal_next_update(TOKEN_SYMBOL);
+    is_default = 1;
+  }
+
+  // "export {..." or "export *"
+  if (td.cursor.type == TOKEN_BRACE || td.cursor.hash == MISC_STAR) {
+    _check(consume_module_list(context));
+
+    // consume optional "from"
+    if (td.cursor.hash != LIT_FROM) {
+      return 0;
+    }
+    internal_next_update(TOKEN_KEYWORD);
+
+    // match string (but not if `${}`)
+    if (td.cursor.type != TOKEN_STRING) {
+      return ERROR__UNEXPECTED;
+    }
+    internal_next();
+    if (td.cursor.type == TOKEN_T_BRACE) {
+      return ERROR__UNEXPECTED;
+    }
+
+    return 0;
+  }
+
+  // if this is class/function, consume with no value
+  switch (td.cursor.hash) {
+    case LIT_CLASS:
+      return consume_class(context);
+
+    case LIT_ASYNC:
+      prsr_peek(&td);
+      if (td.peek.hash != LIT_FUNCTION) {
+        break;
+      }
+      // fall-through
+
+    case LIT_FUNCTION:
+      return consume_function(context);
+  }
+
+  int has_decl = (td.cursor.hash & _MASK_DECL) ? 1 : 0;
+  if (has_decl == is_default) {
+    // can't default export "var foo", can't _not_ "export var".
+    // TODO: should fail, allow for now
+  }
+
+  // otherwise, treat as expr (this catches var/let/const too)
+  return consume_expr_compound(context);
 }
 
 // consumes "async function foo ()"
@@ -56,7 +166,6 @@ int consume_function(int context) {
 
   // expect function literal
   if (td.cursor.hash != LIT_FUNCTION) {
-    debugf("could not consume 'function'\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
@@ -83,7 +192,6 @@ int consume_function(int context) {
 // consumes something starting with async (might be function)
 int consume_async_expr(int context) {
   if (td.cursor.hash != LIT_ASYNC) {
-    debugf("could not match 'async'\n");
     return ERROR__UNEXPECTED;
   }
 
@@ -128,13 +236,50 @@ int consume_async_expr(int context) {
   return 0;
 }
 
+int consume_module_list(int context) {
+  for (;;) {
+    if (td.cursor.type == TOKEN_BRACE) {
+      internal_next();
+      _check(consume_module_list(context));
+      if (td.cursor.type != TOKEN_CLOSE) {
+        return ERROR__UNEXPECTED;
+      }
+      internal_next();
+    } else {
+      // can start with "*", "foo", and end with "as blah"
+      if (td.cursor.type == TOKEN_OP) {
+        if (td.cursor.hash != MISC_STAR) {
+          return ERROR__UNEXPECTED;
+        }
+        internal_next();
+      } else if (td.cursor.type == TOKEN_LIT) {
+        internal_next_update(TOKEN_SYMBOL);
+      } else {
+        return ERROR__UNEXPECTED;
+      }
+
+      // catch optional "as x"
+      if (td.cursor.hash == LIT_AS) {
+        internal_next_update(TOKEN_KEYWORD);
+        if (td.cursor.type != TOKEN_LIT) {
+          return ERROR__UNEXPECTED;
+        }
+        internal_next_update(TOKEN_SYMBOL);
+      }
+    }
+
+    if (td.cursor.hash != MISC_COMMA) {
+      return 0;
+    }
+    internal_next();
+  }
+}
+
 // consumes dict or class (allows either)
 int consume_dict(int context) {
   if (td.cursor.type != TOKEN_BRACE) {
-    debugf("could not find starting { of dict\n");
     return ERROR__UNEXPECTED;
   }
-  debugf(">> dict\n");
   internal_next();
 
   for (;;) {
@@ -222,6 +367,7 @@ int consume_dict(int context) {
         // fall-through
 
       default:
+        debugf("unknown left-side dict part\n");
         return ERROR__UNEXPECTED;
     }
 
@@ -250,7 +396,7 @@ int consume_optional_expr(int context) {
   for (;;) {
     switch (td.cursor.type) {
       case TOKEN_SLASH:
-        prsr_update(&td, value_line ? TOKEN_OP : TOKEN_REGEXP);
+        _check(prsr_update(&td, value_line ? TOKEN_OP : TOKEN_REGEXP));
         continue;  // restart without move
 
       case TOKEN_BRACE:
@@ -342,8 +488,8 @@ int consume_optional_expr(int context) {
         // nb. below here are mostly migrations (symbol or op)
 
           case LIT_OF:
+            // "x of y": only make sense in value-like contexts and is nonsensical anywhere else
             if (value_line) {
-              // nb. this is invalid outside a "for (x of y)", but nonsensical anywhere else
               // TODO: except for line breaks?
               type = TOKEN_OP;
             }
@@ -365,7 +511,7 @@ int consume_optional_expr(int context) {
             }
         }
 
-        prsr_update(&td, type);
+        _check(prsr_update(&td, type));
         continue;
       }
 
@@ -573,6 +719,7 @@ int consume_statement(int context) {
       _check(consume_expr_group(context));
     }
     // TODO: we could remove the following since we're not generating an AST.
+    // ... it's not important that while(); is parsed as part of do-while.
     _check(consume_statement(context));
 
     // special-case trailing "while(...)" for a 'do-while'
@@ -614,8 +761,10 @@ int consume_statement(int context) {
     }
 
     case LIT_IMPORT:
+      return consume_import(context);
+
     case LIT_EXPORT:
-      return ERROR__TODO;  // import/export
+      return consume_export(context);
 
     case LIT_CLASS:
       return consume_class(context);
@@ -670,10 +819,11 @@ int prsr_run(char *p, int context, prsr_callback _callback, void *_arg) {
   callback = _callback;
   arg = _arg;
 
-  internal_next_find();  // yield initial comments
+  internal_next_find();  // yield initial comments and place cursor
   while (td.cursor.type != TOKEN_EOF) {
     _check(consume_statement(context));
   }
+  internal_next();  // always yield EOF
 
   return 0;
 }
