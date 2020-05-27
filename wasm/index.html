@@ -5,7 +5,7 @@
 
 import * as utils from './utils.js';
 
-const globalHandlers = new Map();
+let handler;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -25,12 +25,8 @@ const ready = utils.initializeSideModule('runner.wasm', (view) => {
       throw x;
     },
 
-    _token_callback(at, p, len, line_no, type, mark, hash) {
-      const handler = globalHandlers.get(at);
-      if (!handler) {
-        throw new Error(`unregistered address: ${at}`);
-      }
-      handler(p, len, line_no, type, mark, hash);
+    _token_callback(p, len, line_no, type, special) {
+      handler(p, len, line_no, type, special);
     },
   };
 });
@@ -45,13 +41,15 @@ function reverseDict(dict) {
 
 const TOKENS = {
   EOF: 0,
+  UNKNOWN: 1,
 
-  EXEC: 1,
-  SEMICOLON: 2,
-  OP: 4,
-  ARROW: 5,
+  LIT: 2,
+  SLASH: 3,
+
+  SEMICOLON: 4,
+  OP: 5,
   COLON: 6,
-  DICT: 7,
+  BRACE: 7,
   ARRAY: 8,
   PAREN: 9,
   T_BRACE: 10,
@@ -65,15 +63,12 @@ const TOKENS = {
   SYMBOL: 17,
   KEYWORD: 18,
   LABEL: 19,
-
-  BRACE: 29,
-  LIT: 30,
-  SLASH: 31,
 };
 const TOKEN_LOOKUP = reverseDict(TOKENS);
 
 const MARKS = {
   IMPORT: 1,
+  EXPORT: 2,
 };
 const MARK_LOOKUP = reverseDict(MARKS);
 
@@ -126,7 +121,7 @@ window.addEventListener('load', (ev) => {
       if (token.invalid) {
         node.classList.add('__invalid');
       }
-      const mark = MARK_LOOKUP(token.mark);
+      const mark = MARK_LOOKUP(token.special);
       if (mark) {
         node.classList.add('_' + mark);
       }
@@ -160,56 +155,37 @@ window.addEventListener('load', (ev) => {
     const exports = instance.exports;
 
     const update = () => {
+      // put string to parse at 1024
       const writeAt = 1024;
-      const needed = exports._prsr_size();
 
-      const bytesAt = writeAt + needed;
       const bytes = encoder.encode(input.value);
-      const sourceBuffer = view.subarray(bytesAt, bytesAt + bytes.length + 1);
+      const sourceBuffer = view.subarray(writeAt, writeAt + bytes.length + 1);
       sourceBuffer.set(bytes);
       sourceBuffer[sourceBuffer.length - 1] = 0;  // NULL terminate
 
-      exports._prsr_setup(writeAt, writeAt + needed, module.checked ? 1 : 0);
+      exports._xx_setup(writeAt);
 
-      const futureLitResolve = new Map();
       const tokens = [];
       const start = performance.now();
 
-      const handler = (p, len, lineNo, type, mark, hash) => {
-        const at = p - bytesAt;
-        const token = {at, len, lineNo, type, mark, invalid: false};
-
-        if (mark == 2) {
-          const prev = futureLitResolve.get(token.at);
-          prev.type = type;
-          futureLitResolve.delete(token.at);
-          return;
-        }
-
-        // if we have find LIT, it's probably an ambiguous "async () =>", so save it for later
-        if (token.type == TOKENS.LIT) {
-          futureLitResolve.set(token.at, token);
-        }
-
+      handler = (p, len, lineNo, type, special) => {
+        const at = p - writeAt;
+        const token = {at, len, lineNo, type, special};
         tokens.push(token);
       };
-      if (globalHandlers.has(writeAt)) {
-        throw new Error('multiple jobs');
-      }
-      globalHandlers.set(writeAt, handler);
 
       let err = 0;
       try {
         for (;;) {
-          err = exports._prsr_run(writeAt);
-          // TODO: call many times if valid
-          break;
+          err = exports._xx_run();
+          if (err <= 0) {
+            break;
+          }
         }
       } catch (thrown) {
         console.error(thrown);
         err = thrown;
       }
-      globalHandlers.delete(writeAt);
 
       const took = performance.now() - start;
       stats.textContent = `${took.toLocaleString({minimumSignificantDigits: 8})}ms`;
@@ -222,6 +198,8 @@ window.addEventListener('load', (ev) => {
       if (err) {
         stats.textContent += `\nerr: ${err}`;
       }
+
+      handler = null;
     };
 
     let rAF;
@@ -322,8 +300,10 @@ document.addEventListener('drop', (ev) => {
   pre span.__invalid {
     text-decoration: underline;
   }
-  pre span._import {
-    font-style: italic;
+  pre span._import,
+  pre span._export {
+    background: blue;
+    color: white;
   }
   #stats {
     white-space: pre;

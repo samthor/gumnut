@@ -71,7 +71,8 @@ static int consume_import_module_special(int special) {
 
   int len = td.cursor.len;
   if (len == 1 || (td.cursor.p[0] == '`' && td.cursor.p[len - 1] != '`')) {
-    return ERROR__UNEXPECTED;
+    // nb. probably an error, but will just be treated as an expr
+    return 0;
   }
 
   callback(special);
@@ -261,13 +262,13 @@ int consume_module_list(int context) {
       // can start with "*", "foo", and end with "as blah"
       if (td.cursor.type == TOKEN_OP) {
         if (td.cursor.hash != MISC_STAR) {
-          return ERROR__UNEXPECTED;
+          return 0;
         }
         internal_next();
       } else if (td.cursor.type == TOKEN_LIT) {
         internal_next_update(TOKEN_SYMBOL);
       } else {
-        return ERROR__UNEXPECTED;
+        return 0;
       }
 
       // catch optional "as x"
@@ -805,8 +806,13 @@ int consume_statement(int context) {
       // nb. should look for semi here, just ignore
     }
 
-    case LIT_IMPORT:
+    case LIT_IMPORT: {
+      prsr_peek(&td);
+      if (td.peek.type == TOKEN_PAREN || td.peek.hash == MISC_DOT) {
+        break;  // treat as expr
+      }
       return consume_import(context);
+    }
 
     case LIT_EXPORT:
       return consume_export(context);
