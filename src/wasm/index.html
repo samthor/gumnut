@@ -139,7 +139,9 @@ window.addEventListener('load', (ev) => {
 
       let err = null;
       try {
-        runner(bytes, (at, len, lineNo, type, special) => {
+        runner(bytes.length, (buffer) => {
+          buffer.set(bytes);
+        }, (at, len, lineNo, type, special) => {
           const token = {at, len, lineNo, type, special};
           tokens.push(token);
         });
@@ -167,8 +169,7 @@ window.addEventListener('load', (ev) => {
         let v = null;
         if (input.value.length <= 4096) {
           // just give up if it's too large
-          const out = (module.checked ? String.fromCharCode(0) : '') + input.value;
-          v = window.encodeURIComponent(out);
+          v = window.encodeURIComponent(input.value);
         }
         if (v) {
           window.history.replaceState(null, null, '#' + v);
@@ -179,7 +180,6 @@ window.addEventListener('load', (ev) => {
       });
     };
     input.oninput = dedup;
-    module.onchange = dedup;
     dedup();
   });
 });
@@ -274,21 +274,10 @@ document.addEventListener('drop', (ev) => {
   <a href="https://github.com/samthor/prsr">GitHub</a>
 </div>
 
-<div>
-  <label>
-    <input type="checkbox" id="module" />
-    Module
-  </label>
-</div>
 <textarea id="input" rows="20" cols="100"></textarea>
 <script>
 window.addEventListener('hashchange', (ev) => {
-  let value = window.decodeURIComponent(window.location.hash.substr(1));
-  module.checked = !value.charCodeAt(0);
-  if (module.checked) {
-    value = value.substr(1);
-  }
-  input.value = value;
+  input.value = window.decodeURIComponent(window.location.hash.substr(1));
 });
 window.dispatchEvent(new CustomEvent('hashchange'));
 </script>
