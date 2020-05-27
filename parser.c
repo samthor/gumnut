@@ -41,7 +41,7 @@ int consume_module_list(int);
 int consume_function(int);
 int consume_expr_compound(int);
 
-static inline void internal_next_find() {
+static inline void internal_next_comment() {
   for (;;) {
     int out = prsr_next(&td);
     if (out != TOKEN_COMMENT) {
@@ -54,13 +54,29 @@ static inline void internal_next_find() {
 // yields previous, places the next useful token in curr, skipping comments
 static void internal_next() {
   callback(0);
-  internal_next_find();
+  internal_next_comment();
 }
 
 static void internal_next_update(int type) {
   // TODO: we don't care about return type here
   prsr_update(&td, type);
-  internal_next();
+  callback(0);
+  internal_next_comment();
+}
+
+static int consume_import_module_special(int special) {
+  if (td.cursor.type != TOKEN_STRING) {
+    return ERROR__UNEXPECTED;
+  }
+
+  int len = td.cursor.len;
+  if (len == 1 || (td.cursor.p[0] == '`' && td.cursor.p[len - 1] != '`')) {
+    return ERROR__UNEXPECTED;
+  }
+
+  callback(special);
+  internal_next_comment();
+  return 0;
 }
 
 int consume_import(int context) {
@@ -85,12 +101,7 @@ int consume_import(int context) {
   }
 
   // match string (but not if `${}`)
-  internal_next();
-  if (td.cursor.type == TOKEN_T_BRACE) {
-    return ERROR__UNEXPECTED;
-  }
-
-  return 0;
+  return consume_import_module_special(SPECIAL__IMPORT);
 }
 
 int consume_export(int context) {
@@ -103,28 +114,6 @@ int consume_export(int context) {
   if (td.cursor.hash == LIT_DEFAULT) {
     internal_next_update(TOKEN_SYMBOL);
     is_default = 1;
-  }
-
-  // "export {..." or "export *"
-  if (td.cursor.type == TOKEN_BRACE || td.cursor.hash == MISC_STAR) {
-    _check(consume_module_list(context));
-
-    // consume optional "from"
-    if (td.cursor.hash != LIT_FROM) {
-      return 0;
-    }
-    internal_next_update(TOKEN_KEYWORD);
-
-    // match string (but not if `${}`)
-    if (td.cursor.type != TOKEN_STRING) {
-      return ERROR__UNEXPECTED;
-    }
-    internal_next();
-    if (td.cursor.type == TOKEN_T_BRACE) {
-      return ERROR__UNEXPECTED;
-    }
-
-    return 0;
   }
 
   // if this is class/function, consume with no value
@@ -141,6 +130,20 @@ int consume_export(int context) {
 
     case LIT_FUNCTION:
       return consume_function(context);
+  }
+
+  // "export {..." or "export *"
+  if (td.cursor.type == TOKEN_BRACE || td.cursor.hash == MISC_STAR) {
+    _check(consume_module_list(context));
+
+    // consume optional "from"
+    if (td.cursor.hash != LIT_FROM) {
+      return 0;
+    }
+    internal_next_update(TOKEN_KEYWORD);
+
+    // match string (but not if `${}`)
+    return consume_import_module_special(SPECIAL__EXPORT);
   }
 
   int has_decl = (td.cursor.hash & _MASK_DECL) ? 1 : 0;
@@ -882,7 +885,7 @@ int modp_run() {
   char *head = td.cursor.p;
 
   while (td.cursor.type == TOKEN_COMMENT) {
-    callback(SPECIAL__TOP_COMMENT);
+    callback(0);
     prsr_next(&td);
   }
   _check(consume_statement(top_context));

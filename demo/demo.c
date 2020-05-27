@@ -57,6 +57,12 @@ void render_callback(int special) {
   char c = ' ';
   if (out->hash) {
     c = '#';  // has a hash
+  } else if (special) {
+    if (special == SPECIAL__IMPORT) {
+      c = 'i';
+    } else if (special == SPECIAL__EXPORT) {
+      c = 'e';
+    }
   }
   printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
 #endif

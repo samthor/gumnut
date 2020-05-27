@@ -18,9 +18,8 @@
 
 #define CONTEXT__ASYNC 1  // pass for top-level-await
 
-#define SPECIAL__TOP_COMMENT 1
-#define SPECIAL__IMPORT      2
-#define SPECIAL__EXPORT      4
+#define SPECIAL__IMPORT      1
+#define SPECIAL__EXPORT      2
 
 typedef void (*prsr_callback)(int special);
 token *modp_init(char *, int, prsr_callback);
