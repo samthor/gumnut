@@ -479,31 +479,31 @@ int prsr_peek(tokendef *d) {
     return TOKEN_UNKNOWN;
   }
 
-  char *p = d->cursor.p + d->cursor.len;
+  d->peek.p = d->cursor.p + d->cursor.len;
   d->peek.line_no = d->line_no;
   d->peek.hash = 0;
 
   switch (d->flag) {
     case FLAG__PENDING_T_BRACE:
-      d->peek.p = p;
       d->peek.len = 2;
       d->peek.type = TOKEN_T_BRACE;
       return TOKEN_T_BRACE;
 
     case FLAG__RESUME_LIT:
-      d->peek.p = p;
       d->peek.len = 0;  // TODO: we don't bother in peek
       d->peek.type = TOKEN_STRING;
       return TOKEN_STRING;
   }
 
   for (;;) {
-    d->peek.p = consume_space(p, &(d->peek.line_no));
+    d->peek.p = consume_space(d->peek.p, &(d->peek.line_no));
     eat_token(&(d->peek), &(d->peek.line_no));
 
     int type = d->peek.type;
     if (type != TOKEN_COMMENT) {
       return type;
     }
+
+    d->peek.p += d->peek.len;
   }
 }

@@ -352,6 +352,7 @@ int consume_dict(int context) {
         // ignore missing name, whatever
     }
 
+    // check terminal case (which decides what tpye of entry this is), method or equal/colon
     switch (td.cursor.type) {
       case TOKEN_PAREN:
         // method
@@ -364,64 +365,48 @@ int consume_dict(int context) {
         _check(consume_statement(method_context));
         break;
 
-      case TOKEN_COLON:
-        // value
-        // nb. this allows "async * foo:" which is nonsensical
-        internal_next();
-        _check(consume_optional_expr(context));
-        break;
-
-      case TOKEN_CLOSE:
-        // close, handled below
-        break;
-
       case TOKEN_OP:
-        switch (td.cursor.hash) {
-          case MISC_COMMA:
-            // single value (e.g. "{foo,bar}")
-            internal_next();
-            continue;
-
-          case MISC_EQUALS:
-            // class-like private variable declaration
-            internal_next();
-            _check(consume_optional_expr(context));
-
-            if (td.cursor.type == TOKEN_SEMICOLON) {
-              internal_next();
-            }
-            continue;
+        if (td.cursor.hash != MISC_EQUALS) {
+          break;
         }
         // fall-through
 
-      default:
-        debugf("unknown left-side dict part\n");
+      case TOKEN_COLON:
+        // nb. this allows "async * foo:" or "async foo =" which is nonsensical
+        internal_next();
+        _check(consume_optional_expr(context));
+        break;
+    }
+
+    // handle tail cases (close, eof, op, etc)
+    switch (td.cursor.type) {
+      case TOKEN_CLOSE:
+        internal_next();
+        return 0;
+
+      case TOKEN_EOF:
+        // don't stay here forever
         return ERROR__UNEXPECTED;
+
+      case TOKEN_OP:
+        if (td.cursor.hash != MISC_COMMA) {
+          break;
+        }
+        // fall-through
+
+      case TOKEN_SEMICOLON:
+        internal_next();
+        continue;
+
+      case TOKEN_LIT:
+      case TOKEN_NUMBER:
+      case TOKEN_STRING:
+      case TOKEN_ARRAY:
+        continue;
     }
 
-    // keep going, more data
-    if (td.cursor.hash == MISC_COMMA) {
-      // nb. not valid in classes, whatever
-      internal_next();
-      continue;
-    }
-
-    // don't stay here forever
-    if (td.cursor.type == TOKEN_EOF) {
-      return ERROR__UNEXPECTED;
-    }
-
-    // closed
-    if (td.cursor.type == TOKEN_CLOSE) {
-      internal_next();
-      return 0;
-    }
-
-    if (td.cursor.type != TOKEN_LIT) {
-      // this should only be lit, for class-like with more values (not comma-separated)
-      debugf("got to end of dict, type=%d\n", td.cursor.type);
-    }
-    // nb. we just keep parsing, this is valid in the case of class methods (no comma etc)
+    debugf("unknown left-side dict part: %d\n", td.cursor.type);
+    return ERROR__UNEXPECTED;
   }
 }
 
