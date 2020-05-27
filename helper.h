@@ -14,20 +14,8 @@
  * the License.
  */
 
-#include <ctype.h>
+#include "tokens/lit.h"
+#include "tokens/helper.h"
 
-int strline(char *p) {
-  const char *start = p;
-
-  while (*p) {
-    if (p[0] == '\n') {
-      break;
-    }
-    ++p;
-  }
-
-  return p - start;
-}
-
-// Convenience wrapper for the generated helper code.
-#include "tokens/helper.c"
+// finds the length to the first \n or null byte
+int strline(char *p);

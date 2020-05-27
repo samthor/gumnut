@@ -18,5 +18,10 @@
 
 #define CONTEXT__ASYNC 1  // pass for top-level-await
 
-typedef void (*prsr_callback)(void *, token *);
-int prsr_run(char *p, int context, prsr_callback, void *);
+#define SPECIAL__TOP_COMMENT 1
+#define SPECIAL__IMPORT      2
+#define SPECIAL__EXPORT      4
+
+typedef void (*prsr_callback)(int special);
+token *modp_init(char *, int, prsr_callback);
+int modp_run();

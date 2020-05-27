@@ -14,8 +14,9 @@
  * the License.
  */
 
+#include <ctype.h>
 #include "parser.h"
-#include "tokens/lit.h"
+#include "helper.h"
 #include "token.h"
 
 #define _check(v) { int _ret = v; if (_ret) { return _ret; }};
@@ -30,7 +31,7 @@
 
 static tokendef td; 
 static prsr_callback callback;
-static void *arg;
+static int top_context;
 
 int consume_statement(int);
 int consume_expr_group(int);
@@ -46,13 +47,13 @@ static inline void internal_next_find() {
     if (out != TOKEN_COMMENT) {
       break;
     }
-    callback(arg, &(td.cursor));
+    callback(0);
   }
 }
 
 // yields previous, places the next useful token in curr, skipping comments
 static void internal_next() {
-  callback(arg, &(td.cursor));
+  callback(0);
   internal_next_find();
 }
 
@@ -855,16 +856,36 @@ int consume_statement(int context) {
   return ret;
 }
 
-int prsr_run(char *p, int context, prsr_callback _callback, void *_arg) {
+token *modp_init(char *p, int _context, prsr_callback _callback) {
   td = prsr_init_token(p);
+  top_context = _context;
   callback = _callback;
-  arg = _arg;
 
-  internal_next_find();  // yield initial comments and place cursor
-  while (td.cursor.type != TOKEN_EOF) {
-    _check(consume_statement(context));
+  if (p[0] == '#' && p[1] == '!') {
+    // special-case hashbang opener
+    td.cursor.type = TOKEN_COMMENT;
+    td.cursor.len = strline(p);
+    td.cursor.line_no = 1;
+  } else {
+    // n.b. it's possible but unlikely for this to fail (e.g. opens with "{")
+    prsr_next(&td);
   }
-  internal_next();  // always yield EOF
 
-  return 0;
+  return &(td.cursor);
+}
+
+int modp_run() {
+  if (td.cursor.type == TOKEN_EOF) {
+    return 0;
+  }
+
+  char *head = td.cursor.p;
+
+  while (td.cursor.type == TOKEN_COMMENT) {
+    callback(SPECIAL__TOP_COMMENT);
+    prsr_next(&td);
+  }
+  _check(consume_statement(top_context));
+
+  return td.cursor.p - head;
 }

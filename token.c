@@ -16,31 +16,36 @@
 
 #include <ctype.h>
 #include <string.h>
+#include "helper.h"
 #include "token.h"
-#include "tokens/lit.h"
-#include "tokens/helper.h"
 
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
-// expects pointer to be on first "*"
-static inline char *internal_consume_multiline_comment(char *p, int *line_no) {
+// expects pointer to be on start "/*"
+static inline int internal_consume_multiline_comment(char *p, int *line_no) {
+  if (p[0] != '/' || p[1] != '*') {
+    return 0;
+  }
+  const char *start = p;
+  p += 2;
+
   for (;;) {
-    char c = *(++p);
-    switch (c) {
+    switch (p[0]) {
       case '\n':
         ++(*line_no);
         break;
 
       case '*':
         if (p[1] == '/') {
-          return p + 2;
+          return p - start + 2;
         }
         break;
 
       case 0:
-        return p;
+        return p - start;
     }
+    ++p;
   }
 }
 
@@ -161,25 +166,14 @@ static void eat_token(token *t, int *line_no) {
     case '\0':
       _ret(0, TOKEN_EOF);
 
-    case '/': {
-      char *end;
-
+    case '/':
       switch (p[1]) {
         case '/':
-          end = strchr(p, '\n');
-          int len;
-          if (end) {
-            len = end - p;
-          } else {
-            len = strlen(p);
-          }
-          _ret(len, TOKEN_COMMENT);
+          _ret(strline(p), TOKEN_COMMENT);
         case '*':
-          end = internal_consume_multiline_comment(p + 1, line_no);
-          _ret(end - p, TOKEN_COMMENT);
+          _ret(internal_consume_multiline_comment(p, line_no), TOKEN_COMMENT);
       }
       _ret(1, TOKEN_SLASH);  // ambigious
-    }
 
     case ';':
       _ret(1, TOKEN_SEMICOLON);

@@ -48,9 +48,11 @@ typedef struct {
   int asi;
 } demo_context;
 
-void render_callback(void *arg, token *out) {
-  demo_context *context = (demo_context *) arg;
-  ++context->tokens;
+static token *out;
+static demo_context context;
+
+void render_callback(int special) {
+  ++context.tokens;
 #ifndef SPEED
   char c = ' ';
   if (out->hash) {
@@ -67,13 +69,20 @@ int main() {
     return -1;
   }
   fprintf(stderr, ">> read %d bytes\n", len);
-  demo_context context;
-  bzero(&context, sizeof(demo_context));
 
-  int out = prsr_run(buf, 0, render_callback, &context);
-  if (out) {
-    fprintf(stderr, "ret=%d\n", out);
+  out = modp_init(buf, 0, render_callback);
+  int ret;
+
+  for (;;) {
+    ret = modp_run();
+    if (ret <= 0) {
+      break;
+    }
+  }
+
+  if (ret) {
+    fprintf(stderr, "ret=%d\n", ret);
   }
   fprintf(stderr, ">> %d tokens (%d asi)\n", context.tokens, context.asi);
-  return out;
+  return ret;
 }
