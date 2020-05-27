@@ -779,7 +779,7 @@ int consume_statement(int context) {
         debugf("could not find while of do-while\n");
         return ERROR__UNEXPECTED;
       }
-      internal_next();
+      internal_next_update(TOKEN_KEYWORD);
 
       if (td.cursor.type != TOKEN_PAREN) {
         debugf("could not find do-while parens\n");
