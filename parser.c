@@ -203,7 +203,11 @@ int consume_async_expr(int context) {
   int peek_type = prsr_peek(&td);
   switch (peek_type) {
     case TOKEN_LIT:
-      // function, this is a variable name
+      if (td.peek.hash == LIT_FUNCTION) {
+        return consume_function(context);
+      }
+
+      // "async namehere"
       internal_next_update(TOKEN_KEYWORD);
       internal_next_update(TOKEN_SYMBOL);
 

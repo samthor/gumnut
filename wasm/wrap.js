@@ -1,4 +1,5 @@
 
+
 async function initialize(modulePromise, callback, pages = 128) {
   const memory = new WebAssembly.Memory({initial: pages, maximum: pages});
   const table = new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'});
@@ -18,9 +19,12 @@ async function initialize(modulePromise, callback, pages = 128) {
   }
 
   const module = await modulePromise;
-  const instance = await WebAssembly.instantiate(module, importObject);
+  let instance = await WebAssembly.instantiate(module, importObject);
 
   // emscripten _post_instantiate
+  if (!instance.exports && instance.instance) {
+    instance = instance.instance;
+  }
   instance.exports.__post_instantiate && instance.exports.__post_instantiate();
 
   return {instance, view};
@@ -58,7 +62,7 @@ export default async function build(modulePromise) {
    * @param {!Buffer|!Uint8Array} buffer
    * @param {!Function} callback
    */
-  return (buffer, callback) => {
+  const run = (buffer, callback) => {
     view.set(buffer, writeAt);
     view[buffer.length + writeAt] = 0;  // NULL terminate
 
@@ -81,5 +85,7 @@ export default async function build(modulePromise) {
       throw new TypeError(`internal error: ${ret}`);
     }
   };
+
+  return run;
 }
 
