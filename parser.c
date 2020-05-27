@@ -338,18 +338,18 @@ int consume_dict(int context) {
         internal_next_update(TOKEN_SYMBOL);
         break;
 
+      case TOKEN_NUMBER:
+        internal_next();
+        break;
+
       case TOKEN_ARRAY:
       case TOKEN_STRING:
         _check(consume_expr_group(context));
         break;
-    }
 
-    if (td.cursor.type == TOKEN_LIT) {
-      internal_next_update(TOKEN_SYMBOL);
-    } else if (td.cursor.type == TOKEN_ARRAY) {
-      _check(consume_expr_group(context));
-    } else {
-      // ignore missing name, whatever
+      default:
+        ;
+        // ignore missing name, whatever
     }
 
     switch (td.cursor.type) {
