@@ -3,33 +3,10 @@
 <head>
 <script type="module">
 
-import * as utils from './utils.js';
+import build from './wrap.js';
 
-let handler;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-
-const ready = utils.initializeSideModule('runner.wasm', (view) => {
-  return {
-    _memset(s, c, n) {
-      view.fill(c, s, s + n);
-      return s;
-    },
-
-    _memcpy(dst, src, size) {
-      view.set(view.subarray(src, src + size), dst);
-      return dst;
-    },
-
-    abort(x) {
-      throw x;
-    },
-
-    _token_callback(p, len, line_no, type, special) {
-      handler(p, len, line_no, type, special);
-    },
-  };
-});
 
 function reverseDict(dict) {
   const m = new Map();
@@ -38,6 +15,8 @@ function reverseDict(dict) {
   });
   return (number) => m.get(number) || null;
 };
+
+const runnerPromise = build(WebAssembly.compileStreaming(window.fetch('runner.wasm')));
 
 const TOKENS = {
   EOF: 0,
@@ -151,55 +130,34 @@ window.addEventListener('load', (ev) => {
     }
   };
 
-  ready.then(({instance, view}) => {
-    const exports = instance.exports;
-
+  runnerPromise.then((runner) => {
     const update = () => {
-      // put string to parse at 1024
-      const writeAt = 1024;
-
       const bytes = encoder.encode(input.value);
-      const sourceBuffer = view.subarray(writeAt, writeAt + bytes.length + 1);
-      sourceBuffer.set(bytes);
-      sourceBuffer[sourceBuffer.length - 1] = 0;  // NULL terminate
-
-      exports._xx_setup(writeAt);
-
       const tokens = [];
+
       const start = performance.now();
 
-      handler = (p, len, lineNo, type, special) => {
-        const at = p - writeAt;
-        const token = {at, len, lineNo, type, special};
-        tokens.push(token);
-      };
-
-      let err = 0;
+      let err = null;
       try {
-        for (;;) {
-          err = exports._xx_run();
-          if (err <= 0) {
-            break;
-          }
-        }
-      } catch (thrown) {
-        console.error(thrown);
-        err = thrown;
+        runner(bytes, (at, len, lineNo, type, special) => {
+          const token = {at, len, lineNo, type, special};
+          tokens.push(token);
+        });
+      } catch (e) {
+        err = e;
       }
 
       const took = performance.now() - start;
       stats.textContent = `${took.toLocaleString({minimumSignificantDigits: 8})}ms`;
 
       const renderStart = performance.now();
-      render(tokens, sourceBuffer);
+      render(tokens, bytes);
       const renderTook = performance.now() - start;
-      stats.textContent += `\n${renderTook.toLocaleString({minimumSignificantDigits: 8})}ms render`;
+      stats.append(`\n${renderTook.toLocaleString({minimumSignificantDigits: 8})}ms render`);
 
       if (err) {
-        stats.textContent += `\nerr: ${err}`;
+        stats.append(`\n${err}`);
       }
-
-      handler = null;
     };
 
     let rAF;
