@@ -264,7 +264,7 @@ static void eat_token(token *t, int *line_no) {
 
       // nb. these are all allowed=1, so len=1 even though we're consuming more
       if (start == '=' && c == '>') {
-        _reth(2, TOKEN_ARROW, MISC_ARROW);  // arrow for arrow function
+        _reth(2, TOKEN_OP, MISC_ARROW);  // arrow for arrow function
       } else if (c == start && (c == '+' || c == '-')) {
         // nb. we don't actaully care which one this is?
         _reth(2, TOKEN_OP, MISC_INCDEC);

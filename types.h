@@ -41,17 +41,20 @@ typedef struct {
 #define TOKEN_EOF       0
 #define TOKEN_UNKNOWN   1   // valid but unknown/unresolved token
 
+// internal/ambiguous tokens
+#define TOKEN_LIT       2  // symbol, keyword or label
+#define TOKEN_SLASH     3  // ambigous slash that is op or regexp
+
 // fixed: will always be the same, or in the same set
-#define TOKEN_SEMICOLON 3   // ;
-#define TOKEN_OP        4   // can include 'in', 'instanceof', 'of'
-#define TOKEN_ARROW     5   // =>
+#define TOKEN_SEMICOLON 4   // ;
+#define TOKEN_OP        5   // can include 'in', 'instanceof', 'of'
 #define TOKEN_COLON     6   // used in label or dict
 #define TOKEN_BRACE     7   // {
 #define TOKEN_ARRAY     8   // [
 #define TOKEN_PAREN     9   // (
 #define TOKEN_T_BRACE   10  // '${' within template literal
 #define TOKEN_TERNARY   11  // starts ternary block, "? ... :"
-#define TOKEN_CLOSE     12  // '}', ']', ')', ':' or blank for statement close
+#define TOKEN_CLOSE     12  // '}', ']', ')', or ternary ':'
 
 // variable: could be anything
 #define TOKEN_COMMENT   13
@@ -61,10 +64,6 @@ typedef struct {
 #define TOKEN_SYMBOL    17
 #define TOKEN_KEYWORD   18
 #define TOKEN_LABEL     19  // to the left of a ':', e.g. 'foo:'
-
-// internal/ambiguous tokens
-#define TOKEN_LIT       30  // symbol, keyword or label
-#define TOKEN_SLASH     31  // ambigous slash that is op or regexp
 
 #endif//_TYPES_H
 

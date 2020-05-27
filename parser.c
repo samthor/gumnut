@@ -202,7 +202,7 @@ int consume_async_expr(int context) {
       internal_next_update(TOKEN_KEYWORD);
       internal_next_update(TOKEN_SYMBOL);
 
-      if (td.cursor.type != TOKEN_ARROW) {
+      if (td.cursor.hash != MISC_ARROW) {
         debugf("could not match arrow after 'async foo'\n");
         return ERROR__UNEXPECTED;
       }
@@ -214,10 +214,18 @@ int consume_async_expr(int context) {
       // _maybe_ function
       _check(consume_expr_group(context));
 
-      if (td.cursor.type != TOKEN_ARROW) {
+      if (td.cursor.hash != MISC_ARROW) {
         return 0;  // not a function, just bail (has value)
       }
       break;
+
+    case TOKEN_OP:
+      if (td.peek.hash == MISC_ARROW) {
+        internal_next_update(TOKEN_KEYWORD);
+        // nb. allow "async =>" even though broken
+        break;
+      }
+      // fall-through
 
     default:
       internal_next_update(TOKEN_SYMBOL);
@@ -316,6 +324,17 @@ int consume_dict(int context) {
     }
 
     // name or bracketed name
+    switch (td.cursor.type) {
+      case TOKEN_LIT:
+        internal_next_update(TOKEN_SYMBOL);
+        break;
+
+      case TOKEN_ARRAY:
+      case TOKEN_STRING:
+        _check(consume_expr_group(context));
+        break;
+    }
+
     if (td.cursor.type == TOKEN_LIT) {
       internal_next_update(TOKEN_SYMBOL);
     } else if (td.cursor.type == TOKEN_ARRAY) {
@@ -373,8 +392,14 @@ int consume_dict(int context) {
 
     // keep going, more data
     if (td.cursor.hash == MISC_COMMA) {
+      // nb. not valid in classes, whatever
       internal_next();
       continue;
+    }
+
+    // don't stay here forever
+    if (td.cursor.type == TOKEN_EOF) {
+      return ERROR__UNEXPECTED;
     }
 
     // closed
@@ -383,8 +408,11 @@ int consume_dict(int context) {
       return 0;
     }
 
-    debugf("got to end of dict\n");
-    return ERROR__UNEXPECTED;
+    if (td.cursor.type != TOKEN_LIT) {
+      // this should only be lit, for class-like with more values (not comma-separated)
+      debugf("got to end of dict, type=%d\n", td.cursor.type);
+    }
+    // nb. we just keep parsing, this is valid in the case of class methods (no comma etc)
   }
 }
 
@@ -443,18 +471,6 @@ int consume_optional_expr(int context) {
         _transition_to_value();
         internal_next();
         continue;
-
-      case TOKEN_ARROW: {
-        internal_next();
-        int normal_context = context & ~(CONTEXT__ASYNC);
-        if (td.cursor.type == TOKEN_BRACE) {
-          _check(consume_statement(normal_context));
-        } else {
-          _check(consume_optional_expr(normal_context));
-        }
-        // nb. this has value, but always ends with ) or , etc
-        continue;
-      }
 
       case TOKEN_LIT: {
         int type = TOKEN_SYMBOL;
@@ -527,6 +543,19 @@ int consume_optional_expr(int context) {
           case MISC_COMMA:
             return 0;
 
+          case MISC_ARROW: {
+            internal_next();
+            int normal_context = context & ~(CONTEXT__ASYNC);
+            if (td.cursor.type == TOKEN_BRACE) {
+              _check(consume_statement(normal_context));
+            } else {
+              _check(consume_optional_expr(normal_context));
+            }
+            seen_any = 1;
+            // nb. this has value, but always ends with ) or , etc
+            continue;
+          }
+
           case MISC_NOT:
           case MISC_BITNOT:
             // TODO: "await, new, etc" fall into this bucket?
@@ -587,6 +616,18 @@ int consume_expr_compound(int context) {
 int consume_expr_group(int context) {
   int start = td.cursor.type;
   switch (td.cursor.type) {
+    case TOKEN_STRING:
+      // special-case strings
+      internal_next();
+      for (;;) {
+        if (td.cursor.type != TOKEN_T_BRACE) {
+          return 0;
+        }
+        _check(consume_expr_group(context));
+        internal_next();  // this must be string
+      }
+      return ERROR__INTERNAL;  // should not get here
+
     case TOKEN_PAREN:
     case TOKEN_ARRAY:
     case TOKEN_TERNARY:
