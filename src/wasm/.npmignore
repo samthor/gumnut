@@ -1,3 +1,4 @@
 index.html
 *.c
 *.sh
+yarn-error.log
