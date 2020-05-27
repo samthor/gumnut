@@ -24,7 +24,7 @@ async(/* anything can go here */) {}
 async(/* anything can go here */) => {}
 ```
 
-See [https://dev.to/samthor/arrow-functions-break-javascript-parsers-1ldp](arrow functions break JavaScript parsers) for more details.
+See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-functions-break-javascript-parsers-1ldp) for more details.
 
 In this case, prsr reports `async` as a `TOKEN_LIT`, which is an ambigious token.
 You can change it after-the-fact if this is important to you.
