@@ -59,19 +59,25 @@ export default async function build(modulePromise) {
   const {exports} = instance;
 
   /**
-   * @param {!Buffer|!Uint8Array} buffer
+   * @param {number} size
+   * @param {function(!Uint8Array): void} prepare
    * @param {!Function} callback
    */
-  const run = (buffer, callback) => {
-    view.set(buffer, writeAt);
-    view[buffer.length + writeAt] = 0;  // NULL terminate
+  const run = (size, prepare, callback) => {
+    if (size >= view.length - writeAt - 1) {
+      throw new Error(`can't parse huge file: ${size}`);
+    }
+
+    const inner = view.subarray(writeAt, writeAt + size);
+    const written = prepare(inner) ?? size;
+    if (written > inner.length) {
+      throw new Error(`got too many bytes: ${written}`);
+    }
+    view[writeAt + written] = 0;  // null-terminate
 
     exports._xx_setup(writeAt);
     handler = (p, len, lineNo, type, special) => {
       callback(p - writeAt, len, lineNo, type, special);
-      // if (special) {
-      //   callback(p, len);
-      // }
     };
 
     let ret = 0;
@@ -81,6 +87,8 @@ export default async function build(modulePromise) {
         break;
       }
     }
+    handler = null;
+
     if (ret < 0) {
       throw new TypeError(`internal error: ${ret}`);
     }
