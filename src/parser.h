@@ -18,6 +18,7 @@
 
 #define CONTEXT__ASYNC 1  // pass for top-level-await
 
+#define SPECIAL__MISSING    -1
 #define SPECIAL__IMPORT      1
 #define SPECIAL__EXPORT      2
 

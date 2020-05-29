@@ -42,7 +42,7 @@ static inline int internal_consume_multiline_comment(char *p, int *line_no) {
         }
         break;
 
-      case 0:
+      case '\0':
         return p - start;
     }
     ++p;
@@ -77,7 +77,7 @@ static int consume_slash_regexp(char *p) {
         } while (isalnum(*p));
 
         // fall-through
-      case 0:
+      case '\0':
       case '\n':
         return (p - start);
 

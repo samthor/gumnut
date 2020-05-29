@@ -33,13 +33,13 @@ static tokendef td;
 static prsr_callback callback;
 static int top_context;
 
-int consume_statement(int);
-int consume_expr_group(int);
-int consume_optional_expr(int);
-int consume_class(int);
-int consume_module_list(int);
-int consume_function(int);
-int consume_expr_compound(int);
+static int consume_statement(int);
+static int consume_expr_group(int);
+static int consume_optional_expr(int);
+static int consume_class(int);
+static int consume_module_list(int);
+static int consume_function(int);
+static int consume_expr_compound(int);
 
 static inline void internal_next_comment() {
   for (;;) {
@@ -293,7 +293,7 @@ int consume_module_list(int context) {
 }
 
 // consumes dict or class (allows either)
-int consume_dict(int context) {
+static int consume_dict(int context) {
   if (td.cursor.type != TOKEN_BRACE) {
     return ERROR__UNEXPECTED;
   }
@@ -410,7 +410,7 @@ int consume_dict(int context) {
   }
 }
 
-int consume_optional_expr(int context) {
+static int consume_optional_expr(int context) {
   int value_line = 0;  // line_no of last value
   int seen_any = 0;
 #define _transition_to_value() { if (value_line) { return 0; } value_line = td.cursor.line_no; seen_any = 1; }
@@ -596,7 +596,7 @@ int consume_optional_expr(int context) {
 }
 
 // consumes a compound expr separated by ,'s
-int consume_expr_compound(int context) {
+static int consume_expr_compound(int context) {
   for (;;) {
     _check(consume_optional_expr(context));
     if (td.cursor.hash != MISC_COMMA) {
@@ -607,7 +607,7 @@ int consume_expr_compound(int context) {
   return 0;
 }
 
-int consume_expr_group(int context) {
+static int consume_expr_group(int context) {
   int start = td.cursor.type;
   switch (td.cursor.type) {
     case TOKEN_STRING:
@@ -651,7 +651,7 @@ int consume_expr_group(int context) {
   return 0;
 }
 
-int consume_class(int context) {
+static int consume_class(int context) {
   if (td.cursor.hash != LIT_CLASS) {
     return ERROR__UNEXPECTED;
   }
@@ -672,7 +672,7 @@ int consume_class(int context) {
   return consume_dict(context);
 }
 
-int consume_statement(int context) {
+static int consume_statement(int context) {
   switch (td.cursor.type) {
     case TOKEN_EOF:
       return 0;
@@ -865,7 +865,7 @@ token *modp_init(char *p, int _context, prsr_callback _callback) {
   if (p[0] == '#' && p[1] == '!') {
     // special-case hashbang opener
     td.cursor.type = TOKEN_COMMENT;
-    td.cursor.len = strline(p);
+    td.cursor.len = strline(p);  // FIXME: look for early NULL
     td.cursor.line_no = 1;
   } else {
     // n.b. it's possible but unlikely for this to fail (e.g. opens with "{")
