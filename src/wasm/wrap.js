@@ -20,6 +20,16 @@
 
 const STACK_PAGES = 4;
 
+const ERROR__UNEXPECTED = -1;
+const ERROR__STACK = -2;
+const ERROR__INTERNAL = -3;
+
+const ERRORS = Object.freeze({
+  [ERROR__UNEXPECTED]: 'unexpected',
+  [ERROR__STACK]: 'stack',
+  [ERROR__INTERNAL]: 'internal',
+});
+
 async function initialize(modulePromise, callback, pages = 128) {
   const memory = new WebAssembly.Memory({initial: pages, maximum: pages});
   const table = new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'});
@@ -70,8 +80,8 @@ export default async function build(modulePromise) {
         throw x;
       },
   
-      _token_callback(p, len, line_no, type, special) {
-        handler(p, len, line_no, type, special);
+      _token_callback(special) {
+        handler(special);
       },
     };
   });
@@ -98,9 +108,11 @@ export default async function build(modulePromise) {
     }
     view[writeAt + written] = 0;  // null-terminate
 
-    exports._xx_setup(writeAt);
-    handler = (p, len, lineNo, type, special) => {
-      callback(p - writeAt, len, lineNo, type, special);
+    const tokenAt = exports._xx_setup(writeAt);
+    const tokenView = new Int32Array(view.buffer, tokenAt, 20 >> 2);  // in 32-bit
+    handler = (special) => {
+      // nb. tokenView[4] is actually uint32_t, but it's not used anyway
+      callback(tokenView[0] - writeAt, tokenView[1], tokenView[2], tokenView[3], special);
     };
 
     let ret = 0;
@@ -112,11 +124,53 @@ export default async function build(modulePromise) {
     }
     handler = null;
 
-    if (ret < 0) {
-      throw new TypeError(`internal error: ${ret}`);
+    if (ret >= 0) {
+      return;  // no result, all via callbacks
     }
+    const at = tokenView[0];
+
+    // Special-case crash on a NULL byte. There was no more input.
+    if (view[at] == 0) {
+      throw new TypeError(`Unexpected end of input`);
+    }
+
+    // Otherwise, generate a sane error.
+    const lineNo = tokenView[2];
+    const {line, index} = lineAround(view, at, writeAt);
+    throw new TypeError(`[${lineNo}:${index}] ${ERRORS[ret] || '?'}:\n${line}\n${'^'.padStart(index + 1)}`);
   };
 
   return run;
 }
 
+/**
+ * @param {!Uint8Array} view
+ * @param {number} at of error or character
+ * @param {number} writeAt start of string
+ * @return {string}
+ */
+function lineAround(view, at, writeAt) {
+  let lineAt = at;
+  while (--lineAt >= writeAt) {
+    if (view[lineAt] === 10) {
+      break;
+    }
+  }
+  ++lineAt;  // move back past '\n' or first byte
+  const indexAt = at - lineAt;
+
+  let lineView = view.subarray(lineAt);
+  const lineTo = lineView.findIndex((v) => v === 0 || v === 10);
+  if (lineTo !== -1) {
+    lineView = lineView.subarray(0, lineTo);
+  }
+
+  const decoder = new TextDecoder('utf-8');
+  const line = decoder.decode(lineView);
+
+  const temp = decoder.decode(lineView.subarray(0, indexAt));
+  return {
+    line,
+    index: line.length - temp.length,
+  };
+}

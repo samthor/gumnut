@@ -373,7 +373,7 @@ int prsr_next(tokendef *d) {
 
   if (d->cursor.len == 0 && d->cursor.type != TOKEN_UNKNOWN) {
     // TODO: this could also be "TOKEN_OP" check
-    return ERROR__VALUE;
+    return ERROR__INTERNAL;
   }
 
   token cursor;
