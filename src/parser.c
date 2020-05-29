@@ -637,7 +637,6 @@ int consume_expr_group(int context) {
     _check(consume_expr_compound(context));
 
     // nb. not really good practice, but handles for-loop-likes
-    // TODO(samthor): allow more things
     if (td.cursor.type != TOKEN_SEMICOLON) {
       break;
     }
@@ -792,6 +791,7 @@ int consume_statement(int context) {
 
       // "throw\n" is actually invalid, but we can't do anything about it
       if (line_no != td.cursor.line_no) {
+        // TODO: could we detect "return" + expr and warn?
         return 0;
       }
       return consume_expr_compound(context);
