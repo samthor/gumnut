@@ -150,6 +150,8 @@ export default async function build(modulePromise) {
  * @return {string}
  */
 function lineAround(view, at, writeAt) {
+  // TODO: It might be useful not to return a huge line, if we're given a ~10mb file on one line.
+
   let lineAt = at;
   while (--lineAt >= writeAt) {
     if (view[lineAt] === 10) {
