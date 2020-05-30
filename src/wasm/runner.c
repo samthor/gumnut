@@ -19,6 +19,8 @@ static token *out = 0;
 extern void token_callback(int special);
 
 static void internal_callback(int special) {
+  // nb. This needs to be indirect, as seemingly Web Assembly can't pass around
+  // external function pointers.
   token_callback(special);
 }
 

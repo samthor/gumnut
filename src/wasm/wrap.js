@@ -70,16 +70,16 @@ export default async function build(modulePromise) {
         view.fill(c, s, s + n);
         return s;
       },
-  
+
       _memcpy(dst, src, size) {
         view.set(view.subarray(src, src + size), dst);
         return dst;
       },
-  
+
       abort(x) {
         throw x;
       },
-  
+
       _token_callback(special) {
         handler(special);
       },
