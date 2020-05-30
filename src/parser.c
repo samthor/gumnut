@@ -29,8 +29,8 @@
 #endif
 
 
-static tokendef td; 
-static prsr_callback callback;
+static tokendef td;
+static prsr_callback callback;  // TODO: calling FP adds about 5%
 static int top_context;
 
 static int consume_statement(int);
