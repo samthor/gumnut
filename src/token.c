@@ -425,8 +425,8 @@ int prsr_next(tokendef *d) {
       break;
   }
 
+  // this doesn't clear peek, so it's still valid (should be ~= this token)
   d->cursor = cursor;
-  d->peek.type = TOKEN_UNKNOWN;
   return ret;
 }
 
@@ -472,25 +472,24 @@ int prsr_update(tokendef *d, int type) {
 }
 
 int prsr_peek(tokendef *d) {
-  if (d->peek.type != TOKEN_UNKNOWN) {
+  if (d->peek.p > d->cursor.p) {
     return d->peek.type;
   }
 
   d->peek.p = d->cursor.p + d->cursor.len;
-  d->peek.line_no = d->line_no;
   d->peek.hash = 0;
 
   // nb. we never care about template strings in peek
   // cursor can be zero at EOF
   if (d->flag || d->cursor.len == 0) {
-    d->peek.len = 0;
     d->peek.type = TOKEN_UNKNOWN;
     return TOKEN_UNKNOWN;
   }
 
+  static int line_no = 0;  // never used, just needed as valid ptr
   for (;;) {
-    d->peek.p = consume_space(d->peek.p, &(d->peek.line_no));
-    eat_token(&(d->peek), &(d->peek.line_no));
+    d->peek.p = consume_space(d->peek.p, &(line_no));
+    eat_token(&(d->peek), &(line_no));
 
     int type = d->peek.type;
     if (type != TOKEN_COMMENT) {
