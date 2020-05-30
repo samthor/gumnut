@@ -30,6 +30,8 @@ typedef struct {
   uint8_t flag;  // used to record ${} state
 } tokendef;
 
+extern tokendef td;
+
 // Prepares tokendef. Provides an initial zero token.
 void prsr_init_token(char *);
 

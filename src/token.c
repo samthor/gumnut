@@ -22,6 +22,9 @@
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
+// global
+tokendef td;
+
 // expects pointer to be on start "/*"
 static inline int internal_consume_multiline_comment(char *p, int *line_no) {
   if (p[0] != '/' || p[1] != '*') {
@@ -429,8 +432,6 @@ int prsr_next() {
   td.cursor = cursor;
   return ret;
 }
-
-static tokendef td;
 
 void prsr_init_token(char *p) {
   bzero(&td, sizeof(td));
