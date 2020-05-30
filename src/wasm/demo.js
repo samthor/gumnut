@@ -16,6 +16,7 @@
  */
 
 import build from './rewriter.js';
+import {performance} from 'perf_hooks';
 
 const resolve = (importee, importer) => {
   // importee is from import/export, importer is the current file
@@ -24,6 +25,9 @@ const resolve = (importee, importer) => {
 };
 
 build(resolve).then((rewriter) => {
+  const start = performance.now();
   const s = rewriter(process.argv[2] || 'demo.js');
   s.pipe(process.stdout);
+  const duration = performance.now() - start;
+  process.stderr.write(`took ${duration.toFixed(2)}ms\n`);
 });
