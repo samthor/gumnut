@@ -848,13 +848,7 @@ static int consume_statement(int context) {
     }
   }
 
-  char *p = td.cursor.p;
-  int ret = consume_expr_compound(context);
-  if (p == td.cursor.p) {
-    debugf("expr did not get consumed\n");
-    return ERROR__UNEXPECTED;
-  }
-  return ret;
+  return consume_expr_compound(context);
 }
 
 token *modp_init(char *p, int _context, prsr_callback _callback) {
@@ -865,7 +859,7 @@ token *modp_init(char *p, int _context, prsr_callback _callback) {
   if (p[0] == '#' && p[1] == '!') {
     // special-case hashbang opener
     td.cursor.type = TOKEN_COMMENT;
-    td.cursor.len = strline(p);  // FIXME: look for early NULL
+    td.cursor.len = strline(p);
     td.cursor.line_no = 1;
   } else {
     // n.b. it's possible but unlikely for this to fail (e.g. opens with "{")
@@ -876,10 +870,6 @@ token *modp_init(char *p, int _context, prsr_callback _callback) {
 }
 
 int modp_run() {
-  if (td.cursor.type == TOKEN_EOF) {
-    return 0;
-  }
-
   char *head = td.cursor.p;
 
   while (td.cursor.type == TOKEN_COMMENT) {
@@ -888,5 +878,10 @@ int modp_run() {
   }
   _check(consume_statement(top_context));
 
-  return td.cursor.p - head;
+  int len = td.cursor.p - head;
+  if (len == 0 && td.cursor.type != TOKEN_EOF) {
+    debugf("expr did not get consumed\n");
+    return ERROR__UNEXPECTED;
+  }
+  return len;
 }

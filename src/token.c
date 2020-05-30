@@ -362,7 +362,7 @@ int prsr_next(tokendef *d) {
       return TOKEN_T_BRACE;
     case FLAG__RESUME_LIT: {
       int litflag = 1;
-      ++d->cursor.p;  // move past '}'
+      ++d->cursor.p;  // move past '}' (i.e., previous TOKEN_CLOSE)
       d->cursor.type = TOKEN_STRING;
       d->cursor.len = consume_string(d->cursor.p, &d->line_no, &litflag);
       d->cursor.hash = 0;
@@ -433,7 +433,6 @@ int prsr_next(tokendef *d) {
 tokendef prsr_init_token(char *p) {
   tokendef d;
   bzero(&d, sizeof(d));
-  d.buf = p;
   d.line_no = 1;
 
   d.cursor.type = TOKEN_UNKNOWN;
@@ -475,24 +474,18 @@ int prsr_update(tokendef *d, int type) {
 int prsr_peek(tokendef *d) {
   if (d->peek.type != TOKEN_UNKNOWN) {
     return d->peek.type;
-  } else if (d->cursor.len == 0) {
-    return TOKEN_UNKNOWN;
   }
 
   d->peek.p = d->cursor.p + d->cursor.len;
   d->peek.line_no = d->line_no;
   d->peek.hash = 0;
 
-  switch (d->flag) {
-    case FLAG__PENDING_T_BRACE:
-      d->peek.len = 2;
-      d->peek.type = TOKEN_T_BRACE;
-      return TOKEN_T_BRACE;
-
-    case FLAG__RESUME_LIT:
-      d->peek.len = 0;  // TODO: we don't bother in peek
-      d->peek.type = TOKEN_STRING;
-      return TOKEN_STRING;
+  // nb. we never care about template strings in peek
+  // cursor can be zero at EOF
+  if (d->flag || d->cursor.len == 0) {
+    d->peek.len = 0;
+    d->peek.type = TOKEN_UNKNOWN;
+    return TOKEN_UNKNOWN;
   }
 
   for (;;) {

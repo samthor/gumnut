@@ -21,15 +21,13 @@
 #define _TOKEN_H
 
 typedef struct {
-  char *buf;
   token cursor; // focused here
   token peek;   // peeked token, not available unless prsr_peek() called
   int line_no;  // after cursor
 
-  // depth/flag used to record ${} state (resume literal once brace done)
-  uint8_t flag;
   uint16_t depth : __STACK_SIZE_BITS;
   uint8_t stack[__STACK_SIZE];
+  uint8_t flag;  // used to record ${} state
 } tokendef;
 
 // Prepares tokendef. Provides an initial zero token.
