@@ -130,7 +130,7 @@ export default async function build(modulePromise) {
     const at = tokenView[0];
 
     // Special-case crash on a NULL byte. There was no more input.
-    if (view[at] == 0) {
+    if (view[at] === 0) {
       throw new TypeError(`Unexpected end of input`);
     }
 

@@ -14,6 +14,10 @@
  * the License.
  */
 
+/**
+ * @fileoverview Node interface to a JS imports rewriter.
+ */
+
 import fs from 'fs';
 import path from 'path';
 import build from './wrap.js';
