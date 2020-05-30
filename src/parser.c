@@ -29,7 +29,6 @@
 #endif
 
 
-static tokendef td;
 static prsr_callback callback;  // TODO: calling FP adds about 5%
 static int top_context;
 
@@ -43,7 +42,7 @@ static int consume_expr_compound(int);
 
 static inline void internal_next_comment() {
   for (;;) {
-    int out = prsr_next(&td);
+    int out = prsr_next();
     if (out != TOKEN_COMMENT) {
       break;
     }
@@ -59,7 +58,7 @@ static void internal_next() {
 
 static void internal_next_update(int type) {
   // TODO: we don't care about return type here
-  prsr_update(&td, type);
+  prsr_update(type);
   callback(0);
   internal_next_comment();
 }
@@ -123,7 +122,7 @@ int consume_export(int context) {
       return consume_class(context);
 
     case LIT_ASYNC:
-      prsr_peek(&td);
+      prsr_peek();
       if (td.peek.hash != LIT_FUNCTION) {
         break;
       }
@@ -200,7 +199,7 @@ int consume_async_expr(int context) {
     return ERROR__UNEXPECTED;
   }
 
-  int peek_type = prsr_peek(&td);
+  int peek_type = prsr_peek();
   switch (peek_type) {
     case TOKEN_LIT:
       if (td.peek.hash == LIT_FUNCTION) {
@@ -309,12 +308,12 @@ static int consume_dict(int context) {
     }
 
     // static prefix
-    if (td.cursor.hash == LIT_STATIC && prsr_peek(&td) != TOKEN_PAREN) {
+    if (td.cursor.hash == LIT_STATIC && prsr_peek() != TOKEN_PAREN) {
       internal_next_update(TOKEN_KEYWORD);
     }
 
     // "async" prefix
-    if (td.cursor.hash == LIT_ASYNC && prsr_peek(&td) != TOKEN_PAREN) {
+    if (td.cursor.hash == LIT_ASYNC && prsr_peek() != TOKEN_PAREN) {
       // "async(" is a valid function name, sigh
       method_context |= CONTEXT__ASYNC;
       internal_next_update(TOKEN_KEYWORD);
@@ -328,7 +327,7 @@ static int consume_dict(int context) {
     }
 
     // get/set without bracket
-    if ((td.cursor.hash == LIT_GET || td.cursor.hash == LIT_SET) && prsr_peek(&td) != TOKEN_PAREN) {
+    if ((td.cursor.hash == LIT_GET || td.cursor.hash == LIT_SET) && prsr_peek() != TOKEN_PAREN) {
       internal_next_update(TOKEN_KEYWORD);
     }
 
@@ -418,7 +417,7 @@ static int consume_optional_expr(int context) {
   for (;;) {
     switch (td.cursor.type) {
       case TOKEN_SLASH:
-        _check(prsr_update(&td, value_line ? TOKEN_OP : TOKEN_REGEXP));
+        _check(prsr_update(value_line ? TOKEN_OP : TOKEN_REGEXP));
         continue;  // restart without move
 
       case TOKEN_BRACE:
@@ -521,7 +520,7 @@ static int consume_optional_expr(int context) {
             }
         }
 
-        _check(prsr_update(&td, type));
+        _check(prsr_update(type));
         continue;
       }
 
@@ -719,7 +718,7 @@ static int consume_statement(int context) {
           return 0;
 
         case LIT_ASYNC: {
-          int peek_type = prsr_peek(&td);
+          int peek_type = prsr_peek();
           if (peek_type == TOKEN_LIT && td.peek.hash == LIT_FUNCTION) {
             // only match "async function", as others are expr (e.g. "async () => {}")
             return consume_function(context);
@@ -728,7 +727,7 @@ static int consume_statement(int context) {
         }
       }
 
-      if (!(td.cursor.hash & _MASK_MASQUERADE) && prsr_peek(&td) == TOKEN_COLON) {
+      if (!(td.cursor.hash & _MASK_MASQUERADE) && prsr_peek() == TOKEN_COLON) {
         // nb. "await:" is invalid in async functions, but it's nonsensical anyway
         internal_next_update(TOKEN_LABEL);
         internal_next();  // consume TOKEN_COLON
@@ -799,7 +798,7 @@ static int consume_statement(int context) {
     }
 
     case LIT_IMPORT: {
-      prsr_peek(&td);
+      prsr_peek();
       if (td.peek.type == TOKEN_PAREN || td.peek.hash == MISC_DOT) {
         break;  // treat as expr
       }
@@ -852,7 +851,7 @@ static int consume_statement(int context) {
 }
 
 token *modp_init(char *p, int _context, prsr_callback _callback) {
-  td = prsr_init_token(p);
+  prsr_init_token(p);
   top_context = _context;
   callback = _callback;
 
@@ -863,7 +862,7 @@ token *modp_init(char *p, int _context, prsr_callback _callback) {
     td.cursor.line_no = 1;
   } else {
     // n.b. it's possible but unlikely for this to fail (e.g. opens with "{")
-    prsr_next(&td);
+    prsr_next();
   }
 
   return &(td.cursor);
@@ -874,7 +873,7 @@ int modp_run() {
 
   while (td.cursor.type == TOKEN_COMMENT) {
     callback(0);
-    prsr_next(&td);
+    prsr_next();
   }
   _check(consume_statement(top_context));
 

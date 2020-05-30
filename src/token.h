@@ -31,15 +31,15 @@ typedef struct {
 } tokendef;
 
 // Prepares tokendef. Provides an initial zero token.
-tokendef prsr_init_token(char *);
+void prsr_init_token(char *);
 
 // Moves the current cursor to the next token. This includes comments.
-int prsr_next(tokendef *);
+int prsr_next();
 
 // Updates the current cursor as a different type. Important for TOKEN_SLASH.
-int prsr_update(tokendef *, int);
+int prsr_update();
 
 // Peeks to the next non-comment token. Returns type and fills .peek field.
-int prsr_peek(tokendef *);
+int prsr_peek();
 
 #endif//_TOKEN_H
