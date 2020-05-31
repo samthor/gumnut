@@ -228,14 +228,30 @@ static void eat_token(token *t, int *line_no) {
     int len = 0;
     int allowed;  // how many ops of the same type we can safely consume
 
-    if (memchr("=&|^~!%+-", start, 9)) {
-      allowed = 1;
-    } else if (start == '*' || start == '<') {
-      allowed = 2;  // exponention operator **, or shift
-    } else if (start == '>') {
-      allowed = 3;  // right shift, or zero-fill right shift
-    } else {
-      break;
+    switch (start) {
+      case '=':
+      case '&':
+      case '|':
+      case '^':
+      case '~':
+      case '!':
+      case '%':
+      case '+':
+      case '-':
+        allowed = 1;
+        break;
+
+      case '*':
+      case '<':
+        allowed = 2;
+        break;
+
+      case '>':
+        allowed = 3;
+        break;
+
+      default:
+        goto fallthrough;
     }
 
     while (len < allowed) {
@@ -280,6 +296,8 @@ static void eat_token(token *t, int *line_no) {
     }
 
     _ret(len, TOKEN_OP);
+fallthrough:
+    (void)sizeof(1);
   } while (0);
 
   // number: "0", ".01", "0x100"

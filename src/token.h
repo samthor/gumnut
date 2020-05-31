@@ -39,7 +39,7 @@ void prsr_init_token(char *);
 int prsr_next();
 
 // Updates the current cursor as a different type. Important for TOKEN_SLASH.
-int prsr_update();
+int prsr_update(int);
 
 // Peeks to the next non-comment token. Returns type and fills .peek field.
 int prsr_peek();
