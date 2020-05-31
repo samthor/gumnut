@@ -110,6 +110,7 @@ export default async function build(modulePromise, pages = 128) {
     view[writeAt + written] = 0;  // null-terminate
 
     const tokenAt = exports._xx_setup(writeAt);
+    console.warn('token is at', tokenAt);
     const tokenView = new Int32Array(view.buffer, tokenAt, 20 >> 2);  // in 32-bit
     handler = (special) => {
       // nb. tokenView[4] is actually uint32_t, but it's not used anyway

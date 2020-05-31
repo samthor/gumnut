@@ -349,7 +349,9 @@ static char lookup_op[256] = {
 };
 
 // global and shared with parser
-tokendef td;
+#ifndef EMSCRIPTEN
+tokendef _real_td;
+#endif
 
 // used by consume_template_string_inner to return to caller
 static int litflag;
@@ -679,32 +681,41 @@ static void eat_token(token *t, int *line_no) {
 }
 
 int prsr_next() {
-  switch (td.flag) {
+  switch (td->flag) {
     case FLAG__PENDING_T_BRACE:
-      td.cursor.p += td.cursor.len;  // move past string
-      td.cursor.type = TOKEN_T_BRACE;
-      td.cursor.len = 2;
-      td.cursor.hash = 0;
-      td.flag = 0;
+      td->cursor.p += td->cursor.len;  // move past string
+      td->cursor.type = TOKEN_T_BRACE;
+      td->cursor.len = 2;
+      td->cursor.hash = 0;
+      td->flag = 0;
 
-      if (td.depth == __STACK_SIZE - 1) {
+      if (td->depth == __STACK_SIZE - 1) {
         return ERROR__STACK;
       }
-      td.stack[td.depth++] = TOKEN_T_BRACE;
+      td->stack[td->depth++] = TOKEN_T_BRACE;
 
       return TOKEN_T_BRACE;
     case FLAG__RESUME_LIT: {
+<<<<<<< HEAD
       litflag = 0;
       ++td.cursor.p;  // move past '}' (i.e., previous TOKEN_CLOSE)
       td.cursor.type = TOKEN_STRING;
       td.cursor.len = consume_template_string_inner(td.cursor.p, &td.line_no);
       td.cursor.hash = 0;
       td.flag = litflag ? FLAG__PENDING_T_BRACE : 0;
+=======
+      int litflag = 1;
+      ++td->cursor.p;  // move past '}' (i.e., previous TOKEN_CLOSE)
+      td->cursor.type = TOKEN_STRING;
+      td->cursor.len = consume_string(td->cursor.p, &td->line_no, &litflag);
+      td->cursor.hash = 0;
+      td->flag = litflag ? FLAG__PENDING_T_BRACE : 0;
+>>>>>>> 4a78b27... td at static location
       return TOKEN_STRING;
     }
   }
 
-  if (td.cursor.len == 0 && td.cursor.type != TOKEN_UNKNOWN) {
+  if (td->cursor.len == 0 && td->cursor.type != TOKEN_UNKNOWN) {
     // TODO: this could also be "TOKEN_OP" check
     return ERROR__INTERNAL;
   }
@@ -713,25 +724,30 @@ int prsr_next() {
   cursor.hash = 0;
 
   // consume space chars after previous, until next token
-  char *p = consume_space(td.cursor.p + td.cursor.len, &td.line_no);
+  char *p = consume_space(td->cursor.p + td->cursor.len, &td->line_no);
   cursor.p = p;
-  cursor.line_no = td.line_no;
+  cursor.line_no = td->line_no;
 
-  eat_token(&cursor, &(td.line_no));
+  eat_token(&cursor, &(td->line_no));
   int ret = cursor.type;
 
   switch (cursor.type) {
     case TOKEN_STRING:
+<<<<<<< HEAD
       if (litflag) {
         td.flag = FLAG__PENDING_T_BRACE;
+=======
+      if (p[0] == '`' && (cursor.len == 1 || p[cursor.len - 1] != '`')) {
+        td->flag = FLAG__PENDING_T_BRACE;
+>>>>>>> 4a78b27... td at static location
       }
       break;
 
     case TOKEN_COLON:
       // inside ternary stack, close it
-      if (td.depth && td.stack[td.depth - 1] == TOKEN_TERNARY) {
+      if (td->depth && td->stack[td->depth - 1] == TOKEN_TERNARY) {
         cursor.type = TOKEN_CLOSE;
-        --td.depth;
+        --td->depth;
       }
       break;
 
@@ -739,61 +755,61 @@ int prsr_next() {
     case TOKEN_PAREN:
     case TOKEN_ARRAY:
     case TOKEN_BRACE:
-      if (td.depth == __STACK_SIZE - 1) {
+      if (td->depth == __STACK_SIZE - 1) {
         ret = ERROR__STACK;
         break;
       }
-      td.stack[td.depth++] = cursor.type;
+      td->stack[td->depth++] = cursor.type;
       break;
 
     case TOKEN_CLOSE:
-      if (!td.depth) {
+      if (!td->depth) {
         ret = ERROR__STACK;
         break;
       }
-      uint8_t type = td.stack[--td.depth];
+      uint8_t type = td->stack[--td->depth];
       if (type == TOKEN_T_BRACE) {
-        td.flag |= FLAG__RESUME_LIT;
+        td->flag |= FLAG__RESUME_LIT;
       }
       break;
   }
 
   // this doesn't clear peek, so it's still valid (should be ~= this token)
-  td.cursor = cursor;
+  td->cursor = cursor;
   return ret;
 }
 
 void prsr_init_token(char *p) {
-  bzero(&td, sizeof(td));
-  td.line_no = 1;
+  bzero(td, sizeof(tokendef));
+  td->line_no = 1;
 
-  td.cursor.type = TOKEN_UNKNOWN;
-  td.cursor.p = p;
-  td.peek.type = TOKEN_UNKNOWN;
-  td.peek.p = p;
+  td->cursor.type = TOKEN_UNKNOWN;
+  td->cursor.p = p;
+  td->peek.type = TOKEN_UNKNOWN;
+  td->peek.p = p;
 }
 
 int prsr_update(int type) {
-  switch (td.cursor.type) {
+  switch (td->cursor.type) {
     case TOKEN_SLASH:
       switch (type) {
         case TOKEN_OP:
-          td.cursor.len = consume_slash_op(td.cursor.p);
+          td->cursor.len = consume_slash_op(td->cursor.p);
           break;
         case TOKEN_REGEXP:
-          td.cursor.len = consume_slash_regexp(td.cursor.p);
+          td->cursor.len = consume_slash_regexp(td->cursor.p);
           break;
         default:
           return ERROR__INTERNAL;
       }
-      td.cursor.type = type;
+      td->cursor.type = type;
       return 0;
 
     case TOKEN_LIT:
       if (!(type == TOKEN_SYMBOL || type == TOKEN_KEYWORD || type == TOKEN_LABEL || type == TOKEN_OP)) {
         return ERROR__INTERNAL;
       }
-      td.cursor.type = type;
+      td->cursor.type = type;
       return 0;
 
     default:
@@ -802,30 +818,30 @@ int prsr_update(int type) {
 }
 
 int prsr_peek() {
-  if (td.peek.p > td.cursor.p) {
-    return td.peek.type;
+  if (td->peek.p > td->cursor.p) {
+    return td->peek.type;
   }
 
-  td.peek.p = td.cursor.p + td.cursor.len;
-  td.peek.hash = 0;
+  td->peek.p = td->cursor.p + td->cursor.len;
+  td->peek.hash = 0;
 
   // nb. we never care about template strings in peek
   // cursor can be zero at EOF
-  if (td.flag || td.cursor.len == 0) {
-    td.peek.type = TOKEN_UNKNOWN;
+  if (td->flag || td->cursor.len == 0) {
+    td->peek.type = TOKEN_UNKNOWN;
     return TOKEN_UNKNOWN;
   }
 
   static int line_no = 0;  // never used, just needed as valid ptr
   for (;;) {
-    td.peek.p = consume_space(td.peek.p, &(line_no));
-    eat_token(&(td.peek), &(line_no));
+    td->peek.p = consume_space(td->peek.p, &(line_no));
+    eat_token(&(td->peek), &(line_no));
 
-    int type = td.peek.type;
+    int type = td->peek.type;
     if (type != TOKEN_COMMENT) {
       return type;
     }
 
-    td.peek.p += td.peek.len;
+    td->peek.p += td->peek.len;
   }
 }

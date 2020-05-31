@@ -63,13 +63,13 @@ static void internal_next_update(int type) {
 }
 
 static int consume_import_module_special(int special) {
-  if (td.cursor.type != TOKEN_STRING) {
+  if (td->cursor.type != TOKEN_STRING) {
     debugf("no string found in import/export\n");
     return ERROR__UNEXPECTED;
   }
 
-  int len = td.cursor.len;
-  if (len == 1 || (td.cursor.p[0] == '`' && td.cursor.p[len - 1] != '`')) {
+  int len = td->cursor.len;
+  if (len == 1 || (td->cursor.p[0] == '`' && td->cursor.p[len - 1] != '`')) {
     // nb. probably an error, but will just be treated as an expr
     return 0;
   }
@@ -80,17 +80,17 @@ static int consume_import_module_special(int special) {
 }
 
 int consume_import(int context) {
-  if (td.cursor.hash != LIT_IMPORT) {
+  if (td->cursor.hash != LIT_IMPORT) {
     debugf("missing import keyword\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
 
-  if (td.cursor.type != TOKEN_STRING) {
+  if (td->cursor.type != TOKEN_STRING) {
     _check(consume_module_list(context));
 
     // consume "from"
-    if (td.cursor.hash != LIT_FROM) {
+    if (td->cursor.hash != LIT_FROM) {
       debugf("missing from keyword\n");
       return ERROR__UNEXPECTED;
     }
@@ -102,26 +102,26 @@ int consume_import(int context) {
 }
 
 int consume_export(int context) {
-  if (td.cursor.hash != LIT_EXPORT) {
+  if (td->cursor.hash != LIT_EXPORT) {
     debugf("missing export keyword\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
 
   int is_default = 0;
-  if (td.cursor.hash == LIT_DEFAULT) {
+  if (td->cursor.hash == LIT_DEFAULT) {
     internal_next_update(TOKEN_SYMBOL);
     is_default = 1;
   }
 
   // if this is class/function, consume with no value
-  switch (td.cursor.hash) {
+  switch (td->cursor.hash) {
     case LIT_CLASS:
       return consume_class(context);
 
     case LIT_ASYNC:
       prsr_peek();
-      if (td.peek.hash != LIT_FUNCTION) {
+      if (td->peek.hash != LIT_FUNCTION) {
         break;
       }
       // fall-through
@@ -131,11 +131,11 @@ int consume_export(int context) {
   }
 
   // "export {..." or "export *" or "export default *"
-  if ((!is_default && td.cursor.type == TOKEN_BRACE) || td.cursor.hash == MISC_STAR) {
+  if ((!is_default && td->cursor.type == TOKEN_BRACE) || td->cursor.hash == MISC_STAR) {
     _check(consume_module_list(context));
 
     // consume optional "from"
-    if (td.cursor.hash != LIT_FROM) {
+    if (td->cursor.hash != LIT_FROM) {
       return 0;
     }
     internal_next_update(TOKEN_KEYWORD);
@@ -144,7 +144,7 @@ int consume_export(int context) {
     return consume_import_module_special(SPECIAL__EXPORT);
   }
 
-  int has_decl = (td.cursor.hash & _MASK_DECL) ? 1 : 0;
+  int has_decl = (td->cursor.hash & _MASK_DECL) ? 1 : 0;
   if (has_decl == is_default) {
     // can't default export "var foo", can't _not_ "export var".
     // TODO: should fail, allow for now
@@ -159,7 +159,7 @@ int consume_function(int context) {
   int statement_context = context;
 
   // check for leading async and update context
-  if (td.cursor.hash == LIT_ASYNC) {
+  if (td->cursor.hash == LIT_ASYNC) {
     statement_context |= CONTEXT__ASYNC;
     internal_next_update(TOKEN_KEYWORD);
   } else {
@@ -167,24 +167,24 @@ int consume_function(int context) {
   }
 
   // expect function literal
-  if (td.cursor.hash != LIT_FUNCTION) {
+  if (td->cursor.hash != LIT_FUNCTION) {
     debugf("missing 'function' keyword\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
 
   // check for generator star
-  if (td.cursor.hash == MISC_STAR) {
+  if (td->cursor.hash == MISC_STAR) {
     internal_next();
   }
 
   // check for optional function name
-  if (td.cursor.type == TOKEN_LIT) {
+  if (td->cursor.type == TOKEN_LIT) {
     internal_next_update(TOKEN_SYMBOL);  // nb. should ban reserved words
   }
 
   // check for parens (nb. should be required)
-  if (td.cursor.type == TOKEN_PAREN) {
+  if (td->cursor.type == TOKEN_PAREN) {
     _check(consume_expr_group(context));
   }
 
@@ -194,7 +194,7 @@ int consume_function(int context) {
 
 // consumes something starting with async (might be function)
 int consume_async_expr(int context) {
-  if (td.cursor.hash != LIT_ASYNC) {
+  if (td->cursor.hash != LIT_ASYNC) {
     debugf("missing 'async' starter\n");
     return ERROR__UNEXPECTED;
   }
@@ -202,7 +202,7 @@ int consume_async_expr(int context) {
   int peek_type = prsr_peek();
   switch (peek_type) {
     case TOKEN_LIT:
-      if (td.peek.hash == LIT_FUNCTION) {
+      if (td->peek.hash == LIT_FUNCTION) {
         return consume_function(context);
       }
 
@@ -210,7 +210,7 @@ int consume_async_expr(int context) {
       internal_next_update(TOKEN_KEYWORD);
       internal_next_update(TOKEN_SYMBOL);
 
-      if (td.cursor.hash != MISC_ARROW) {
+      if (td->cursor.hash != MISC_ARROW) {
         debugf("could not match arrow after 'async foo'\n");
         return ERROR__UNEXPECTED;
       }
@@ -222,13 +222,13 @@ int consume_async_expr(int context) {
       // _maybe_ function
       _check(consume_expr_group(context));
 
-      if (td.cursor.hash != MISC_ARROW) {
+      if (td->cursor.hash != MISC_ARROW) {
         return 0;  // not a function, just bail (has value)
       }
       break;
 
     case TOKEN_OP:
-      if (td.peek.hash == MISC_ARROW) {
+      if (td->peek.hash == MISC_ARROW) {
         internal_next_update(TOKEN_KEYWORD);
         // nb. allow "async =>" even though broken
         break;
@@ -243,7 +243,7 @@ int consume_async_expr(int context) {
   internal_next();  // consume arrow
 
   int async_context = context | CONTEXT__ASYNC;
-  if (td.cursor.type == TOKEN_BRACE) {
+  if (td->cursor.type == TOKEN_BRACE) {
     _check(consume_statement(async_context));
   } else {
     _check(consume_optional_expr(async_context));
@@ -254,31 +254,31 @@ int consume_async_expr(int context) {
 
 int consume_module_list(int context) {
   for (;;) {
-    if (td.cursor.type == TOKEN_BRACE) {
+    if (td->cursor.type == TOKEN_BRACE) {
       internal_next();
       _check(consume_module_list(context));
-      if (td.cursor.type != TOKEN_CLOSE) {
+      if (td->cursor.type != TOKEN_CLOSE) {
         debugf("missing close after module list\n");
         return ERROR__UNEXPECTED;
       }
       internal_next();
     } else {
       // can start with "*", "foo", and end with "as blah"
-      if (td.cursor.type == TOKEN_OP) {
-        if (td.cursor.hash != MISC_STAR) {
+      if (td->cursor.type == TOKEN_OP) {
+        if (td->cursor.hash != MISC_STAR) {
           return 0;
         }
         internal_next();
-      } else if (td.cursor.type == TOKEN_LIT) {
+      } else if (td->cursor.type == TOKEN_LIT) {
         internal_next_update(TOKEN_SYMBOL);
       } else {
         return 0;
       }
 
       // catch optional "as x"
-      if (td.cursor.hash == LIT_AS) {
+      if (td->cursor.hash == LIT_AS) {
         internal_next_update(TOKEN_KEYWORD);
-        if (td.cursor.type != TOKEN_LIT) {
+        if (td->cursor.type != TOKEN_LIT) {
           debugf("missing literal after 'as'\n");
           return ERROR__UNEXPECTED;
         }
@@ -286,7 +286,7 @@ int consume_module_list(int context) {
       }
     }
 
-    if (td.cursor.hash != MISC_COMMA) {
+    if (td->cursor.hash != MISC_COMMA) {
       return 0;
     }
     internal_next();
@@ -295,7 +295,7 @@ int consume_module_list(int context) {
 
 // consumes dict or class (allows either)
 static int consume_dict(int context) {
-  if (td.cursor.type != TOKEN_BRACE) {
+  if (td->cursor.type != TOKEN_BRACE) {
     debugf("missing open brace for dict\n");
     return ERROR__UNEXPECTED;
   }
@@ -304,19 +304,19 @@ static int consume_dict(int context) {
   for (;;) {
     int method_context = context;
 
-    if (td.cursor.hash == MISC_SPREAD) {
+    if (td->cursor.hash == MISC_SPREAD) {
       internal_next();
       _check(consume_optional_expr(context));
       continue;
     }
 
     // static prefix
-    if (td.cursor.hash == LIT_STATIC && prsr_peek() != TOKEN_PAREN) {
+    if (td->cursor.hash == LIT_STATIC && prsr_peek() != TOKEN_PAREN) {
       internal_next_update(TOKEN_KEYWORD);
     }
 
     // "async" prefix
-    if (td.cursor.hash == LIT_ASYNC && prsr_peek() != TOKEN_PAREN) {
+    if (td->cursor.hash == LIT_ASYNC && prsr_peek() != TOKEN_PAREN) {
       // "async(" is a valid function name, sigh
       method_context |= CONTEXT__ASYNC;
       internal_next_update(TOKEN_KEYWORD);
@@ -325,17 +325,17 @@ static int consume_dict(int context) {
     }
 
     // generator
-    if (td.cursor.hash == MISC_STAR) {
+    if (td->cursor.hash == MISC_STAR) {
       internal_next();
     }
 
     // get/set without bracket
-    if ((td.cursor.hash == LIT_GET || td.cursor.hash == LIT_SET) && prsr_peek() != TOKEN_PAREN) {
+    if ((td->cursor.hash == LIT_GET || td->cursor.hash == LIT_SET) && prsr_peek() != TOKEN_PAREN) {
       internal_next_update(TOKEN_KEYWORD);
     }
 
     // name or bracketed name
-    switch (td.cursor.type) {
+    switch (td->cursor.type) {
       case TOKEN_LIT:
         internal_next_update(TOKEN_SYMBOL);
         break;
@@ -355,12 +355,12 @@ static int consume_dict(int context) {
     }
 
     // check terminal case (which decides what tpye of entry this is), method or equal/colon
-    switch (td.cursor.type) {
+    switch (td->cursor.type) {
       case TOKEN_PAREN:
         // method
         _check(consume_expr_group(context));
 
-        if (td.cursor.type != TOKEN_BRACE) {
+        if (td->cursor.type != TOKEN_BRACE) {
           debugf("did not find brace after dict paren\n");
           return ERROR__UNEXPECTED;
         }
@@ -368,7 +368,7 @@ static int consume_dict(int context) {
         break;
 
       case TOKEN_OP:
-        if (td.cursor.hash != MISC_EQUALS) {
+        if (td->cursor.hash != MISC_EQUALS) {
           break;
         }
         // fall-through
@@ -381,7 +381,7 @@ static int consume_dict(int context) {
     }
 
     // handle tail cases (close, eof, op, etc)
-    switch (td.cursor.type) {
+    switch (td->cursor.type) {
       case TOKEN_CLOSE:
         internal_next();
         return 0;
@@ -392,7 +392,7 @@ static int consume_dict(int context) {
         return ERROR__UNEXPECTED;
 
       case TOKEN_OP:
-        if (td.cursor.hash != MISC_COMMA) {
+        if (td->cursor.hash != MISC_COMMA) {
           break;
         }
         // fall-through
@@ -408,7 +408,7 @@ static int consume_dict(int context) {
         continue;
     }
 
-    debugf("unknown left-side dict part: %d\n", td.cursor.type);
+    debugf("unknown left-side dict part: %d\n", td->cursor.type);
     return ERROR__UNEXPECTED;
   }
 }
@@ -416,10 +416,10 @@ static int consume_dict(int context) {
 static int consume_optional_expr(int context) {
   int value_line = 0;  // line_no of last value
   int seen_any = 0;
-#define _transition_to_value() { if (value_line) { return 0; } value_line = td.cursor.line_no; seen_any = 1; }
+#define _transition_to_value() { if (value_line) { return 0; } value_line = td->cursor.line_no; seen_any = 1; }
 
   for (;;) {
-    switch (td.cursor.type) {
+    switch (td->cursor.type) {
       case TOKEN_SLASH:
         _check(prsr_update(value_line ? TOKEN_OP : TOKEN_REGEXP));
         continue;  // restart without move
@@ -430,7 +430,7 @@ static int consume_optional_expr(int context) {
           return 0;
         }
         _check(consume_dict(context));
-        value_line = td.cursor.line_no;
+        value_line = td->cursor.line_no;
         seen_any = 1;
         continue;
 
@@ -450,12 +450,12 @@ static int consume_optional_expr(int context) {
       case TOKEN_ARRAY:
       case TOKEN_PAREN:
         _check(consume_expr_group(context));
-        value_line = td.cursor.line_no;
+        value_line = td->cursor.line_no;
         seen_any = 1;
         continue;
 
       case TOKEN_STRING:
-        if (td.cursor.p[0] == '`' && value_line) {
+        if (td->cursor.p[0] == '`' && value_line) {
           // tagged template, e.g. "hello`123`"
           internal_next();
           continue;
@@ -472,7 +472,7 @@ static int consume_optional_expr(int context) {
       case TOKEN_LIT: {
         int type = TOKEN_SYMBOL;
 
-        switch (td.cursor.hash) {
+        switch (td->cursor.hash) {
           case LIT_VAR:
           case LIT_LET:
           case LIT_CONST:
@@ -515,9 +515,9 @@ static int consume_optional_expr(int context) {
             break;
 
           default:
-            if (td.cursor.hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
+            if (td->cursor.hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
               type = TOKEN_OP;
-            } else if (td.cursor.hash & _MASK_KEYWORD) {
+            } else if (td->cursor.hash & _MASK_KEYWORD) {
               return 0;
             } else if (value_line) {
               return 0;  // value after value
@@ -529,21 +529,21 @@ static int consume_optional_expr(int context) {
       }
 
       case TOKEN_OP:
-        if (td.cursor.hash & _MASK_UNARY_OP) {
+        if (td->cursor.hash & _MASK_UNARY_OP) {
           if (seen_any && value_line) {
             // e.g., "var x = 123 new foo" is invalid
             return 0;
           }
         }
 
-        switch (td.cursor.hash) {
+        switch (td->cursor.hash) {
           case MISC_COMMA:
             return 0;
 
           case MISC_ARROW: {
             internal_next();
             int normal_context = context & ~(CONTEXT__ASYNC);
-            if (td.cursor.type == TOKEN_BRACE) {
+            if (td->cursor.type == TOKEN_BRACE) {
               _check(consume_statement(normal_context));
             } else {
               _check(consume_optional_expr(normal_context));
@@ -568,18 +568,18 @@ static int consume_optional_expr(int context) {
           case MISC_CHAIN:
             // nb. this needs has_value, but it's nonsensical otherwise
             internal_next();
-            if (td.cursor.type != TOKEN_LIT) {
+            if (td->cursor.type != TOKEN_LIT) {
               return 0;
             }
             internal_next_update(TOKEN_SYMBOL);
-            value_line = td.cursor.line_no;
+            value_line = td->cursor.line_no;
             seen_any = 1;
             continue;
 
           case MISC_INCDEC:
             if (!value_line) {
               // ok, attaches to upcoming
-            } else if (td.cursor.line_no != value_line) {
+            } else if (td->cursor.line_no != value_line) {
               // on new line, not attached to previous
               return 0;
             }
@@ -602,7 +602,7 @@ static int consume_optional_expr(int context) {
 static int consume_expr_compound(int context) {
   for (;;) {
     _check(consume_optional_expr(context));
-    if (td.cursor.hash != MISC_COMMA) {
+    if (td->cursor.hash != MISC_COMMA) {
       break;
     }
     internal_next();
@@ -611,13 +611,13 @@ static int consume_expr_compound(int context) {
 }
 
 static int consume_expr_group(int context) {
-  int start = td.cursor.type;
-  switch (td.cursor.type) {
+  int start = td->cursor.type;
+  switch (td->cursor.type) {
     case TOKEN_STRING:
       // special-case strings
       internal_next();
       for (;;) {
-        if (td.cursor.type != TOKEN_T_BRACE) {
+        if (td->cursor.type != TOKEN_T_BRACE) {
           return 0;
         }
         _check(consume_expr_group(context));
@@ -641,14 +641,14 @@ static int consume_expr_group(int context) {
     _check(consume_expr_compound(context));
 
     // nb. not really good practice, but handles for-loop-likes
-    if (td.cursor.type != TOKEN_SEMICOLON) {
+    if (td->cursor.type != TOKEN_SEMICOLON) {
       break;
     }
 
     internal_next();
   }
 
-  if (td.cursor.type != TOKEN_CLOSE) {
+  if (td->cursor.type != TOKEN_CLOSE) {
     debugf("expected close after expr group\n");
     return ERROR__UNEXPECTED;
   }
@@ -657,17 +657,17 @@ static int consume_expr_group(int context) {
 }
 
 static int consume_class(int context) {
-  if (td.cursor.hash != LIT_CLASS) {
+  if (td->cursor.hash != LIT_CLASS) {
     debugf("expected class keyword\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
 
-  if (td.cursor.type == TOKEN_LIT) {
-    if (td.cursor.hash != LIT_EXTENDS) {
+  if (td->cursor.type == TOKEN_LIT) {
+    if (td->cursor.hash != LIT_EXTENDS) {
       internal_next_update(TOKEN_SYMBOL);  // nb. should ban reserved words
     }
-    if (td.cursor.hash == LIT_EXTENDS) {
+    if (td->cursor.hash == LIT_EXTENDS) {
       internal_next_update(TOKEN_KEYWORD);
 
       // nb. something must be here (but if it's not, that's an error, as we expect a '{' following)
@@ -679,18 +679,18 @@ static int consume_class(int context) {
 }
 
 static int consume_statement(int context) {
-  switch (td.cursor.type) {
+  switch (td->cursor.type) {
     case TOKEN_EOF:
       return 0;
 
     case TOKEN_BRACE:
       internal_next();  // consume brace, get next
 
-      while (td.cursor.type != TOKEN_CLOSE) {
+      while (td->cursor.type != TOKEN_CLOSE) {
         int ret = consume_statement(context);
         if (ret != 0) {
           return ret;
-        } else if (td.cursor.type == TOKEN_EOF) {
+        } else if (td->cursor.type == TOKEN_EOF) {
           return ERROR__STACK;  // safety otherwise we won't leave for EOF
         }
       }
@@ -703,10 +703,10 @@ static int consume_statement(int context) {
       return 0;
 
     case TOKEN_LIT:
-      switch (td.cursor.hash) {
+      switch (td->cursor.hash) {
         case LIT_DEFAULT:
           internal_next_update(TOKEN_KEYWORD);
-          if (td.cursor.type != TOKEN_COLON) {
+          if (td->cursor.type != TOKEN_COLON) {
             debugf("no : after default\n");
             return ERROR__UNEXPECTED;
           }
@@ -719,7 +719,7 @@ static int consume_statement(int context) {
           _check(consume_optional_expr(context));
 
           // after expr, expect colon
-          if (td.cursor.type != TOKEN_COLON) {
+          if (td->cursor.type != TOKEN_COLON) {
             debugf("no : after case\n");
             return ERROR__UNEXPECTED;
           }
@@ -728,7 +728,7 @@ static int consume_statement(int context) {
 
         case LIT_ASYNC: {
           int peek_type = prsr_peek();
-          if (peek_type == TOKEN_LIT && td.peek.hash == LIT_FUNCTION) {
+          if (peek_type == TOKEN_LIT && td->peek.hash == LIT_FUNCTION) {
             // only match "async function", as others are expr (e.g. "async () => {}")
             return consume_function(context);
           }
@@ -736,7 +736,7 @@ static int consume_statement(int context) {
         }
       }
 
-      if (!(td.cursor.hash & _MASK_MASQUERADE) && prsr_peek() == TOKEN_COLON) {
+      if (!(td->cursor.hash & _MASK_MASQUERADE) && prsr_peek() == TOKEN_COLON) {
         // nb. "await:" is invalid in async functions, but it's nonsensical anyway
         internal_next_update(TOKEN_LABEL);
         internal_next();  // consume TOKEN_COLON
@@ -747,20 +747,20 @@ static int consume_statement(int context) {
   }
 
   // match "if", "catch" etc
-  if (td.cursor.hash & _MASK_CONTROL) {
-    int control_hash = td.cursor.hash;
-    td.cursor.type = TOKEN_KEYWORD;
+  if (td->cursor.hash & _MASK_CONTROL) {
+    int control_hash = td->cursor.hash;
+    td->cursor.type = TOKEN_KEYWORD;
     internal_next();
 
     // match "for" and "for await"
     if (control_hash == LIT_FOR) {
-      if (td.cursor.hash == LIT_AWAIT) {
-        td.cursor.type = TOKEN_KEYWORD;
+      if (td->cursor.hash == LIT_AWAIT) {
+        td->cursor.type = TOKEN_KEYWORD;
         internal_next();
       }
     }
 
-    if (td.cursor.type == TOKEN_PAREN) {
+    if (td->cursor.type == TOKEN_PAREN) {
       _check(consume_expr_group(context));
     }
     // TODO: we could remove the following since we're not generating an AST.
@@ -770,17 +770,17 @@ static int consume_statement(int context) {
     // special-case trailing "while(...)" for a 'do-while'
     if (control_hash == LIT_DO) {
       // TODO: in case the statement hasn't closed properly
-      if (td.cursor.type == TOKEN_SEMICOLON) {
+      if (td->cursor.type == TOKEN_SEMICOLON) {
         internal_next();
       }
 
-      if (td.cursor.hash != LIT_WHILE) {
+      if (td->cursor.hash != LIT_WHILE) {
         debugf("could not find while of do-while\n");
         return ERROR__UNEXPECTED;
       }
       internal_next_update(TOKEN_KEYWORD);
 
-      if (td.cursor.type != TOKEN_PAREN) {
+      if (td->cursor.type != TOKEN_PAREN) {
         debugf("could not find do-while parens\n");
         return ERROR__UNEXPECTED;
       }
@@ -791,14 +791,14 @@ static int consume_statement(int context) {
     return 0;
   }
 
-  switch (td.cursor.hash) {
+  switch (td->cursor.hash) {
     case LIT_RETURN:
     case LIT_THROW: {
-      int line_no = td.cursor.line_no;
+      int line_no = td->cursor.line_no;
       internal_next_update(TOKEN_KEYWORD);
 
       // "throw\n" is actually invalid, but we can't do anything about it
-      if (line_no != td.cursor.line_no) {
+      if (line_no != td->cursor.line_no) {
         // TODO: could we detect "return" + expr and warn?
         return 0;
       }
@@ -808,7 +808,7 @@ static int consume_statement(int context) {
 
     case LIT_IMPORT: {
       prsr_peek();
-      if (td.peek.type == TOKEN_PAREN || td.peek.hash == MISC_DOT) {
+      if (td->peek.type == TOKEN_PAREN || td->peek.hash == MISC_DOT) {
         break;  // treat as expr
       }
       return consume_import(context);
@@ -824,10 +824,10 @@ static int consume_statement(int context) {
       return consume_function(context);
 
     case LIT_DEBUGGER: {
-      int line_no = td.cursor.line_no;
+      int line_no = td->cursor.line_no;
       internal_next_update(TOKEN_KEYWORD);
 
-      if (line_no != td.cursor.line_no) {
+      if (line_no != td->cursor.line_no) {
         return 0;
       }
 
@@ -837,16 +837,16 @@ static int consume_statement(int context) {
 
     case LIT_CONTINUE:
     case LIT_BREAK: {
-      int line_no = td.cursor.line_no;
+      int line_no = td->cursor.line_no;
       internal_next_update(TOKEN_KEYWORD);
-      if (line_no != td.cursor.line_no) {
+      if (line_no != td->cursor.line_no) {
         return 0;
       }
 
       // "break foo"
-      if (td.cursor.type == TOKEN_LIT) {
+      if (td->cursor.type == TOKEN_LIT) {
         internal_next_update(TOKEN_LABEL);
-        if (line_no != td.cursor.line_no) {
+        if (line_no != td->cursor.line_no) {
           return 0;
         }
       }
@@ -865,28 +865,28 @@ token *modp_init(char *p, int _context) {
 
   if (p[0] == '#' && p[1] == '!') {
     // special-case hashbang opener
-    td.cursor.type = TOKEN_COMMENT;
-    td.cursor.len = strline(p);
-    td.cursor.line_no = 1;
+    td->cursor.type = TOKEN_COMMENT;
+    td->cursor.len = strline(p);
+    td->cursor.line_no = 1;
   } else {
     // n.b. it's possible but unlikely for this to fail (e.g. opens with "{")
     prsr_next();
   }
 
-  return &(td.cursor);
+  return &(td->cursor);
 }
 
 int modp_run() {
-  char *head = td.cursor.p;
+  char *head = td->cursor.p;
 
-  while (td.cursor.type == TOKEN_COMMENT) {
+  while (td->cursor.type == TOKEN_COMMENT) {
     modp_callback(0);
     prsr_next();
   }
   _check(consume_statement(top_context));
 
-  int len = td.cursor.p - head;
-  if (len == 0 && td.cursor.type != TOKEN_EOF) {
+  int len = td->cursor.p - head;
+  if (len == 0 && td->cursor.type != TOKEN_EOF) {
     debugf("expr did not get consumed\n");
     return ERROR__UNEXPECTED;
   }
