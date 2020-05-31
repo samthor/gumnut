@@ -1,4 +1,4 @@
-// Generated on Tue May 26 2020 23:01:50 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Sun May 31 2020 14:04:19 GMT+1000 (Australian Eastern Standard Time)
 
 export const _KEYWORD = 1;
 export const _STRICT_KEYWORD = 2;
@@ -68,13 +68,11 @@ export const YIELD = 782180363;
 export const $ARROW = 333946880;
 export const $BITNOT = 135249920;
 export const $CHAIN = 317186048;
-export const $COLON = 134692864;
 export const $COMMA = 134578176;
 export const $DOT = 134594560;
 export const $EQUALS = 134717440;
 export const $INCDEC = 315973632;
 export const $NOT = 134488064;
-export const $RARRAY = 134979584;
 export const $SPREAD = 451264512;
 export const $STAR = 134561792;
 

@@ -191,7 +191,7 @@ static void eat_token(token *t, int *line_no) {
       _ret(1, TOKEN_TERNARY);
 
     case ':':
-      _reth(1, TOKEN_COLON, MISC_COLON);  // nb. might change to TOKEN_CLOSE in parent
+      _ret(1, TOKEN_COLON);
 
     case ',':
       _reth(1, TOKEN_OP, MISC_COMMA);
@@ -206,8 +206,6 @@ static void eat_token(token *t, int *line_no) {
       _ret(1, TOKEN_ARRAY);
 
     case ']':
-      _reth(1, TOKEN_CLOSE, MISC_RARRAY);
-
     case ')':
     case '}':
       _ret(1, TOKEN_CLOSE);

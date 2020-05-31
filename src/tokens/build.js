@@ -60,8 +60,6 @@ const extraDefines = {
   COMMA: ',',
   SPREAD: '...',
   ARROW: '=>',
-  COLON: ':',
-  RARRAY: ']',
   DOT: '.',
   CHAIN: '?.',
   STAR: '*',

@@ -550,7 +550,7 @@ static int consume_optional_expr(int context) {
 
           case MISC_NOT:
           case MISC_BITNOT:
-            // TODO: "await, new, etc" fall into this bucket?
+            // nb. this matches _MASK_UNARY_OP above
             if (seen_any && value_line) {
               // explicitly only takes right arg, so e.g.:
               //   "var x = 123 !foo"

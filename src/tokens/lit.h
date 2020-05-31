@@ -1,4 +1,4 @@
-// Generated on Tue May 26 2020 23:01:50 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Sun May 31 2020 14:04:19 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -71,13 +71,11 @@
 #define MISC_ARROW       333946880  // =>
 #define MISC_BITNOT      135249920  // ~
 #define MISC_CHAIN       317186048  // ?.
-#define MISC_COLON       134692864  // :
 #define MISC_COMMA       134578176  // ,
 #define MISC_DOT         134594560  // .
 #define MISC_EQUALS      134717440  // =
 #define MISC_INCDEC      315973632  // +-
 #define MISC_NOT         134488064  // !
-#define MISC_RARRAY      134979584  // ]
 #define MISC_SPREAD      451264512  // ...
 #define MISC_STAR        134561792  // *
 
