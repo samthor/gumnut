@@ -22,8 +22,339 @@
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
-// global
+#define _LOOKUP__EOF      0
+#define _LOOKUP__OP_1     1
+#define _LOOKUP__OP_2     2
+#define _LOOKUP__OP_3     3
+#define _LOOKUP__SLASH    4
+#define _LOOKUP__DOT      5
+#define _LOOKUP__Q        6
+#define _LOOKUP__COMMA    7   // token with MISC_COMMA
+#define _LOOKUP__NEWLINE  8
+#define _LOOKUP__SPACE    9
+#define _LOOKUP__STRING   10  // " or '
+#define _LOOKUP__TEMPLATE 11  // `
+#define _LOOKUP__LIT      12  // could be a hash
+#define _LOOKUP__SYMBOL   13  // always symbol, never hashed
+#define _LOOKUP__TOKEN    14  // fixed single-char token
+#define _LOOKUP__NUMBER   15
+
+static char lookup_symbol[256] = {
+// 0-127
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 1, 0, 0, 0,  // just $
+  0, 0, 0, 0, 0, 0, 0, 0,
+  1, 1, 1, 1, 1, 1, 1, 1,  // 0-7
+  1, 1, 0, 0, 0, 0, 0, 0,  // 8-9
+  0, 1, 1, 1, 1, 1, 1, 1,  // A-G
+  1, 1, 1, 1, 1, 1, 1, 1,  // H-O
+  1, 1, 1, 1, 1, 1, 1, 1,  // P-W
+  1, 1, 1, 0, 2, 0, 0, 1,  // X-Z, \ (special), _
+  0, 1, 1, 1, 1, 1, 1, 1,  // a-g
+  1, 1, 1, 1, 1, 1, 1, 1,  // h-o
+  1, 1, 1, 1, 1, 1, 1, 1,  // p-w
+  1, 1, 1, 0, 0, 0, 0, 0,  // x-z
+
+// 128-255
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0,
+};
+
+typedef struct {
+  int lookup;
+  int type;
+} lookup_op;
+
+static lookup_op lookup[256] = {
+  {_LOOKUP__EOF, 0},  // EOF
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__SPACE, 0},  // \t (9)
+  {_LOOKUP__NEWLINE, 0},  // \n (10)
+  {_LOOKUP__SPACE, 0},
+  {_LOOKUP__SPACE, 0},
+  {_LOOKUP__SPACE, 0},  // \r (13)
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},  // 16
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__EOF, 0},
+  {_LOOKUP__SPACE, 0},  // space (32)
+  {_LOOKUP__OP_1, 0},  // ! (33)
+  {_LOOKUP__STRING, 0},  // " (34)
+  {_LOOKUP__SYMBOL, 0},  // # (35)
+  {_LOOKUP__SYMBOL, 0},  // $ (36)
+  {_LOOKUP__OP_1, 0},  // % (37)
+  {_LOOKUP__OP_1, 0},  // & (38)
+  {_LOOKUP__STRING, 0},  // ' (39)
+  {_LOOKUP__TOKEN, TOKEN_PAREN},  // ( (40)
+  {_LOOKUP__TOKEN, TOKEN_CLOSE},  // ) (41)
+  {_LOOKUP__OP_2, 0},  // * (42)
+  {_LOOKUP__OP_1, 0},  // + (43)
+  {_LOOKUP__COMMA, 0},  // , (44)
+  {_LOOKUP__OP_1, 0},  // - (45)
+  {_LOOKUP__DOT, 0},  // . (46)
+  {_LOOKUP__SLASH, 0},  // / (47)
+
+  {_LOOKUP__NUMBER, 0},  // 0 (48)
+  {_LOOKUP__NUMBER, 0},  // 1
+  {_LOOKUP__NUMBER, 0},  // 2
+  {_LOOKUP__NUMBER, 0},  // 3
+  {_LOOKUP__NUMBER, 0},  // 4
+  {_LOOKUP__NUMBER, 0},  // 5
+  {_LOOKUP__NUMBER, 0},  // 6
+  {_LOOKUP__NUMBER, 0},  // 7
+  {_LOOKUP__NUMBER, 0},  // 8
+  {_LOOKUP__NUMBER, 0},  // 9
+
+  {_LOOKUP__TOKEN, TOKEN_COLON},  // : (58)
+  {_LOOKUP__TOKEN, TOKEN_SEMICOLON},  // ; (59)
+  {_LOOKUP__OP_2, 0},  // < (60)
+  {_LOOKUP__OP_1, 0},  // = (61)
+  {_LOOKUP__OP_3, 0},  // > (62)
+  {_LOOKUP__Q, 0},  // ? (63)
+  {_LOOKUP__EOF, 0},  // @ (64)
+
+  {_LOOKUP__SYMBOL, 0}, // A
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},  // Z
+
+  {_LOOKUP__TOKEN, TOKEN_ARRAY},  // [ (91)
+  {_LOOKUP__EOF, 0},  // \ (92)
+  {_LOOKUP__TOKEN, TOKEN_CLOSE},  // ] (93)
+  {_LOOKUP__OP_1, 0},  // ^ (94)
+  {_LOOKUP__SYMBOL, 0},  // _ (95)
+  {_LOOKUP__TEMPLATE, 0},  // ' (96)
+
+  {_LOOKUP__LIT, 0},  // a
+  {_LOOKUP__LIT, 0},  // b
+  {_LOOKUP__LIT, 0},  // c
+  {_LOOKUP__LIT, 0},  // d
+  {_LOOKUP__LIT, 0},  // e
+  {_LOOKUP__LIT, 0},  // f
+  {_LOOKUP__LIT, 0},  // g
+  {_LOOKUP__SYMBOL, 0},  // h
+  {_LOOKUP__LIT, 0},  // i
+  {_LOOKUP__SYMBOL, 0},  // j
+  {_LOOKUP__SYMBOL, 0},  // k
+  {_LOOKUP__LIT, 0},  // l
+  {_LOOKUP__SYMBOL, 0},  // m
+  {_LOOKUP__LIT, 0},  // n
+  {_LOOKUP__LIT, 0},  // o
+  {_LOOKUP__LIT, 0},  // p
+  {_LOOKUP__SYMBOL, 0},  // q
+  {_LOOKUP__LIT, 0},  // r
+  {_LOOKUP__LIT, 0},  // s
+  {_LOOKUP__LIT, 0},  // t
+  {_LOOKUP__LIT, 0},  // u
+  {_LOOKUP__LIT, 0},  // v
+  {_LOOKUP__LIT, 0},  // w
+  {_LOOKUP__LIT, 0},  // y
+  {_LOOKUP__SYMBOL, 0},  // x
+  {_LOOKUP__SYMBOL, 0},  // z
+
+  {_LOOKUP__TOKEN, TOKEN_BRACE},  // { (123)
+  {_LOOKUP__OP_1, 0},  // | (124)
+  {_LOOKUP__TOKEN, TOKEN_CLOSE},  // } (125)
+
+  {_LOOKUP__OP_1, 0},  // ~ (126)
+  {_LOOKUP__EOF, 0},  // 127
+
+// 128-255
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+  {_LOOKUP__SYMBOL, 0},
+};
+
+// global and shared with parser
 tokendef td;
+
+// used by consume_template_string_inner to return to caller
+static int litflag;
 
 // expects pointer to be on start "/*"
 static inline int internal_consume_multiline_comment(char *p, int *line_no) {
@@ -111,65 +442,173 @@ static char *consume_space(char *p, int *line_no) {
   }
 }
 
-static int consume_string(char *p, int *line_no, int *litflag) {
-  int len;
-  char start;
-  if (*litflag) {
-    len = -1;
-    start = '`';
-    *litflag = 0;
-  } else {
-    len = 0;
-    start = p[0];
-  }
+static int consume_basic_string(char *p, int *line_no) {
+  int len = 0;
 
   for (;;) {
     char c = p[++len];
-    if (c == start) {
-      ++len;
-      return len;
+    switch (c) {
+      case '\0':
+        return len;
+
+      case '\n':
+        // nb. not valid here
+        ++(*line_no);
+        break;
+
+      case '\\':
+        c = p[++len];
+        switch (c) {
+          case '\0':
+            return len;
+          case '\n':
+            ++(*line_no);
+        }
+        break;
+
+      case '"':
+      case '\'':
+        if (c == p[0]) {
+          return ++len;
+        }
+        break;
     }
+  }
+}
+
+// p should point to first inner char, not `
+static int consume_template_string_inner(char *p, int *line_no) {
+  int len = 0;
+
+  for (;;) {
+    char c = p[len];
 
     switch (c) {
       case '\0':
         return len;
 
+      case '\n':
+        ++(*line_no);
+        break;
+
       case '$':
-        if (start == '`' && p[len+1] == '{') {
-          *litflag = 1;
+        if (p[len+1] == '{') {
+          litflag = 1;
           return len;
         }
         break;
 
       case '\\':
         c = p[++len];
-        if (c == '\n') {
-          ++(*line_no);  // record if newline (this is valid in all string types)
+        switch (c) {
+          case '\0':
+            return len;
+          case '\n':
+            ++(*line_no);
         }
         break;
 
-      case '\n':
-        // invalid in non-` but not much else we can do
-        ++(*line_no);
-        break;
+      case '`':
+        return ++len;
     }
+
+    ++len;
   }
 
   return len;
 }
 
+// consumes number, assumes first char is valid (dot or digit)
+static int consume_number(char *p) {
+  int len = 1;
+  char c = p[1];
+  for (;;) {
+    if (!(isalnum(c) || c == '.' || c == '_')) {  // letters, dots, etc- misuse is invalid, so eat anyway
+      break;
+    }
+    c = p[++len];
+  }
+  return len;
+}
+
 static void eat_token(token *t, int *line_no) {
 #define _ret(_len, _type) {t->type = _type; t->len = _len; return;};
-#define _reth(_len, _type, _hash) {t->type = _type; t->len = _len; t->hash = _hash; return;};
+#define _reth(_len, _type, _hash) {t->hash = _hash; t->type = _type; t->len = _len; return;};
   char *p = t->p;
   const char start = p[0];
 
-  // simple cases
-  switch (start) {
-    case '\0':
+  lookup_op *op = &lookup[start];
+
+  int len = 1;
+  uint32_t hash = 0;
+
+  switch (op->lookup) {
+    case _LOOKUP__EOF:
+      if (start != 0) {
+        _ret(0, ERROR__UNEXPECTED);
+      }
       _ret(0, TOKEN_EOF);
 
-    case '/':
+    case _LOOKUP__OP_1:
+    case _LOOKUP__OP_2:
+    case _LOOKUP__OP_3: {
+      int allowed = op->lookup;
+      char c = p[len];
+
+      while (len < allowed) {
+        c = p[len];
+        if (c != start) {
+          break;
+        }
+        ++len;
+      }
+
+      if (len == 1) {
+        // simple cases that are hashed
+        switch (start) {
+          case '*':
+            _reth(1, TOKEN_OP, MISC_STAR);
+          case '~':
+            _reth(1, TOKEN_OP, MISC_BITNOT);
+          case '!':
+            if (c != '=') {
+              _reth(1, TOKEN_OP, MISC_NOT);
+            }
+            break;
+        }
+
+        // nb. these are all allowed=1, so len=1 even though we're consuming more
+        if (start == '=' && c == '>') {
+          _reth(2, TOKEN_OP, MISC_ARROW);  // arrow for arrow function
+        } else if (c == start && (c == '+' || c == '-')) {
+          // nb. we don't actually care which one this is
+          _reth(2, TOKEN_OP, MISC_INCDEC);
+        } else if (c == start && (c == '|' || c == '&')) {
+          ++len;  // eat || or &&: but no more
+        } else if (c == '=') {
+          // consume a suffix '=' (or whole ===, !==)
+          c = p[++len];
+          if (c == '=' && (start == '=' || start == '!')) {
+            ++len;
+          }
+        } else if (start == '=') {
+          // match equals specially
+          _reth(1, TOKEN_OP, MISC_EQUALS);
+        }
+      }
+
+      _ret(len, TOKEN_OP);
+    }
+
+    case _LOOKUP__DOT:
+      if (isdigit(p[1])) {
+        _ret(consume_number(p), TOKEN_NUMBER);
+      } else if (p[1] == '.' && p[2] == '.') {
+        _reth(3, TOKEN_OP, MISC_SPREAD);  // '...' operator
+      }
+      _reth(1, TOKEN_OP, MISC_DOT);
+
+    case _LOOKUP__SLASH:
       switch (p[1]) {
         case '/':
           _ret(strline(p), TOKEN_COMMENT);
@@ -178,10 +617,7 @@ static void eat_token(token *t, int *line_no) {
       }
       _ret(1, TOKEN_SLASH);  // ambigious
 
-    case ';':
-      _ret(1, TOKEN_SEMICOLON);
-
-    case '?':
+    case _LOOKUP__Q:
       switch (p[1]) {
         case '.':
           _reth(2, TOKEN_OP, MISC_CHAIN);
@@ -190,176 +626,61 @@ static void eat_token(token *t, int *line_no) {
       }
       _ret(1, TOKEN_TERNARY);
 
-    case ':':
-      _ret(1, TOKEN_COLON);
-
-    case ',':
+    case _LOOKUP__COMMA:
       _reth(1, TOKEN_OP, MISC_COMMA);
 
-    case '{':
-      _ret(1, TOKEN_BRACE);
+    case _LOOKUP__STRING:
+      litflag = 0;
+      _ret(consume_basic_string(p, line_no), TOKEN_STRING);
 
-    case '(':
-      _ret(1, TOKEN_PAREN);
-
-    case '[':
-      _ret(1, TOKEN_ARRAY);
-
-    case ']':
-    case ')':
-    case '}':
-      _ret(1, TOKEN_CLOSE);
-
-    case '\'':
-    case '"':
-    case '`': {
-      int litflag = 0;  // TODO: not used
-      int len = consume_string(p, line_no, &litflag);
-      _ret(len, TOKEN_STRING);
-    }
-  }
-
-  // ops: i.e., anything made up of =<& etc (except '/' and ',', handled above)
-  // note: 'in' and 'instanceof' are ops in most cases, but here they are lit
-  do {
-    char c = start;
-    int len = 0;
-    int allowed;  // how many ops of the same type we can safely consume
-
-    switch (start) {
-      case '=':
-      case '&':
-      case '|':
-      case '^':
-      case '~':
-      case '!':
-      case '%':
-      case '+':
-      case '-':
-        allowed = 1;
-        break;
-
-      case '*':
-      case '<':
-        allowed = 2;
-        break;
-
-      case '>':
-        allowed = 3;
-        break;
-
-      default:
-        goto fallthrough;
+    case _LOOKUP__TEMPLATE: {
+      litflag = 0;
+      _ret(consume_template_string_inner(p + 1, line_no) + 1, TOKEN_STRING);
     }
 
-    while (len < allowed) {
-      c = p[++len];
-      if (c != start) {
-        break;
+    case _LOOKUP__LIT:
+      len = consume_known_lit(p, &hash);
+      // fall-through
+
+    case _LOOKUP__SYMBOL: {
+      char c = p[len];
+      if (!lookup_symbol[c]) {
+        // this checks the symbol after lit (above), or p[1]
+        _reth(len, TOKEN_LIT, hash);
       }
-    }
 
-    if (len == 1) {
-      // simple cases that are hashed
-      switch (start) {
-        case '*':
-          _reth(1, TOKEN_OP, MISC_STAR);
-        case '~':
-          _reth(1, TOKEN_OP, MISC_BITNOT);
-        case '!':
-          if (c != '=') {
-            _reth(1, TOKEN_OP, MISC_NOT);
+      for (;;) {
+        if (c == '\\') {
+          char escape = p[++len];
+          switch (escape) {
+            case '\0':
+              _ret(len, TOKEN_LIT);  // don't escape null
+
+            case 'u':
+              if (p[len + 1] != '{') {
+                break;
+              }
+              // TODO: match \u{1234}
+              _ret(0, ERROR__INTERNAL);
           }
-          break;
-      }
-
-      // nb. these are all allowed=1, so len=1 even though we're consuming more
-      if (start == '=' && c == '>') {
-        _reth(2, TOKEN_OP, MISC_ARROW);  // arrow for arrow function
-      } else if (c == start && (c == '+' || c == '-')) {
-        // nb. we don't actaully care which one this is?
-        _reth(2, TOKEN_OP, MISC_INCDEC);
-      } else if (c == start && (c == '|' || c == '&')) {
-        ++len;  // eat || or &&: but no more
-      } else if (c == '=') {
-        // consume a suffix '=' (or whole ===, !==)
-        c = p[++len];
-        if (c == '=' && (start == '=' || start == '!')) {
-          ++len;
         }
-      } else if (start == '=') {
-        // match equals specially
-        _reth(1, TOKEN_OP, MISC_EQUALS);
-      }
-    }
-
-    _ret(len, TOKEN_OP);
-fallthrough:
-    (void)sizeof(1);
-  } while (0);
-
-  // number: "0", ".01", "0x100"
-  const char next = p[1];
-  if (isdigit(start) || (start == '.' && isdigit(next))) {
-    int len = 1;
-    char c = next;
-    for (;;) {
-      if (!(isalnum(c) || c == '.')) {  // letters, dots, etc- misuse is invalid, so eat anyway
-        break;
-      }
-      c = p[++len];
-    }
-    _ret(len, TOKEN_NUMBER);
-  }
-
-  // dot notation (not a number)
-  if (start == '.') {
-    if (next == '.' && p[2] == '.') {
-      _reth(3, TOKEN_OP, MISC_SPREAD);  // '...' operator
-    }
-    _reth(1, TOKEN_OP, MISC_DOT);  // it's valid to say e.g., "foo . bar", so separate token
-  }
-
-  // literals
-  uint32_t hash = 0;
-  int len;
-  if (start == '#') {
-    len = 1;  // allow # at start of literal, for private vars
-  } else {
-    len = consume_known_lit(p, &hash);
-  }
-  char c = p[len];
-  do {
-    // FIXME: escapes aren't valid in literals, but check whether this matches UTF-8
-    if (c == '\\') {
-      hash = 0;
-      ++len;  // don't care, eat whatever aferwards
-      c = p[++len];
-      if (c != '{') {
-        continue;
-      }
-      while (c && c != '}') {
         c = p[++len];
+
+        // check if we can continue
+        if (!lookup_symbol[c]) {
+          _ret(len, TOKEN_LIT);
+        }
       }
-      ++len;
-      continue;
     }
 
-    // nb. `c < 0` == `((unsigned char) c) > 127`
-    int valid = (len ? isalnum(c) : isalpha(c)) || c == '$' || c == '_' || c < 0;
-    if (!valid) {
-      break;
-    }
-    hash = 0;
-    c = p[++len];
-  } while (c);
+    case _LOOKUP__TOKEN:
+      _ret(1, op->type);
 
-  if (!len) {
-    // found nothing :(
-    _ret(0, -1);
+    case _LOOKUP__NUMBER:
+      _ret(consume_number(p), TOKEN_NUMBER);
   }
 
-  _reth(len, TOKEN_LIT, hash);
+  _ret(0, ERROR__UNEXPECTED);
 #undef _ret
 #undef _reth
 }
@@ -380,10 +701,10 @@ int prsr_next() {
 
       return TOKEN_T_BRACE;
     case FLAG__RESUME_LIT: {
-      int litflag = 1;
+      litflag = 0;
       ++td.cursor.p;  // move past '}' (i.e., previous TOKEN_CLOSE)
       td.cursor.type = TOKEN_STRING;
-      td.cursor.len = consume_string(td.cursor.p, &td.line_no, &litflag);
+      td.cursor.len = consume_template_string_inner(td.cursor.p, &td.line_no);
       td.cursor.hash = 0;
       td.flag = litflag ? FLAG__PENDING_T_BRACE : 0;
       return TOKEN_STRING;
@@ -408,7 +729,7 @@ int prsr_next() {
 
   switch (cursor.type) {
     case TOKEN_STRING:
-      if (p[0] == '`' && (cursor.len == 1 || p[cursor.len - 1] != '`')) {
+      if (litflag) {
         td.flag = FLAG__PENDING_T_BRACE;
       }
       break;
