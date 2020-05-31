@@ -23,5 +23,7 @@
 #define SPECIAL__EXPORT      2
 
 typedef void (*prsr_callback)(int special);
-token *modp_init(char *, int, prsr_callback);
+token *modp_init(char *, int);
 int modp_run();
+
+void modp_callback(int);

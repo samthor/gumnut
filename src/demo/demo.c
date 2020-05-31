@@ -43,16 +43,11 @@ int read_stdin(char **buf) {
   return pos;
 }
 
-typedef struct {
-  int tokens;
-  int asi;
-} demo_context;
-
 static token *out;
-static demo_context context;
+static int tokens = 0;
 
-void render_callback(int special) {
-  ++context.tokens;
+void modp_callback(int special) {
+  ++tokens;
 #ifndef SPEED
   char c = ' ';
   if (out->hash) {
@@ -76,7 +71,7 @@ int main() {
   }
   fprintf(stderr, ">> read %d bytes\n", len);
 
-  out = modp_init(buf, 0, render_callback);
+  out = modp_init(buf, 0);
   int ret;
 
   for (;;) {
@@ -89,6 +84,6 @@ int main() {
   if (ret) {
     fprintf(stderr, "ret=%d\n", ret);
   }
-  fprintf(stderr, ">> %d tokens (%d asi)\n", context.tokens, context.asi);
+  fprintf(stderr, ">> %d tokens\n", tokens);
   return ret;
 }

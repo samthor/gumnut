@@ -80,7 +80,7 @@ export default async function build(modulePromise) {
         throw x;
       },
 
-      _token_callback(special) {
+      _modp_callback(special) {
         handler(special);
       },
     };

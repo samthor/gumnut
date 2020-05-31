@@ -29,7 +29,6 @@
 #endif
 
 
-static prsr_callback callback;  // TODO: calling FP adds about 5%
 static int top_context;
 
 static int consume_statement(int);
@@ -46,20 +45,20 @@ static inline void internal_next_comment() {
     if (out != TOKEN_COMMENT) {
       break;
     }
-    callback(0);
+    modp_callback(0);
   }
 }
 
 // yields previous, places the next useful token in curr, skipping comments
 static void internal_next() {
-  callback(0);
+  modp_callback(0);
   internal_next_comment();
 }
 
 static void internal_next_update(int type) {
   // TODO: we don't care about return type here
   prsr_update(type);
-  callback(0);
+  modp_callback(0);
   internal_next_comment();
 }
 
@@ -74,7 +73,7 @@ static int consume_import_module_special(int special) {
     return 0;
   }
 
-  callback(special);
+  modp_callback(special);
   internal_next_comment();
   return 0;
 }
@@ -850,10 +849,9 @@ static int consume_statement(int context) {
   return consume_expr_compound(context);
 }
 
-token *modp_init(char *p, int _context, prsr_callback _callback) {
+token *modp_init(char *p, int _context) {
   prsr_init_token(p);
   top_context = _context;
-  callback = _callback;
 
   if (p[0] == '#' && p[1] == '!') {
     // special-case hashbang opener
@@ -872,7 +870,7 @@ int modp_run() {
   char *head = td.cursor.p;
 
   while (td.cursor.type == TOKEN_COMMENT) {
-    callback(0);
+    modp_callback(0);
     prsr_next();
   }
   _check(consume_statement(top_context));
