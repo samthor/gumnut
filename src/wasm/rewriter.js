@@ -48,6 +48,7 @@ export default async function rewriter(resolve, pages = 128) {
     let buffer = null;
     const prepare = (b) => {
       buffer = b;  // store for later
+
       const read = fs.readSync(fd, buffer, 0, stat.size, 0);
       if (read !== stat.size) {
         throw new Error(`did not read all bytes at once: ${read}/${stat.size}`);

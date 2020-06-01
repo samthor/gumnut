@@ -30,7 +30,7 @@ const ERRORS = Object.freeze({
   [ERROR__INTERNAL]: 'internal',
 });
 
-async function initialize(modulePromise, callback, pages = 128) {
+async function initialize(modulePromise, callback, pages) {
   const memory = new WebAssembly.Memory({initial: pages, maximum: pages});
   const table = new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'});
   const view = new Uint8Array(memory.buffer);
@@ -60,7 +60,7 @@ async function initialize(modulePromise, callback, pages = 128) {
   return {instance, view};
 }
 
-export default async function build(modulePromise) {
+export default async function build(modulePromise, pages = 128) {
   const writeAt = 1024;
   let handler = null;
 
@@ -84,7 +84,7 @@ export default async function build(modulePromise) {
         handler(special);
       },
     };
-  });
+  }, pages);
 
   const {exports} = instance;
 
@@ -94,8 +94,9 @@ export default async function build(modulePromise) {
    * @param {function(number, number, number, number, number): void} callback
    */
   const run = (size, prepare, callback) => {
-    if (size >= view.length - (STACK_PAGES * 65536) - writeAt - 1) {
-      throw new Error(`can't parse huge file: ${size}`);
+    const avail = view.length - (STACK_PAGES * 65536) - writeAt - 1;
+    if (size >= avail) {
+      throw new Error(`can't parse huge file: ${size} (had ${avail})`);
     }
 
     const inner = view.subarray(writeAt, writeAt + size);
