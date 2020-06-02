@@ -125,7 +125,7 @@ int consume_export(int context) {
 
     case LIT_ASYNC:
       prsr_peek();
-      if (td.peek.hash != LIT_FUNCTION) {
+      if (!prsr_peek_is_function()) {
         break;
       }
       // fall-through
@@ -208,7 +208,7 @@ int consume_async_expr(int context) {
   int peek_type = prsr_peek();
   switch (peek_type) {
     case TOKEN_LIT:
-      if (td.peek.hash == LIT_FUNCTION) {
+      if (prsr_peek_is_function()) {
         return consume_function(context);
       }
 
@@ -234,7 +234,7 @@ int consume_async_expr(int context) {
       break;
 
     case TOKEN_OP:
-      if (td.peek.hash == MISC_ARROW) {
+      if (td.peek_at[0] == '=' && td.peek_at[1] == '>') {
         internal_next_update(TOKEN_KEYWORD);
         // nb. allow "async =>" even though broken
         break;
@@ -735,8 +735,7 @@ static int consume_statement(int context) {
           return 0;
 
         case LIT_ASYNC: {
-          int peek_type = prsr_peek();
-          if (peek_type == TOKEN_LIT && td.peek.hash == LIT_FUNCTION) {
+          if (prsr_peek() == TOKEN_LIT && prsr_peek_is_function()) {
             // only match "async function", as others are expr (e.g. "async () => {}")
             return consume_function(context);
           }
@@ -815,8 +814,9 @@ static int consume_statement(int context) {
     }
 
     case LIT_IMPORT: {
-      prsr_peek();
-      if (td.peek.type == TOKEN_PAREN || td.peek.hash == MISC_DOT) {
+      // if this is "import(" or "import.", treat as expr
+      int type = prsr_peek();
+      if (type == TOKEN_PAREN || (type == TOKEN_OP && td.peek_at[0] == '.' && td.peek_at[1] != '.')) {
         break;  // treat as expr
       }
       return consume_import(context);
@@ -871,12 +871,7 @@ token *modp_init(char *p, int _context) {
   prsr_init_token(p);
   top_context = _context;
 
-  if (p[0] == '#' && p[1] == '!') {
-    // special-case hashbang opener
-    td.cursor.type = TOKEN_COMMENT;
-    td.cursor.len = strline(p);
-    td.cursor.line_no = 1;
-  } else {
+  if (td.cursor.type != TOKEN_COMMENT) {
     // n.b. it's possible but unlikely for this to fail (e.g. opens with "}")
     prsr_next();
   }

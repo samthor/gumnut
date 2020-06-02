@@ -356,9 +356,11 @@ static int litflag;
 
 // expects pointer to be on start "/*"
 static inline int internal_consume_multiline_comment(char *p, int *line_no) {
+#ifdef DEBUG
   if (p[0] != '/' || p[1] != '*') {
     return 0;
   }
+#endif
   const char *start = p;
   p += 2;
 
@@ -427,7 +429,7 @@ static int consume_slash_regexp(char *p) {
   }
 }
 
-static char *consume_space(char *p, int *line_no) {
+static char *walk_space(char *p, int *line_no) {
   char c;
   for (;;) {
     c = *p;
@@ -529,7 +531,66 @@ static int consume_number(char *p) {
   return len;
 }
 
-static void eat_token(token *t, int *line_no) {
+static inline int eat_token_peek() {
+  int line_no = 0;
+  int op = lookup_op[td.peek_at[0]];
+
+  switch (op) {
+    case _LOOKUP__SPACE:
+    case _LOOKUP__NEWLINE:
+      return ERROR__UNEXPECTED;
+
+    case _LOOKUP__EOF:
+      return TOKEN_EOF;
+
+    case _LOOKUP__OP_1:
+    case _LOOKUP__OP_2:
+    case _LOOKUP__OP_3:
+      return TOKEN_OP;
+
+    case _LOOKUP__DOT:
+      if (isdigit(td.peek_at[1])) {
+        return TOKEN_NUMBER;
+      }
+      return TOKEN_OP;
+
+    case _LOOKUP__SLASH:
+      // nb. this is sadly always slow
+      // FIXME not working
+      switch (td.peek_at[1]) {
+        case '/':
+        case '*':
+          return TOKEN_COMMENT;
+      }
+      return TOKEN_SLASH;
+
+    case _LOOKUP__Q:
+      switch (td.peek_at[1]) {
+        case '.':
+        case '?':
+          return TOKEN_OP;
+      }
+      return TOKEN_TERNARY;
+
+    case _LOOKUP__COMMA:
+      return TOKEN_OP;
+
+    case _LOOKUP__STRING:
+    case _LOOKUP__TEMPLATE:
+      return TOKEN_STRING;
+
+    case _LOOKUP__LIT:
+    case _LOOKUP__SYMBOL:
+      return TOKEN_LIT;
+
+    case _LOOKUP__NUMBER:
+      return TOKEN_NUMBER;
+  }
+
+  return op & ~(_LOOKUP__TOKEN);
+}
+
+static inline void eat_token(token *t, int *line_no) {
 #define _ret(_len, _type) {t->type = _type; t->len = _len; return;};
 #define _reth(_len, _type, _hash) {t->hash = _hash; t->type = _type; t->len = _len; return;};
   char *p = t->p;
@@ -681,11 +742,13 @@ static void eat_token(token *t, int *line_no) {
 int prsr_next() {
   switch (td.flag) {
     case FLAG__PENDING_T_BRACE:
-      td.cursor.p += td.cursor.len;  // move past string
+      td.cursor.p = td.resume;
       td.cursor.type = TOKEN_T_BRACE;
       td.cursor.len = 2;
       td.cursor.hash = 0;
+
       td.flag = 0;
+      td.resume = walk_space(td.resume + 2, &(td.line_no));  // step over ${ and space
 
       if (td.depth == __STACK_SIZE - 1) {
         return ERROR__STACK;
@@ -697,9 +760,17 @@ int prsr_next() {
       litflag = 0;
       ++td.cursor.p;  // move past '}' (i.e., previous TOKEN_CLOSE)
       td.cursor.type = TOKEN_STRING;
-      td.cursor.len = consume_template_string_inner(td.cursor.p, &td.line_no);
+      td.cursor.len = consume_template_string_inner(td.cursor.p, &(td.line_no));
       td.cursor.hash = 0;
-      td.flag = litflag ? FLAG__PENDING_T_BRACE : 0;
+
+      if (litflag) {
+        td.flag = FLAG__PENDING_T_BRACE;
+        td.resume += td.cursor.len + 1;  // length of string plus }
+      } else {
+        td.flag = 0;
+        td.resume = walk_space(td.resume + td.cursor.len + 1, &(td.line_no));
+      }
+
       return TOKEN_STRING;
     }
   }
@@ -713,20 +784,19 @@ int prsr_next() {
   cursor.hash = 0;
 
   // consume space chars after previous, until next token
-  char *p = consume_space(td.cursor.p + td.cursor.len, &td.line_no);
-  cursor.p = p;
+  cursor.p = td.resume;
   cursor.line_no = td.line_no;
 
   eat_token(&cursor, &(td.line_no));
+  if (litflag) {
+    td.cursor = cursor;
+    td.resume = cursor.p + cursor.len;
+    return cursor.type;
+  }
+
   int ret = cursor.type;
 
   switch (cursor.type) {
-    case TOKEN_STRING:
-      if (litflag) {
-        td.flag = FLAG__PENDING_T_BRACE;
-      }
-      break;
-
     case TOKEN_COLON:
       // inside ternary stack, close it
       if (td.depth && td.stack[td.depth - 1] == TOKEN_TERNARY) {
@@ -754,12 +824,16 @@ int prsr_next() {
       uint8_t type = td.stack[--td.depth];
       if (type == TOKEN_T_BRACE) {
         td.flag |= FLAG__RESUME_LIT;
+        td.cursor = cursor;
+        td.resume = cursor.p + cursor.len;
+        return ret;
       }
       break;
   }
 
   // this doesn't clear peek, so it's still valid (should be ~= this token)
   td.cursor = cursor;
+  td.resume = walk_space(cursor.p + cursor.len, &(td.line_no));
   return ret;
 }
 
@@ -767,10 +841,20 @@ void prsr_init_token(char *p) {
   bzero(&td, sizeof(td));
   td.line_no = 1;
 
-  td.cursor.type = TOKEN_UNKNOWN;
-  td.cursor.p = p;
-  td.peek.type = TOKEN_UNKNOWN;
-  td.peek.p = p;
+  if (p[0] == '#' && p[1] == '!') {
+    // special-case hashbang opener
+    td.cursor.p = p;
+    td.cursor.type = TOKEN_COMMENT;
+    td.cursor.len = strline(p);
+    td.cursor.line_no = 1;
+    p += td.cursor.len;
+  } else {
+    td.cursor.p = p;
+    td.cursor.type = TOKEN_UNKNOWN;
+  }
+
+  td.resume = walk_space(p, &(td.line_no));
+  td.peek_at = td.resume;
 }
 
 int prsr_update(int type) {
@@ -802,30 +886,45 @@ int prsr_update(int type) {
 }
 
 int prsr_peek() {
-  if (td.peek.p > td.cursor.p) {
-    return td.peek.type;
-  }
-
-  td.peek.p = td.cursor.p + td.cursor.len;
-  td.peek.hash = 0;
-
   // nb. we never care about template strings in peek
   // cursor can be zero at EOF
   if (td.flag || td.cursor.len == 0) {
-    td.peek.type = TOKEN_UNKNOWN;
+    td.peek_at = td.cursor.p;
     return TOKEN_UNKNOWN;
   }
 
+  td.peek_at = td.cursor.p + td.cursor.len;
+
   static int line_no = 0;  // never used, just needed as valid ptr
   for (;;) {
-    td.peek.p = consume_space(td.peek.p, &(line_no));
-    eat_token(&(td.peek), &(line_no));
-
-    int type = td.peek.type;
+    td.peek_at = walk_space(td.peek_at, &(line_no));
+    int type = eat_token_peek();
     if (type != TOKEN_COMMENT) {
       return type;
     }
 
-    td.peek.p += td.peek.len;
+    // consuming comments is slow, but we hope (?) that this doesn't happen often
+    int len;
+    if (td.peek_at[1] == '/') {
+      len = strline(td.peek_at);
+    } else {
+      len = internal_consume_multiline_comment(td.peek_at, &line_no);
+    }
+    td.peek_at += len;
   }
+}
+
+int prsr_peek_is_function() {
+  char *p = td.peek_at;
+  return (
+    p[0] == 'f' &&
+    p[1] == 'u' &&
+    p[2] == 'n' &&
+    p[3] == 'c' &&
+    p[4] == 't' &&
+    p[5] == 'i' &&
+    p[6] == 'o' &&
+    p[7] == 'n' &&
+    !lookup_symbol[p[8]]
+  );
 }
