@@ -351,11 +351,8 @@ static char lookup_op[256] = {
 // global and shared with parser
 tokendef td;
 
-// used by consume_template_string_inner to return to caller
-static int litflag;
-
 // expects pointer to be on start "/*"
-static inline int internal_consume_multiline_comment(char *p, int *line_no) {
+static int internal_consume_multiline_comment(char *p, int *line_no) {
 #ifdef DEBUG
   if (p[0] != '/' || p[1] != '*') {
     return 0;
@@ -391,7 +388,7 @@ static inline int consume_slash_op(char *p) {
   return 1;
 }
 
-static int consume_slash_regexp(char *p) {
+static inline int consume_slash_regexp(char *p) {
   char *start = p;
   int is_charexpr = 0;
 
@@ -442,7 +439,7 @@ static char *walk_space(char *p, int *line_no) {
   }
 }
 
-static int consume_basic_string(char *p, int *line_no) {
+static inline int consume_basic_string(char *p, int *line_no) {
   int len = 0;
 
   for (;;) {
@@ -493,7 +490,7 @@ static int consume_template_string_inner(char *p, int *line_no) {
 
       case '$':
         if (p[len+1] == '{') {
-          litflag = 1;
+          td.flag = FLAG__PENDING_T_BRACE;
           return len;
         }
         break;
@@ -672,7 +669,7 @@ static inline void eat_token(token *t, int *line_no) {
         case '*':
           _ret(internal_consume_multiline_comment(p, line_no), TOKEN_COMMENT);
       }
-      _ret(1, TOKEN_SLASH);  // ambigious
+      _ret(0, TOKEN_SLASH);  // ambigious
 
     case _LOOKUP__Q:
       switch (p[1]) {
@@ -687,13 +684,10 @@ static inline void eat_token(token *t, int *line_no) {
       _reth(1, TOKEN_OP, MISC_COMMA);
 
     case _LOOKUP__STRING:
-      litflag = 0;
       _ret(consume_basic_string(p, line_no), TOKEN_STRING);
 
-    case _LOOKUP__TEMPLATE: {
-      litflag = 0;
+    case _LOOKUP__TEMPLATE:
       _ret(consume_template_string_inner(p + 1, line_no) + 1, TOKEN_STRING);
-    }
 
     case _LOOKUP__LIT:
       len = consume_known_lit(p, &hash);
@@ -742,13 +736,14 @@ static inline void eat_token(token *t, int *line_no) {
 int prsr_next() {
   switch (td.flag) {
     case FLAG__PENDING_T_BRACE:
-      td.cursor.p = td.resume;
+      td.flag = 0;
+
+      td.cursor.p += td.cursor.len;  // move past string
       td.cursor.type = TOKEN_T_BRACE;
       td.cursor.len = 2;
       td.cursor.hash = 0;
 
-      td.flag = 0;
-      td.resume = walk_space(td.resume + 2, &(td.line_no));  // step over ${ and space
+      td.resume = walk_space(td.cursor.p + 2, &(td.line_no));  // step over ${ and space
 
       if (td.depth == __STACK_SIZE - 1) {
         return ERROR__STACK;
@@ -757,18 +752,17 @@ int prsr_next() {
 
       return TOKEN_T_BRACE;
     case FLAG__RESUME_LIT: {
-      litflag = 0;
+      td.flag = 0;
+
       ++td.cursor.p;  // move past '}' (i.e., previous TOKEN_CLOSE)
       td.cursor.type = TOKEN_STRING;
       td.cursor.len = consume_template_string_inner(td.cursor.p, &(td.line_no));
       td.cursor.hash = 0;
 
-      if (litflag) {
-        td.flag = FLAG__PENDING_T_BRACE;
-        td.resume += td.cursor.len + 1;  // length of string plus }
-      } else {
-        td.flag = 0;
-        td.resume = walk_space(td.resume + td.cursor.len + 1, &(td.line_no));
+      td.resume = td.cursor.p + td.cursor.len;
+      if (!td.flag) {
+        // end of real string, walk over spaces
+        td.resume = walk_space(td.resume, &(td.line_no));
       }
 
       return TOKEN_STRING;
@@ -788,12 +782,6 @@ int prsr_next() {
   cursor.line_no = td.line_no;
 
   eat_token(&cursor, &(td.line_no));
-  if (litflag) {
-    td.cursor = cursor;
-    td.resume = cursor.p + cursor.len;
-    return cursor.type;
-  }
-
   int ret = cursor.type;
 
   switch (cursor.type) {
@@ -824,16 +812,17 @@ int prsr_next() {
       uint8_t type = td.stack[--td.depth];
       if (type == TOKEN_T_BRACE) {
         td.flag |= FLAG__RESUME_LIT;
-        td.cursor = cursor;
-        td.resume = cursor.p + cursor.len;
-        return ret;
       }
       break;
   }
 
+  td.resume = cursor.p + cursor.len;
+  if (!td.flag && cursor.len) {
+    td.resume = walk_space(td.resume, &(td.line_no));
+  }
+
   // this doesn't clear peek, so it's still valid (should be ~= this token)
   td.cursor = cursor;
-  td.resume = walk_space(cursor.p + cursor.len, &(td.line_no));
   return ret;
 }
 
@@ -870,6 +859,8 @@ int prsr_update(int type) {
         default:
           return ERROR__INTERNAL;
       }
+
+      td.resume = walk_space(td.cursor.p + td.cursor.len, &(td.line_no));
       td.cursor.type = type;
       return 0;
 
@@ -893,11 +884,10 @@ int prsr_peek() {
     return TOKEN_UNKNOWN;
   }
 
-  td.peek_at = td.cursor.p + td.cursor.len;
+  td.peek_at = td.resume;
 
   static int line_no = 0;  // never used, just needed as valid ptr
   for (;;) {
-    td.peek_at = walk_space(td.peek_at, &(line_no));
     int type = eat_token_peek();
     if (type != TOKEN_COMMENT) {
       return type;
@@ -910,7 +900,7 @@ int prsr_peek() {
     } else {
       len = internal_consume_multiline_comment(td.peek_at, &line_no);
     }
-    td.peek_at += len;
+    td.peek_at = walk_space(td.peek_at + len, &line_no);
   }
 }
 
