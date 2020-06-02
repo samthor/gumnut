@@ -53,10 +53,8 @@ void modp_callback(int special) {
   if (out->hash) {
     c = '#';  // has a hash
   } else if (special) {
-    if (special == SPECIAL__IMPORT) {
-      c = 'i';
-    } else if (special == SPECIAL__EXPORT) {
-      c = 'e';
+    if (special == SPECIAL__MODULE_PATH) {
+      c = 'm';
     }
   }
   printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);

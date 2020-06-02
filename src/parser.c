@@ -80,10 +80,12 @@ static int consume_import_module_special() {
 }
 
 int consume_import(int context) {
+#ifdef DEBUG
   if (td.cursor.hash != LIT_IMPORT) {
     debugf("missing import keyword\n");
     return ERROR__UNEXPECTED;
   }
+#endif
   internal_next_update(TOKEN_KEYWORD);
 
   if (td.cursor.type != TOKEN_STRING) {
@@ -102,10 +104,12 @@ int consume_import(int context) {
 }
 
 int consume_export(int context) {
+#ifdef DEBUG
   if (td.cursor.hash != LIT_EXPORT) {
     debugf("missing export keyword\n");
     return ERROR__UNEXPECTED;
   }
+#endif
   internal_next_update(TOKEN_KEYWORD);
 
   int is_default = 0;
@@ -194,10 +198,12 @@ int consume_function(int context) {
 
 // consumes something starting with async (might be function)
 int consume_async_expr(int context) {
+#ifdef DEBUG
   if (td.cursor.hash != LIT_ASYNC) {
     debugf("missing 'async' starter\n");
     return ERROR__UNEXPECTED;
   }
+#endif
 
   int peek_type = prsr_peek();
   switch (peek_type) {
@@ -657,10 +663,12 @@ static int consume_expr_group(int context) {
 }
 
 static int consume_class(int context) {
+#ifdef DEBUG
   if (td.cursor.hash != LIT_CLASS) {
     debugf("expected class keyword\n");
     return ERROR__UNEXPECTED;
   }
+#endif
   internal_next_update(TOKEN_KEYWORD);
 
   if (td.cursor.type == TOKEN_LIT) {
@@ -887,7 +895,7 @@ int modp_run() {
 
   int len = td.cursor.p - head;
   if (len == 0 && td.cursor.type != TOKEN_EOF) {
-    debugf("expr did not get consumed\n");
+    debugf("expr did not get consumed, token=%d\n");
     return ERROR__UNEXPECTED;
   }
   return len;
