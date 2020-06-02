@@ -696,21 +696,12 @@ int prsr_next() {
 
       return TOKEN_T_BRACE;
     case FLAG__RESUME_LIT: {
-<<<<<<< HEAD
       litflag = 0;
-      ++td.cursor.p;  // move past '}' (i.e., previous TOKEN_CLOSE)
-      td.cursor.type = TOKEN_STRING;
-      td.cursor.len = consume_template_string_inner(td.cursor.p, &td.line_no);
-      td.cursor.hash = 0;
-      td.flag = litflag ? FLAG__PENDING_T_BRACE : 0;
-=======
-      int litflag = 1;
       ++td->cursor.p;  // move past '}' (i.e., previous TOKEN_CLOSE)
       td->cursor.type = TOKEN_STRING;
-      td->cursor.len = consume_string(td->cursor.p, &td->line_no, &litflag);
+      td->cursor.len = consume_template_string_inner(td->cursor.p, &(td->line_no));
       td->cursor.hash = 0;
       td->flag = litflag ? FLAG__PENDING_T_BRACE : 0;
->>>>>>> 4a78b27... td at static location
       return TOKEN_STRING;
     }
   }
@@ -733,13 +724,8 @@ int prsr_next() {
 
   switch (cursor.type) {
     case TOKEN_STRING:
-<<<<<<< HEAD
       if (litflag) {
-        td.flag = FLAG__PENDING_T_BRACE;
-=======
-      if (p[0] == '`' && (cursor.len == 1 || p[cursor.len - 1] != '`')) {
         td->flag = FLAG__PENDING_T_BRACE;
->>>>>>> 4a78b27... td at static location
       }
       break;
 
