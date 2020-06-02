@@ -596,7 +596,6 @@ static inline void eat_token() {
   const char start = td->resume[0];
 
   int len = 1;
-  uint32_t hash = 0;
   int op = lookup_op[start];
 
   switch (op) {
