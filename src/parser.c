@@ -895,7 +895,7 @@ int modp_run() {
 
   int len = td.cursor.p - head;
   if (len == 0 && td.cursor.type != TOKEN_EOF) {
-    debugf("expr did not get consumed, token=%d\n");
+    debugf("expr did not get consumed, token=%d\n", td.cursor.type);
     return ERROR__UNEXPECTED;
   }
   return len;
