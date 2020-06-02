@@ -692,15 +692,16 @@ static inline void eat_token() {
       _ret(consume_template_string_inner(td->resume + 1) + 1, TOKEN_STRING);
 
     case _LOOKUP__LIT:
-      len = consume_known_lit(td->resume, &hash);
+      len = consume_known_lit(td->resume, &(td->cursor.hash));
       // fall-through
 
     case _LOOKUP__SYMBOL: {
       char c = td->resume[len];
       if (!lookup_symbol[c]) {
         // this checks the symbol after lit (above), or p[1]
-        _reth(len, TOKEN_LIT, hash);
+        _ret(len, TOKEN_LIT);  // doesn't change hash
       }
+      td->cursor.hash = 0; // might be "functionFOO"
 
       for (;;) {
         if (c == '\\') {
