@@ -64,6 +64,7 @@ static void internal_next_update(int type) {
 
 static int consume_import_module_special(int special) {
   if (td.cursor.type != TOKEN_STRING) {
+    debugf("no string found in import/export\n");
     return ERROR__UNEXPECTED;
   }
 
@@ -80,6 +81,7 @@ static int consume_import_module_special(int special) {
 
 int consume_import(int context) {
   if (td.cursor.hash != LIT_IMPORT) {
+    debugf("missing import keyword\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
@@ -89,14 +91,10 @@ int consume_import(int context) {
 
     // consume "from"
     if (td.cursor.hash != LIT_FROM) {
+      debugf("missing from keyword\n");
       return ERROR__UNEXPECTED;
     }
     internal_next_update(TOKEN_KEYWORD);
-
-    // check for trailing string from
-    if (td.cursor.type != TOKEN_STRING) {
-      return ERROR__UNEXPECTED;
-    }
   }
 
   // match string (but not if `${}`)
@@ -105,6 +103,7 @@ int consume_import(int context) {
 
 int consume_export(int context) {
   if (td.cursor.hash != LIT_EXPORT) {
+    debugf("missing export keyword\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
@@ -169,6 +168,7 @@ int consume_function(int context) {
 
   // expect function literal
   if (td.cursor.hash != LIT_FUNCTION) {
+    debugf("missing 'function' keyword\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
@@ -195,6 +195,7 @@ int consume_function(int context) {
 // consumes something starting with async (might be function)
 int consume_async_expr(int context) {
   if (td.cursor.hash != LIT_ASYNC) {
+    debugf("missing 'async' starter\n");
     return ERROR__UNEXPECTED;
   }
 
@@ -257,6 +258,7 @@ int consume_module_list(int context) {
       internal_next();
       _check(consume_module_list(context));
       if (td.cursor.type != TOKEN_CLOSE) {
+        debugf("missing close after module list\n");
         return ERROR__UNEXPECTED;
       }
       internal_next();
@@ -277,6 +279,7 @@ int consume_module_list(int context) {
       if (td.cursor.hash == LIT_AS) {
         internal_next_update(TOKEN_KEYWORD);
         if (td.cursor.type != TOKEN_LIT) {
+          debugf("missing literal after 'as'\n");
           return ERROR__UNEXPECTED;
         }
         internal_next_update(TOKEN_SYMBOL);
@@ -293,6 +296,7 @@ int consume_module_list(int context) {
 // consumes dict or class (allows either)
 static int consume_dict(int context) {
   if (td.cursor.type != TOKEN_BRACE) {
+    debugf("missing open brace for dict\n");
     return ERROR__UNEXPECTED;
   }
   internal_next();
@@ -384,6 +388,7 @@ static int consume_dict(int context) {
 
       case TOKEN_EOF:
         // don't stay here forever
+        debugf("got EOF inside dict\n");
         return ERROR__UNEXPECTED;
 
       case TOKEN_OP:
@@ -627,6 +632,7 @@ static int consume_expr_group(int context) {
       break;
 
     default:
+      debugf("expected expr group\n");
       return ERROR__UNEXPECTED;
   }
   internal_next();
@@ -643,6 +649,7 @@ static int consume_expr_group(int context) {
   }
 
   if (td.cursor.type != TOKEN_CLOSE) {
+    debugf("expected close after expr group\n");
     return ERROR__UNEXPECTED;
   }
   internal_next();
@@ -651,6 +658,7 @@ static int consume_expr_group(int context) {
 
 static int consume_class(int context) {
   if (td.cursor.hash != LIT_CLASS) {
+    debugf("expected class keyword\n");
     return ERROR__UNEXPECTED;
   }
   internal_next_update(TOKEN_KEYWORD);
@@ -699,6 +707,7 @@ static int consume_statement(int context) {
         case LIT_DEFAULT:
           internal_next_update(TOKEN_KEYWORD);
           if (td.cursor.type != TOKEN_COLON) {
+            debugf("no : after default\n");
             return ERROR__UNEXPECTED;
           }
           internal_next();
@@ -711,6 +720,7 @@ static int consume_statement(int context) {
 
           // after expr, expect colon
           if (td.cursor.type != TOKEN_COLON) {
+            debugf("no : after case\n");
             return ERROR__UNEXPECTED;
           }
           internal_next();

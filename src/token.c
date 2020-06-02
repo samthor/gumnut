@@ -29,15 +29,16 @@
 #define _LOOKUP__SLASH    4
 #define _LOOKUP__DOT      5
 #define _LOOKUP__Q        6
-#define _LOOKUP__COMMA    7   // token with MISC_COMMA
+#define _LOOKUP__COMMA    7  // token with MISC_COMMA
 #define _LOOKUP__NEWLINE  8
 #define _LOOKUP__SPACE    9
 #define _LOOKUP__STRING   10  // " or '
 #define _LOOKUP__TEMPLATE 11  // `
 #define _LOOKUP__LIT      12  // could be a hash
 #define _LOOKUP__SYMBOL   13  // always symbol, never hashed
-#define _LOOKUP__TOKEN    14  // fixed single-char token
-#define _LOOKUP__NUMBER   15
+#define _LOOKUP__NUMBER   14
+
+#define _LOOKUP__TOKEN    32
 
 static char lookup_symbol[256] = {
 // 0-127
@@ -59,295 +60,292 @@ static char lookup_symbol[256] = {
   1, 1, 1, 0, 0, 0, 0, 0,  // x-z
 
 // 128-255
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
 };
 
-typedef struct {
-  int lookup;
-  int type;
-} lookup_op;
+static char lookup_op[256] = {
+  _LOOKUP__EOF,  // 0, null
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__SPACE,  // 9, \t
+  _LOOKUP__NEWLINE,  // 10, \n
+  _LOOKUP__SPACE,
+  _LOOKUP__SPACE,
+  _LOOKUP__SPACE,  // 13, \r
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,  // 16
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
+  _LOOKUP__EOF,
 
-static lookup_op lookup[256] = {
-  {_LOOKUP__EOF, 0},  // EOF
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__SPACE, 0},  // \t (9)
-  {_LOOKUP__NEWLINE, 0},  // \n (10)
-  {_LOOKUP__SPACE, 0},
-  {_LOOKUP__SPACE, 0},
-  {_LOOKUP__SPACE, 0},  // \r (13)
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},  // 16
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__EOF, 0},
-  {_LOOKUP__SPACE, 0},  // space (32)
-  {_LOOKUP__OP_1, 0},  // ! (33)
-  {_LOOKUP__STRING, 0},  // " (34)
-  {_LOOKUP__SYMBOL, 0},  // # (35)
-  {_LOOKUP__SYMBOL, 0},  // $ (36)
-  {_LOOKUP__OP_1, 0},  // % (37)
-  {_LOOKUP__OP_1, 0},  // & (38)
-  {_LOOKUP__STRING, 0},  // ' (39)
-  {_LOOKUP__TOKEN, TOKEN_PAREN},  // ( (40)
-  {_LOOKUP__TOKEN, TOKEN_CLOSE},  // ) (41)
-  {_LOOKUP__OP_2, 0},  // * (42)
-  {_LOOKUP__OP_1, 0},  // + (43)
-  {_LOOKUP__COMMA, 0},  // , (44)
-  {_LOOKUP__OP_1, 0},  // - (45)
-  {_LOOKUP__DOT, 0},  // . (46)
-  {_LOOKUP__SLASH, 0},  // / (47)
+  _LOOKUP__SPACE,  // 32, space
+  _LOOKUP__OP_1,  // 33, !
+  _LOOKUP__STRING,  // 34, "
+  _LOOKUP__SYMBOL,  // 35, #
+  _LOOKUP__SYMBOL,  // 36, $
+  _LOOKUP__OP_1,  // 37, %
+  _LOOKUP__OP_1,  // 38, &
+  _LOOKUP__STRING,  // 39, '
+  _LOOKUP__TOKEN | TOKEN_PAREN,  // 40, (
+  _LOOKUP__TOKEN | TOKEN_CLOSE,  // 41, )
+  _LOOKUP__OP_2,  // 42, *
+  _LOOKUP__OP_1,  // 43, +
+  _LOOKUP__COMMA,  // 44, ,
+  _LOOKUP__OP_1,  // 45, -
+  _LOOKUP__DOT,  // 46, .
+  _LOOKUP__SLASH,  // 47, /
 
-  {_LOOKUP__NUMBER, 0},  // 0 (48)
-  {_LOOKUP__NUMBER, 0},  // 1
-  {_LOOKUP__NUMBER, 0},  // 2
-  {_LOOKUP__NUMBER, 0},  // 3
-  {_LOOKUP__NUMBER, 0},  // 4
-  {_LOOKUP__NUMBER, 0},  // 5
-  {_LOOKUP__NUMBER, 0},  // 6
-  {_LOOKUP__NUMBER, 0},  // 7
-  {_LOOKUP__NUMBER, 0},  // 8
-  {_LOOKUP__NUMBER, 0},  // 9
+  _LOOKUP__NUMBER,  // 48, 0
+  _LOOKUP__NUMBER,  // 49, 1
+  _LOOKUP__NUMBER,  // 50, 2
+  _LOOKUP__NUMBER,  // 51, 3
+  _LOOKUP__NUMBER,  // 52, 4
+  _LOOKUP__NUMBER,  // 53, 5
+  _LOOKUP__NUMBER,  // 54, 6
+  _LOOKUP__NUMBER,  // 55, 7
+  _LOOKUP__NUMBER,  // 56, 8
+  _LOOKUP__NUMBER,  // 57, 9
 
-  {_LOOKUP__TOKEN, TOKEN_COLON},  // : (58)
-  {_LOOKUP__TOKEN, TOKEN_SEMICOLON},  // ; (59)
-  {_LOOKUP__OP_2, 0},  // < (60)
-  {_LOOKUP__OP_1, 0},  // = (61)
-  {_LOOKUP__OP_3, 0},  // > (62)
-  {_LOOKUP__Q, 0},  // ? (63)
-  {_LOOKUP__EOF, 0},  // @ (64)
+  _LOOKUP__TOKEN | TOKEN_COLON,  // 58, :
+  _LOOKUP__TOKEN | TOKEN_SEMICOLON,  // 59, ;
+  _LOOKUP__OP_2,  // 60, <
+  _LOOKUP__OP_1,  // 61, =
+  _LOOKUP__OP_3,  // 62, >
+  _LOOKUP__Q,  // 63, ?
+  _LOOKUP__EOF,  // 64, @
 
-  {_LOOKUP__SYMBOL, 0}, // A
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},  // Z
+  _LOOKUP__SYMBOL, // 65, A
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,  // 90, Z
 
-  {_LOOKUP__TOKEN, TOKEN_ARRAY},  // [ (91)
-  {_LOOKUP__EOF, 0},  // \ (92)
-  {_LOOKUP__TOKEN, TOKEN_CLOSE},  // ] (93)
-  {_LOOKUP__OP_1, 0},  // ^ (94)
-  {_LOOKUP__SYMBOL, 0},  // _ (95)
-  {_LOOKUP__TEMPLATE, 0},  // ' (96)
+  _LOOKUP__TOKEN | TOKEN_ARRAY,  // 91, [
+  _LOOKUP__EOF,  // 92, forward slash
+  _LOOKUP__TOKEN | TOKEN_CLOSE,  // 93, ]
+  _LOOKUP__OP_1,  // 94, ^
+  _LOOKUP__SYMBOL,  // 95, _
+  _LOOKUP__TEMPLATE,  // 96, '
 
-  {_LOOKUP__LIT, 0},  // a
-  {_LOOKUP__LIT, 0},  // b
-  {_LOOKUP__LIT, 0},  // c
-  {_LOOKUP__LIT, 0},  // d
-  {_LOOKUP__LIT, 0},  // e
-  {_LOOKUP__LIT, 0},  // f
-  {_LOOKUP__LIT, 0},  // g
-  {_LOOKUP__SYMBOL, 0},  // h
-  {_LOOKUP__LIT, 0},  // i
-  {_LOOKUP__SYMBOL, 0},  // j
-  {_LOOKUP__SYMBOL, 0},  // k
-  {_LOOKUP__LIT, 0},  // l
-  {_LOOKUP__SYMBOL, 0},  // m
-  {_LOOKUP__LIT, 0},  // n
-  {_LOOKUP__LIT, 0},  // o
-  {_LOOKUP__LIT, 0},  // p
-  {_LOOKUP__SYMBOL, 0},  // q
-  {_LOOKUP__LIT, 0},  // r
-  {_LOOKUP__LIT, 0},  // s
-  {_LOOKUP__LIT, 0},  // t
-  {_LOOKUP__LIT, 0},  // u
-  {_LOOKUP__LIT, 0},  // v
-  {_LOOKUP__LIT, 0},  // w
-  {_LOOKUP__LIT, 0},  // y
-  {_LOOKUP__SYMBOL, 0},  // x
-  {_LOOKUP__SYMBOL, 0},  // z
+  // nb. [h, j, k, m, q, x, z] don't start keywords
+  _LOOKUP__LIT,  // 97, a
+  _LOOKUP__LIT,  // 98, b
+  _LOOKUP__LIT,  // 99, c
+  _LOOKUP__LIT,  // 100, d
+  _LOOKUP__LIT,  // 101, e
+  _LOOKUP__LIT,  // 102, f
+  _LOOKUP__LIT,  // 103, g
+  _LOOKUP__SYMBOL,  // 104, h
+  _LOOKUP__LIT,  // 105, i
+  _LOOKUP__SYMBOL,  // 106, j
+  _LOOKUP__SYMBOL,  // 107, k
+  _LOOKUP__LIT,  // 108, l
+  _LOOKUP__SYMBOL,  // 109, m
+  _LOOKUP__LIT,  // 110, n
+  _LOOKUP__LIT,  // 111, o
+  _LOOKUP__LIT,  // 112, p
+  _LOOKUP__SYMBOL,  // 113, q
+  _LOOKUP__LIT,  // 114, r
+  _LOOKUP__LIT,  // 115, s
+  _LOOKUP__LIT,  // 116, t
+  _LOOKUP__LIT,  // 117, u
+  _LOOKUP__LIT,  // 118, v
+  _LOOKUP__LIT,  // 119, w
+  _LOOKUP__LIT,  // 120, y
+  _LOOKUP__SYMBOL,  // 121, x
+  _LOOKUP__SYMBOL,  // 122, z
 
-  {_LOOKUP__TOKEN, TOKEN_BRACE},  // { (123)
-  {_LOOKUP__OP_1, 0},  // | (124)
-  {_LOOKUP__TOKEN, TOKEN_CLOSE},  // } (125)
+  _LOOKUP__TOKEN | TOKEN_BRACE,  // 123, {
+  _LOOKUP__OP_1,  // 124, |
+  _LOOKUP__TOKEN | TOKEN_CLOSE,  // 125, }
 
-  {_LOOKUP__OP_1, 0},  // ~ (126)
-  {_LOOKUP__EOF, 0},  // 127
+  _LOOKUP__OP_1,  // 126, ~
+  _LOOKUP__EOF,  // 127
 
 // 128-255
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
-  {_LOOKUP__SYMBOL, 0},
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
+  _LOOKUP__SYMBOL,
 };
 
 // global and shared with parser
@@ -537,12 +535,16 @@ static void eat_token(token *t, int *line_no) {
   char *p = t->p;
   const char start = p[0];
 
-  lookup_op *op = &lookup[start];
-
   int len = 1;
   uint32_t hash = 0;
+  int op = lookup_op[start];
 
-  switch (op->lookup) {
+  switch (op) {
+    case _LOOKUP__SPACE:
+    case _LOOKUP__NEWLINE:
+      // TODO: for now, handled in consume_space
+      _ret(0, ERROR__UNEXPECTED);
+
     case _LOOKUP__EOF:
       if (start != 0) {
         _ret(0, ERROR__UNEXPECTED);
@@ -552,15 +554,9 @@ static void eat_token(token *t, int *line_no) {
     case _LOOKUP__OP_1:
     case _LOOKUP__OP_2:
     case _LOOKUP__OP_3: {
-      int allowed = op->lookup;
       char c = p[len];
-
-      while (len < allowed) {
-        c = p[len];
-        if (c != start) {
-          break;
-        }
-        ++len;
+      while (len < op && c == start) {
+        c = p[++len];
       }
 
       if (len == 1) {
@@ -673,14 +669,11 @@ static void eat_token(token *t, int *line_no) {
       }
     }
 
-    case _LOOKUP__TOKEN:
-      _ret(1, op->type);
-
     case _LOOKUP__NUMBER:
       _ret(consume_number(p), TOKEN_NUMBER);
   }
 
-  _ret(0, ERROR__UNEXPECTED);
+  _ret(1, op & ~(_LOOKUP__TOKEN));
 #undef _ret
 #undef _reth
 }
