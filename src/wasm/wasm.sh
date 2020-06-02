@@ -6,7 +6,7 @@ FLAGS="-O1 -g4"
 export EMCC_DEBUG=1
 if [[ "${1-}" == "release" ]]; then
   export EMCC_DEBUG=0
-  FLAGS="-Os -DSPEED"
+  FLAGS="-O2 -DSPEED"
   echo "Release mode (\"${FLAGS}\")" >&2
 elif [[ "${1-}" != "" ]]; then
   echo "Unknown mode: $1" >&2
