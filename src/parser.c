@@ -62,7 +62,7 @@ static void internal_next_update(int type) {
   internal_next_comment();
 }
 
-static int consume_import_module_special(int special) {
+static int consume_import_module_special() {
   if (td.cursor.type != TOKEN_STRING) {
     debugf("no string found in import/export\n");
     return ERROR__UNEXPECTED;
@@ -74,7 +74,7 @@ static int consume_import_module_special(int special) {
     return 0;
   }
 
-  modp_callback(special);
+  modp_callback(SPECIAL__MODULE_PATH);
   internal_next_comment();
   return 0;
 }
@@ -98,7 +98,7 @@ int consume_import(int context) {
   }
 
   // match string (but not if `${}`)
-  return consume_import_module_special(SPECIAL__IMPORT);
+  return consume_import_module_special();
 }
 
 int consume_export(int context) {
@@ -141,7 +141,7 @@ int consume_export(int context) {
     internal_next_update(TOKEN_KEYWORD);
 
     // match string (but not if `${}`)
-    return consume_import_module_special(SPECIAL__EXPORT);
+    return consume_import_module_special();
   }
 
   int has_decl = (td.cursor.hash & _MASK_DECL) ? 1 : 0;
