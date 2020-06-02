@@ -22,15 +22,22 @@
 
 typedef struct {
   token cursor; // focused here
-  token peek;   // peeked token, not available unless prsr_peek() called
-  int line_no;  // after cursor
+  char *resume;
+  char *peek_at;
+  int line_no;  // after resume
 
   uint16_t depth : __STACK_SIZE_BITS;
   uint8_t stack[__STACK_SIZE];
   uint8_t flag;  // used to record ${} state
 } tokendef;
 
-extern tokendef td;
+// global
+#ifdef EMSCRIPTEN
+#define td ((tokendef *) 20)
+#else
+extern tokendef _real_td;
+#define td (&_real_td)
+#endif
 
 // Prepares tokendef. Provides an initial zero token.
 void prsr_init_token(char *);
@@ -43,5 +50,8 @@ int prsr_update(int);
 
 // Peeks to the next non-comment token. Returns type and fills .peek field.
 int prsr_peek();
+
+// Special-case. Is the current peek cursor pointing at "function"?
+int prsr_peek_is_function();
 
 #endif//_TOKEN_H
