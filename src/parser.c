@@ -869,7 +869,7 @@ token *modp_init(char *p, int _context) {
     td.cursor.len = strline(p);
     td.cursor.line_no = 1;
   } else {
-    // n.b. it's possible but unlikely for this to fail (e.g. opens with "{")
+    // n.b. it's possible but unlikely for this to fail (e.g. opens with "}")
     prsr_next();
   }
 
