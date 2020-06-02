@@ -40,6 +40,9 @@
 
 #define _LOOKUP__TOKEN    32
 
+// TODO: Emscipten puts these lookups in __memory_base, but we'd happily put
+// them somewhere static.
+
 static char lookup_symbol[256] = {
 // 0-127
   0, 0, 0, 0, 0, 0, 0, 0,

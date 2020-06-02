@@ -33,7 +33,7 @@ typedef struct {
 
 // global
 #ifdef EMSCRIPTEN
-#define td ((tokendef *) 516)
+#define td ((tokendef *) 20)
 #else
 extern tokendef _real_td;
 #define td (&_real_td)

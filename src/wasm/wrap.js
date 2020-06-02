@@ -32,14 +32,11 @@ const ERRORS = Object.freeze({
 
 async function initialize(modulePromise, callback, pages) {
   const memory = new WebAssembly.Memory({initial: pages, maximum: pages});
-  const table = new WebAssembly.Table({initial: 2, maximum: 2, element: 'anyfunc'});
   const view = new Uint8Array(memory.buffer);
 
   const env = {
     memory,
     __memory_base: (pages - STACK_PAGES) * 65536,  // put Emscripten 'stack' at end of memory
-    table,
-    __table_base: 0,
   };
   const importObject = {env};
 
