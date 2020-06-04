@@ -29,14 +29,13 @@ const PENDING_BUFFER_MAX = 1024 * 16;
  * Builds a method which rewrites imports from a passed filename.
  *
  * @param {function(string, string): string} resolve passed importee and importer, return new import
- * @param {number=} pages of wasm memory to allocate
  * @return {function(string): !ReadableStream}
  */
-export default async function rewriter(resolve, pages = 128) {
+export default async function rewriter(resolve) {
   const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
   const wasm = fs.readFileSync(source);
 
-  const run = await build(wasm, pages);
+  const {prepare, run} = await build(wasm);
 
   return (f) => {
     const fd = fs.openSync(f);
@@ -44,18 +43,20 @@ export default async function rewriter(resolve, pages = 128) {
     const readable = new stream.Readable();
 
     let buffer = null;
-    const prepare = (b) => {
-      buffer = b;  // store for later
+    const token = prepare(stat.size, (b) => {
+      buffer = b;
 
       const read = fs.readSync(fd, buffer, 0, stat.size, 0);
       if (read !== stat.size) {
         throw new Error(`did not read all bytes at once: ${read}/${stat.size}`);
       }
-    };
+    });
 
     let sent = 0;
 
-    run(stat.size, prepare, (p, len, line_no, type, special) => {
+    run((special) => {
+      const p = token.at();
+
       if (special !== specials.modulePath) {
         if (p - sent > PENDING_BUFFER_MAX) {
           // send some data, we've gone through a lot
@@ -65,6 +66,7 @@ export default async function rewriter(resolve, pages = 128) {
         return;
       }
 
+      const len = token.len();
       const s = stringFrom(buffer.subarray(p + 1, p + len - 1));
       const out = resolve(s, f);
       if (out == null || typeof out !== 'string') {

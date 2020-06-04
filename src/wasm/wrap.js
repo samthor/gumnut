@@ -87,60 +87,88 @@ export default async function build(modulePromise) {
 
   const {exports} = instance;
 
-  /**
-   * @param {number} size
-   * @param {function(!Uint8Array): void} prepare
-   * @param {function(number, number, number, number, number): void} callback
-   */
-  const run = (size, prepare, callback) => {
-    const memoryNeeded = WRITE_AT + size + 1;
-    if (memory.buffer.byteLength < memoryNeeded) {
-      memory.grow(Math.ceil((memoryNeeded - memory.buffer.byteLength) / PAGE_SIZE));
-    }
-    const view = new Uint8Array(memory.buffer);
-    const inner = view.subarray(WRITE_AT, WRITE_AT + size);
-    let written = prepare(inner);
-    if (written == null) {
-      written = size;
-    }
-    if (written > inner.length) {
-      throw new Error(`got too many bytes: ${written}`);
-    }
-    view[WRITE_AT + size] = 0;  // null-terminate
-
-    const tokenAt = exports._xx_setup(WRITE_AT);
-    const tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);  // in 32-bit
-    handler = (special) => {
-      // nb. tokenView[4] is actually uint32_t, but it's not used anyway
-      callback(tokenView[0] - WRITE_AT, tokenView[1], tokenView[2], tokenView[3], special);
-    };
-
-    let ret = 0;
-    for (;;) {
-      ret = exports._xx_run();
-      if (ret <= 0) {
-        break;
+  return {
+    prepare(size, callback) {
+      const memoryNeeded = WRITE_AT + size + 1;
+      if (memory.buffer.byteLength < memoryNeeded) {
+        memory.grow(Math.ceil((memoryNeeded - memory.buffer.byteLength) / PAGE_SIZE));
       }
-    }
-    handler = null;
+      const view = new Uint8Array(memory.buffer);
+      const inner = view.subarray(WRITE_AT, WRITE_AT + size);
+      let written = callback(inner);
+      if (written == null) {
+        written = size;
+      }
+      if (written > inner.length) {
+        throw new Error(`got too many bytes: ${written}`);
+      }
+      view[WRITE_AT + size] = 0;  // null-terminate
 
-    if (ret >= 0) {
-      return;  // no result, all via callbacks
-    }
-    const at = tokenView[0];
+      const tokenAt = exports._xx_setup(WRITE_AT);
+      const tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);  // in 32-bit
 
-    // Special-case crash on a NULL byte. There was no more input.
-    if (view[at] === 0) {
-      throw new TypeError(`Unexpected end of input`);
-    }
+      // nb. getters are slow, use real functions.
+      return {
+        at() {
+          return tokenView[0] - WRITE_AT;
+        },
 
-    // Otherwise, generate a sane error.
-    const lineNo = tokenView[2];
-    const {line, index} = lineAround(view, at, WRITE_AT);
-    throw new TypeError(`[${lineNo}:${index}] ${ERRORS[ret] || '?'}:\n${line}\n${'^'.padStart(index + 1)}`);
+        len() {
+          return tokenView[1];
+        },
+
+        lineNo() {
+          return tokenView[2];
+        },
+
+        type() {
+          return tokenView[3];
+        },
+
+        hash() {
+          return tokenView[4];
+        },
+
+        view() {
+          return view.subarray(tokenView[0], tokenView[1]);
+        },
+
+        string() {
+          return decoder.decode(view.subarray(tokenView[0], tokenView[1]));
+        },
+      };
+    },
+
+    run(callback) {
+      handler = callback;
+
+      let ret = 0;
+      for (;;) {
+        ret = exports._xx_run();
+        if (ret <= 0) {
+          break;
+        }
+      }
+
+      handler = null;
+
+      if (ret === 0) {
+        return;
+      }
+      const at = tokenView[0];
+
+      // Special-case crash on a NULL byte. There was no more input.
+      if (view[at] === 0) {
+        throw new TypeError(`Unexpected end of input`);
+      }
+
+      // Otherwise, generate a sane error.
+      const lineNo = tokenView[2];
+      const {line, index} = lineAround(view, at, WRITE_AT);
+      throw new TypeError(`[${lineNo}:${index}] ${ERRORS[ret] || '?'}:\n${line}\n${'^'.padStart(index + 1)}`);
+    },
+
   };
-
-  return run;
 }
 
 /**
