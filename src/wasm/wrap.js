@@ -68,7 +68,7 @@ async function initialize(modulePromise, callback) {
   return {instance, memory};
 }
 
-export default async function build(modulePromise, pages = 128) {
+export default async function build(modulePromise) {
   let handler = null;
 
   const {instance, memory} = await initialize(modulePromise, () => {
@@ -83,7 +83,7 @@ export default async function build(modulePromise, pages = 128) {
         handler(special);
       },
     };
-  }, pages);
+  });
 
   const {exports} = instance;
 
