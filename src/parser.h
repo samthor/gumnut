@@ -23,6 +23,7 @@
 #define SPECIAL__DECLARE_TOP     4
 #define SPECIAL__AMBIGUOUS_ASYNC 8
 #define SPECIAL__PROPERTY        16
+#define SPECIAL__SCOPE           32   // found on {'s of functions
 
 typedef void (*prsr_callback)(int special);
 token *modp_init(char *, int);

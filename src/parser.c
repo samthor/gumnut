@@ -31,7 +31,7 @@
 
 static int top_context;
 
-static int consume_statement(int);
+static int consume_statement(int, int);
 static int consume_expr_group(int);
 static int consume_optional_expr(int);
 static int consume_class(int);
@@ -195,7 +195,7 @@ int consume_function(int context) {
   }
 
   // consume function body
-  return consume_statement(statement_context);
+  return consume_statement(statement_context, SPECIAL__SCOPE);
 }
 
 // consumes something starting with async (might be function)
@@ -254,7 +254,7 @@ int consume_async_expr(int context) {
 
   int async_context = context | CONTEXT__ASYNC;
   if (td->cursor.type == TOKEN_BRACE) {
-    _check(consume_statement(async_context));
+    _check(consume_statement(async_context, SPECIAL__SCOPE));
   } else {
     _check(consume_optional_expr(async_context));
   }
@@ -524,7 +524,7 @@ static int consume_dict(int context) {
         // ignore missing name, whatever
     }
 
-    // check terminal case (which decides what tpye of entry this is), method or equal/colon
+    // check terminal case (which decides what type of entry this is), method or equal/colon
     switch (td->cursor.type) {
       case TOKEN_PAREN:
         // method
@@ -534,7 +534,7 @@ static int consume_dict(int context) {
           debugf("did not find brace after dict paren\n");
           return ERROR__UNEXPECTED;
         }
-        _check(consume_statement(method_context));
+        _check(consume_statement(method_context, SPECIAL__SCOPE));
         break;
 
       case TOKEN_OP:
@@ -716,7 +716,7 @@ static int consume_optional_expr(int context) {
             internal_next();
             int normal_context = context & ~(CONTEXT__ASYNC);
             if (td->cursor.type == TOKEN_BRACE) {
-              _check(consume_statement(normal_context));
+              _check(consume_statement(normal_context, SPECIAL__SCOPE));
             } else {
               _check(consume_optional_expr(normal_context));
             }
@@ -865,16 +865,17 @@ static int consume_class(int context) {
   return consume_dict(context);
 }
 
-static int consume_statement(int context) {
+static int consume_statement(int context, int special_scope) {
   switch (td->cursor.type) {
     case TOKEN_EOF:
       return 0;
 
     case TOKEN_BRACE:
-      internal_next();  // consume brace, get next
+      modp_callback(special_scope);  // marks for functions
+      internal_next_comment();
 
       while (td->cursor.type != TOKEN_CLOSE) {
-        int ret = consume_statement(context);
+        int ret = consume_statement(context, 0);
         if (ret != 0) {
           return ret;
         } else if (td->cursor.type == TOKEN_EOF) {
@@ -882,7 +883,8 @@ static int consume_statement(int context) {
         }
       }
 
-      internal_next();  // consume close
+      modp_callback(special_scope);  // mark close too
+      internal_next_comment();
       return 0;
 
     case TOKEN_SEMICOLON:
@@ -951,7 +953,7 @@ static int consume_statement(int context) {
     }
     // TODO: we could remove the following since we're not generating an AST.
     // ... it's not important that while(); is parsed as part of do-while.
-    _check(consume_statement(context));
+    _check(consume_statement(context, 0));
 
     // special-case trailing "while(...)" for a 'do-while'
     if (control_hash == LIT_DO) {
@@ -1065,7 +1067,7 @@ int modp_run() {
     modp_callback(0);
     prsr_next();
   }
-  _check(consume_statement(top_context));
+  _check(consume_statement(top_context, 0));
 
   int len = td->cursor.p - head;
   if (len == 0 && td->cursor.type != TOKEN_EOF) {
