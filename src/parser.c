@@ -39,6 +39,7 @@ static int consume_module_list(int);
 static int consume_function(int);
 static int consume_expr_compound(int);
 static int consume_definition_list(int);
+static int consume_string(int);
 
 static inline void internal_next_comment() {
   for (;;) {
@@ -510,8 +511,11 @@ static int consume_dict(int context) {
         internal_next();
         break;
 
-      case TOKEN_ARRAY:
       case TOKEN_STRING:
+        _check(consume_string(context));
+        break;
+
+      case TOKEN_ARRAY:
         _check(consume_expr_group(context));
         break;
 
@@ -609,12 +613,6 @@ static int consume_optional_expr(int context) {
         seen_any = 1;
         continue;
 
-      case TOKEN_T_BRACE:
-        _check(consume_expr_group(context));
-        value_line = 0;  // allows string to continue
-        seen_any = 1;
-        continue;
-
       case TOKEN_ARRAY:
       case TOKEN_PAREN:
         _check(consume_expr_group(context));
@@ -625,10 +623,11 @@ static int consume_optional_expr(int context) {
       case TOKEN_STRING:
         if (td->cursor.p[0] == '`' && value_line) {
           // tagged template, e.g. "hello`123`"
-          internal_next();
-          continue;
+        } else {
+          _transition_to_value();
         }
-        // fall-through
+        _check(consume_string(context));
+        continue;
 
       case TOKEN_SYMBOL:  // for calling again via async
       case TOKEN_REGEXP:
@@ -784,21 +783,33 @@ static int consume_expr_compound(int context) {
   return 0;
 }
 
+static int consume_string(int context) {
+#ifdef DEBUG
+  if (td->cursor.type != TOKEN_STRING) {
+    debugf("could not find string\n");
+    return ERROR__UNEXPECTED;
+  }
+#endif
+  internal_next();
+  for (;;) {
+    if (td->cursor.type != TOKEN_T_BRACE) {
+      return 0;
+    }
+    _check(consume_expr_group(context));
+#ifdef DEBUG
+    if (td->cursor.type != TOKEN_STRING) {
+      debugf("should see string again after tbrace/close\n");
+      return ERROR__UNEXPECTED;
+    }
+#endif
+    internal_next();  // this must be string
+  }
+  return ERROR__INTERNAL;  // should not get here
+}
+
 static int consume_expr_group(int context) {
   int start = td->cursor.type;
   switch (td->cursor.type) {
-    case TOKEN_STRING:
-      // special-case strings
-      internal_next();
-      for (;;) {
-        if (td->cursor.type != TOKEN_T_BRACE) {
-          return 0;
-        }
-        _check(consume_expr_group(context));
-        internal_next();  // this must be string
-      }
-      return ERROR__INTERNAL;  // should not get here
-
     case TOKEN_PAREN:
     case TOKEN_ARRAY:
     case TOKEN_TERNARY:
