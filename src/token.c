@@ -866,7 +866,8 @@ int prsr_update(int type) {
       return 0;
 
     case TOKEN_LIT:
-      if (!(type == TOKEN_SYMBOL || type == TOKEN_KEYWORD || type == TOKEN_LABEL || type == TOKEN_OP)) {
+      // nb. TOKEN_SYMBOL and above are all literal types
+      if (!(type == TOKEN_OP || type >= TOKEN_SYMBOL)) {
         return ERROR__INTERNAL;
       }
       td->cursor.type = type;

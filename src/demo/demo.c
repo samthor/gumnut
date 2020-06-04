@@ -49,15 +49,13 @@ static int tokens = 0;
 void modp_callback(int special) {
   ++tokens;
 #ifndef SPEED
-  char c = ' ';
-  if (out->hash) {
-    c = '#';  // has a hash
-  } else if (special) {
-    if (special == SPECIAL__MODULE_PATH) {
-      c = 'm';
-    }
-  }
-  printf("%c%4d.%02d: %.*s\n", c, out->line_no, out->type, out->len, out->p);
+  // char c = ' ';
+  // switch (special) {
+  //   case SPECIAL__MODULE_PATH:
+  //     c = 'm';
+  //     break;
+  // }
+  printf("%d\t%4d.%02d: %.*s\n", special, out->line_no, out->type, out->len, out->p);
 #endif
 }
 

@@ -18,7 +18,11 @@
 
 #define CONTEXT__ASYNC 1  // pass for top-level-await
 
-#define SPECIAL__MODULE_PATH 1
+#define SPECIAL__MODULE_PATH     1
+#define SPECIAL__DECLARE         2
+#define SPECIAL__DECLARE_TOP     4
+#define SPECIAL__AMBIGUOUS_ASYNC 8
+#define SPECIAL__PROPERTY        16
 
 typedef void (*prsr_callback)(int special);
 token *modp_init(char *, int);

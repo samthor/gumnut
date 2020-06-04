@@ -58,7 +58,7 @@ typedef struct {
 #define TOKEN_STRING    14
 #define TOKEN_REGEXP    15  // literal "/foo/", not "new RegExp('foo')"
 #define TOKEN_NUMBER    16
-#define TOKEN_SYMBOL    17
+#define TOKEN_SYMBOL    17  // this and above must be literal types
 #define TOKEN_KEYWORD   18
 #define TOKEN_LABEL     19  // to the left of a ':', e.g. 'foo:'
 

@@ -45,11 +45,12 @@ const TOKENS = {
 };
 const TOKEN_LOOKUP = reverseDict(TOKENS);
 
-const MARKS = {
+const SPECIALS = {
   IMPORT: 1,
-  EXPORT: 2,
+  DECLARE: 2,
+  PROPERTY: 16,
 };
-const MARK_LOOKUP = reverseDict(MARKS);
+const SPECIAL_LOOKUP = reverseDict(SPECIALS);
 
 
 window.addEventListener('load', (ev) => {
@@ -78,19 +79,13 @@ window.addEventListener('load', (ev) => {
     let lineNo = 0;
     output.textContent = '';
     tokens.forEach((token) => {
-      if (token.lineNo !== lineNo) {
-        const valid = token.lineNo > lineNo;
-        appendLine();
-
+      while (token.lineNo > lineNo) {
         const node = document.createElement('aside');
-        node.dataset.line = token.lineNo;
-        output.appendChild(node);
-
-        if (!valid) {
-          node.classList.add('__invalid');
-        } else {
-          lineNo = token.lineNo;
+        node.dataset.line = ++lineNo;
+        if (token.lineNo !== lineNo) {
+          node.classList.add('__skip');
         }
+        output.append('\n', node);
       }
 
       const backing = view.subarray(token.at, token.at + token.len);
@@ -100,23 +95,15 @@ window.addEventListener('load', (ev) => {
       if (token.invalid) {
         node.classList.add('__invalid');
       }
-      const mark = MARK_LOOKUP(token.special);
-      if (mark) {
-        node.classList.add('_' + mark);
-      }
 
-      if (!s) {
-        node.classList.add('_virt');
-        switch (token.type) {
-          case TOKENS.SEMICOLON:
-            node.textContent = ';'
-            break;
-          case TOKENS.EXEC:
-            node.textContent = '{';
-            break;
-          case TOKENS.CLOSE:
-            node.textContent = '}';
-            break;
+      let special = token.special;
+      for (let check = 1; special; check <<= 1) {
+        if (special & check) {
+          const mark = SPECIAL_LOOKUP(check);
+          if (mark) {
+            node.classList.add('_' + mark);
+          }
+          special &= ~(check);
         }
       }
 
@@ -220,6 +207,10 @@ document.addEventListener('drop', (ev) => {
   pre aside.__invalid {
     background: red;
   }
+  pre aside.__skip {
+    background: #777;
+    color: transparent;
+  }
   pre aside::before {
     content: attr(data-line);
     display: inline-block;
@@ -251,15 +242,17 @@ document.addEventListener('drop', (ev) => {
   pre span.symbol {
     color: blue;
   }
-  pre span.lit {
+  pre span.lit:not(._property) {
     background: red;
     color: white;
+  }
+  pre span._property {
+    font-style: italic;
   }
   pre span.__invalid {
     text-decoration: underline;
   }
-  pre span._import,
-  pre span._export {
+  pre span._import {
     background: blue;
     color: white;
   }
@@ -282,9 +275,7 @@ window.addEventListener('hashchange', (ev) => {
 window.dispatchEvent(new CustomEvent('hashchange'));
 </script>
 
-<div id="stats">
-</div>
-
+<pre id="stats"></pre>
 <pre id="output"></pre>
 
 </body>

@@ -58,7 +58,7 @@ export default async function rewriter(resolve, pages = 128) {
     let sent = 0;
 
     run(stat.size, prepare, (p, len, line_no, type, special) => {
-      if (special === 0) {
+      if (special !== 1) {
         if (p - sent > PENDING_BUFFER_MAX) {
           // send some data, we've gone through a lot
           readable.push(buffer.subarray(sent, p));

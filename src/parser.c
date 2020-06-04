@@ -38,6 +38,7 @@ static int consume_class(int);
 static int consume_module_list(int);
 static int consume_function(int);
 static int consume_expr_compound(int);
+static int consume_definition_list(int);
 
 static inline void internal_next_comment() {
   for (;;) {
@@ -223,7 +224,9 @@ int consume_async_expr(int context) {
       break;
 
     case TOKEN_PAREN:
-      internal_next();  // nb. we explicitly yield TOKEN_LIT here
+      // nb. we explicitly yield TOKEN_LIT here
+      modp_callback(SPECIAL__AMBIGUOUS_ASYNC);
+      internal_next_comment();
 
       // _maybe_ function
       _check(consume_expr_group(context));
@@ -299,6 +302,132 @@ int consume_module_list(int context) {
   }
 }
 
+// consume var/const/let destructuring (not run for regular statement)
+static int consume_destructuring(int context, int special) {
+#ifdef DEBUG
+  if (td->cursor.type != TOKEN_BRACE && td->cursor.type != TOKEN_ARRAY) {
+    debugf("destructuring did not start with { or [\n");
+    return ERROR__UNEXPECTED;
+  }
+#endif
+  int start = td->cursor.type;
+  internal_next();
+
+  for (;;) {
+    switch (td->cursor.type) {
+      case TOKEN_CLOSE:
+        internal_next();
+        return 0;
+
+      case TOKEN_LIT:
+        // if this [foo] or {foo} without colon, announce now
+        if (prsr_peek() == TOKEN_COLON) {
+          modp_callback(SPECIAL__PROPERTY);  // variable name is after colon
+        } else {
+          // e.g. "const {x} = ...", x is a symbol, decl and property
+          prsr_update(TOKEN_SYMBOL);
+          modp_callback(special | SPECIAL__PROPERTY);
+        }
+        internal_next_comment();
+        break;
+
+      case TOKEN_ARRAY:
+        if (start == TOKEN_BRACE) {
+          // this is a computed property name
+          _check(consume_expr_group(context));
+          break;
+        }
+        _check(consume_destructuring(context, special));
+        break;
+
+      case TOKEN_BRACE:
+        // nb. doesn't make sense in object context, but harmless
+        _check(consume_destructuring(context, special));
+        break;
+
+      case TOKEN_OP:
+        if (td->cursor.hash == MISC_COMMA) {
+          // nb. solo comma
+          internal_next();
+          continue;
+        }
+        // fall-through
+
+      default:
+        debugf("got unexpected inside object destructuring\n");
+        return ERROR__UNEXPECTED;
+    }
+
+    // check for colon: blah
+    if (td->cursor.type == TOKEN_COLON) {
+      internal_next();
+
+      switch (td->cursor.type) {
+        case TOKEN_ARRAY:
+        case TOKEN_BRACE:
+          _check(consume_destructuring(context, special));
+          break;
+
+        case TOKEN_LIT:
+          prsr_update(TOKEN_SYMBOL);
+          modp_callback(special);  // declaring new prop
+          internal_next_comment();
+          break;
+      }
+    }
+
+    if (td->cursor.hash == MISC_COMMA) {
+      internal_next();
+    } else if (td->cursor.type != TOKEN_CLOSE) {
+      debugf("non-comma or close in destructuring: %d\n", td->cursor.type);
+      return ERROR__UNEXPECTED;
+    }
+
+  }
+}
+
+// consume list of definitions, i.e., on "var" etc
+static int consume_definition_list(int context) {
+  if (!(td->cursor.hash & _MASK_DECL)) {
+    return ERROR__UNEXPECTED;
+  }
+
+  int special = SPECIAL__DECLARE;
+  if (td->cursor.hash == LIT_VAR) {
+    special |= SPECIAL__DECLARE_TOP;
+  }
+  internal_next_update(TOKEN_KEYWORD);
+
+  for (;;) {
+    switch (td->cursor.type) {
+      case TOKEN_LIT:
+        // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
+        prsr_update(TOKEN_SYMBOL);
+        modp_callback(special);
+        internal_next_comment();
+        break;
+
+      case TOKEN_BRACE:
+      case TOKEN_ARRAY:
+        _check(consume_destructuring(context, special));
+        break;
+
+      default:
+        return 0;  // unhandled/unexpected
+    }
+
+    if (td->cursor.hash == MISC_EQUALS) {
+      internal_next();
+      _check(consume_optional_expr(context));
+    }
+
+    if (td->cursor.hash != MISC_COMMA) {
+      return 0;
+    }
+    internal_next();
+  }
+}
+
 // consumes dict or class (allows either)
 static int consume_dict(int context) {
   if (td->cursor.type != TOKEN_BRACE) {
@@ -342,9 +471,30 @@ static int consume_dict(int context) {
 
     // name or bracketed name
     switch (td->cursor.type) {
-      case TOKEN_LIT:
-        internal_next_update(TOKEN_SYMBOL);
+      case TOKEN_LIT: {
+        int is_symbol = 1;
+
+        // if followed by : = or (, then this is a property
+        switch (prsr_peek()) {
+          case TOKEN_COLON:
+          case TOKEN_PAREN:
+            is_symbol = 0;
+            break;
+
+          case TOKEN_OP:
+            if (td->peek_at[0] == '=' && td->peek_at[1] != '=') {
+              is_symbol = 0;
+            }
+            break;
+        }
+
+        if (is_symbol) {
+          prsr_update(TOKEN_SYMBOL);
+        }
+        modp_callback(SPECIAL__PROPERTY);
+        internal_next_comment();
         break;
+      }
 
       case TOKEN_NUMBER:
         internal_next();
@@ -419,6 +569,7 @@ static int consume_dict(int context) {
   }
 }
 
+// consumes expr if found (but might not move cursor if cannot)
 static int consume_optional_expr(int context) {
   int value_line = 0;  // line_no of last value
   int seen_any = 0;
@@ -486,7 +637,8 @@ static int consume_optional_expr(int context) {
               return 0;
             }
             // nb. only keyword at top-level and in for, but nonsensical otherwise
-            internal_next_update(TOKEN_KEYWORD);
+            // FIXME: move to top-level since we can call this externally
+            _check(consume_definition_list(context));
             continue;
 
           case LIT_ASYNC:
@@ -524,6 +676,7 @@ static int consume_optional_expr(int context) {
             if (td->cursor.hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
               type = TOKEN_OP;
             } else if (td->cursor.hash & _MASK_KEYWORD) {
+              // FIXME: this and below could be allowed to fall-through in more cases
               return 0;
             } else if (value_line) {
               return 0;  // value after value
@@ -577,7 +730,8 @@ static int consume_optional_expr(int context) {
             if (td->cursor.type != TOKEN_LIT) {
               return 0;
             }
-            internal_next_update(TOKEN_SYMBOL);
+            modp_callback(SPECIAL__PROPERTY);  // not a symbol
+            internal_next_comment();
             value_line = td->cursor.line_no;
             seen_any = 1;
             continue;
