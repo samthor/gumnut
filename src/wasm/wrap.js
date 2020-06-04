@@ -18,7 +18,8 @@
  * @fileoverview Provides a builder for the module rewriter.
  */
 
-const STACK_PAGES = 4;
+const PAGE_SIZE = 65536;
+const WRITE_AT = PAGE_SIZE * 2;
 
 const decoder = new TextDecoder('utf-8');
 
@@ -38,19 +39,19 @@ export const specials = Object.seal({
   declareTop: 4,
   ambigiousAsync: 8,
   property: 16,
+  scope: 32,
 });
 
-async function initialize(modulePromise, callback, pages) {
-  const memory = new WebAssembly.Memory({initial: pages, maximum: pages});
-  const view = new Uint8Array(memory.buffer);
+async function initialize(modulePromise, callback) {
+  const memory = new WebAssembly.Memory({initial: 2});
 
   const env = {
     memory,
-    __memory_base: (pages - STACK_PAGES) * 65536,  // put Emscripten 'stack' at end of memory
+    __memory_base: PAGE_SIZE,  // put Emscripten 'stack' at start of memory, not really used
   };
   const importObject = {env};
 
-  const methods = await callback(view);
+  const methods = await callback();
   for (const method in methods) {
     importObject.env[method] = methods[method];
   }
@@ -64,27 +65,18 @@ async function initialize(modulePromise, callback, pages) {
   }
   instance.exports.__post_instantiate && instance.exports.__post_instantiate();
 
-  return {instance, view};
+  return {instance, memory};
 }
 
 export default async function build(modulePromise, pages = 128) {
-  const writeAt = 1024;
   let handler = null;
 
-  const {instance, view} = await initialize(modulePromise, (view) => {
+  const {instance, memory} = await initialize(modulePromise, () => {
     return {
       _memset(s, c, n) {
-        view.fill(c, s, s + n);
+        // nb. This only happens once per run in prsr.
+        new Uint8Array(memory.buffer).fill(c, s, s + n);
         return s;
-      },
-
-      _memcpy(dst, src, size) {
-        view.set(view.subarray(src, src + size), dst);
-        return dst;
-      },
-
-      abort(x) {
-        throw x;
       },
 
       _modp_callback(special) {
@@ -101,12 +93,12 @@ export default async function build(modulePromise, pages = 128) {
    * @param {function(number, number, number, number, number): void} callback
    */
   const run = (size, prepare, callback) => {
-    const avail = view.length - (STACK_PAGES * 65536) - writeAt - 1;
-    if (size >= avail) {
-      throw new Error(`can't parse huge file: ${size} (had ${avail})`);
+    const memoryNeeded = WRITE_AT + size + 1;
+    if (memory.buffer.byteLength < memoryNeeded) {
+      memory.grow(Math.ceil((memoryNeeded - memory.buffer.byteLength) / PAGE_SIZE));
     }
-
-    const inner = view.subarray(writeAt, writeAt + size);
+    const view = new Uint8Array(memory.buffer);
+    const inner = view.subarray(WRITE_AT, WRITE_AT + size);
     let written = prepare(inner);
     if (written == null) {
       written = size;
@@ -114,13 +106,13 @@ export default async function build(modulePromise, pages = 128) {
     if (written > inner.length) {
       throw new Error(`got too many bytes: ${written}`);
     }
-    view[writeAt + written] = 0;  // null-terminate
+    view[WRITE_AT + size] = 0;  // null-terminate
 
-    const tokenAt = exports._xx_setup(writeAt);
-    const tokenView = new Int32Array(view.buffer, tokenAt, 20 >> 2);  // in 32-bit
+    const tokenAt = exports._xx_setup(WRITE_AT);
+    const tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);  // in 32-bit
     handler = (special) => {
       // nb. tokenView[4] is actually uint32_t, but it's not used anyway
-      callback(tokenView[0] - writeAt, tokenView[1], tokenView[2], tokenView[3], special);
+      callback(tokenView[0] - WRITE_AT, tokenView[1], tokenView[2], tokenView[3], special);
     };
 
     let ret = 0;
@@ -144,7 +136,7 @@ export default async function build(modulePromise, pages = 128) {
 
     // Otherwise, generate a sane error.
     const lineNo = tokenView[2];
-    const {line, index} = lineAround(view, at, writeAt);
+    const {line, index} = lineAround(view, at, WRITE_AT);
     throw new TypeError(`[${lineNo}:${index}] ${ERRORS[ret] || '?'}:\n${line}\n${'^'.padStart(index + 1)}`);
   };
 
