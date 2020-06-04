@@ -416,9 +416,19 @@ static int consume_definition_list(int context) {
         return 0;  // unhandled/unexpected
     }
 
-    if (td->cursor.hash == MISC_EQUALS) {
-      internal_next();
-      _check(consume_optional_expr(context));
+    // FIXME: This is a little gross, since we handle this in both the definition list as well as
+    // expr code. It's an argument to merge?
+    switch (td->cursor.hash) {
+      case LIT_IN:
+      case LIT_OF:
+        internal_next_update(TOKEN_OP);
+        _check(consume_optional_expr(context));
+        break;
+
+      case MISC_EQUALS:
+        internal_next();
+        _check(consume_optional_expr(context));
+        break;
     }
 
     if (td->cursor.hash != MISC_COMMA) {
@@ -584,6 +594,7 @@ static int consume_optional_expr(int context) {
       case TOKEN_BRACE:
         if (seen_any && value_line) {
           // e.g. "(foo {})" is invalid, but "(foo + {})" is ok
+          // we need this as "foo\n{}" must break out of this
           return 0;
         }
         _check(consume_dict(context));
@@ -681,6 +692,9 @@ static int consume_optional_expr(int context) {
             } else if (value_line) {
               return 0;  // value after value
             }
+
+            // regular symbol
+            // FIXME: if seen_any=0, could be lvalue
         }
 
         _check(prsr_update(type));
