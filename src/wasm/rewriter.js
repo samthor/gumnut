@@ -20,12 +20,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import build from './wrap.js';
+import build, {stringFrom, specials} from './wrap.js';
 import stream from 'stream';
 
 const PENDING_BUFFER_MAX = 1024 * 16;
-
-const decoder = new TextDecoder('utf-8');
 
 /**
  * Builds a method which rewrites imports from a passed filename.
@@ -58,7 +56,7 @@ export default async function rewriter(resolve, pages = 128) {
     let sent = 0;
 
     run(stat.size, prepare, (p, len, line_no, type, special) => {
-      if (special !== 1) {
+      if (special !== specials.modulePath) {
         if (p - sent > PENDING_BUFFER_MAX) {
           // send some data, we've gone through a lot
           readable.push(buffer.subarray(sent, p));
@@ -67,7 +65,7 @@ export default async function rewriter(resolve, pages = 128) {
         return;
       }
 
-      const s = parseStringLiteralInner(buffer.subarray(p + 1, p + len - 1));
+      const s = stringFrom(buffer.subarray(p + 1, p + len - 1));
       const out = resolve(s, f);
       if (out == null || typeof out !== 'string') {
         return;  // do nothing, data will be sent later
@@ -88,27 +86,5 @@ export default async function rewriter(resolve, pages = 128) {
     readable.push(null);
     return readable;
   };
-}
-
-
-/**
- * @param {!Uint8Array} view
- * @return {string}
- */
-function parseStringLiteralInner(view) {
-  if (view.some((c) => c === 92)) {
-    // take the slow train, choo choo, filter out slashes
-    let skip = false;
-    view = view.filter((c, index) => {
-      if (skip) {
-        skip = false;
-        return true;  // always allow
-      }
-      skip = (c === 92);
-      return !skip;
-    });
-  }
-
-  return decoder.decode(view);
 }
 

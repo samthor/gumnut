@@ -20,6 +20,8 @@
 
 const STACK_PAGES = 4;
 
+const decoder = new TextDecoder('utf-8');
+
 const ERROR__UNEXPECTED = -1;
 const ERROR__STACK = -2;
 const ERROR__INTERNAL = -3;
@@ -28,6 +30,14 @@ const ERRORS = Object.freeze({
   [ERROR__UNEXPECTED]: 'unexpected',
   [ERROR__STACK]: 'stack',
   [ERROR__INTERNAL]: 'internal',
+});
+
+export const specials = Object.seal({
+  modulePath: 1,
+  declare: 2,
+  declareTop: 4,
+  ambigiousAsync: 8,
+  property: 16,
 });
 
 async function initialize(modulePromise, callback, pages) {
@@ -139,6 +149,27 @@ export default async function build(modulePromise, pages = 128) {
   };
 
   return run;
+}
+
+/**
+ * @param {!Uint8Array} view
+ * @return {string}
+ */
+export function stringFrom(view) {
+  if (view.some((c) => c === 92)) {
+    // take the slow train, choo choo, filter out slashes
+    let skip = false;
+    view = view.filter((c, index) => {
+      if (skip) {
+        skip = false;
+        return true;  // always allow
+      }
+      skip = (c === 92);
+      return !skip;
+    });
+  }
+
+  return decoder.decode(view);
 }
 
 /**
