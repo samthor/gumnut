@@ -34,9 +34,9 @@ static int top_context;
 static int consume_statement(int, int);
 static int consume_expr_group(int);
 static int consume_optional_expr(int);
-static int consume_class(int);
+static int consume_class(int, int);
 static int consume_module_list(int);
-static int consume_function(int);
+static int consume_function(int, int);
 static int consume_expr_compound(int);
 static int consume_definition_list(int);
 static int consume_string(int);
@@ -123,7 +123,7 @@ int consume_export(int context) {
   // if this is class/function, consume with no value
   switch (td->cursor.hash) {
     case LIT_CLASS:
-      return consume_class(context);
+      return consume_class(context, SPECIAL__DECLARE);
 
     case LIT_ASYNC:
       prsr_peek();
@@ -133,7 +133,7 @@ int consume_export(int context) {
       // fall-through
 
     case LIT_FUNCTION:
-      return consume_function(context);
+      return consume_function(context, SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
   }
 
   // "export {..." or "export *" or "export default *"
@@ -160,8 +160,27 @@ int consume_export(int context) {
   return consume_expr_compound(context);
 }
 
+inline static int consume_defn_name(int special) {
+#ifdef DEBUG
+  if (td->cursor.type != TOKEN_LIT) {
+    debugf("expected name\n");
+    return ERROR__UNEXPECTED;
+  }
+#endif
+  if (special) {
+    // this is a decl so the name is important
+    prsr_update(TOKEN_SYMBOL);  // nb. should ban reserved words
+    modp_callback(special);
+    internal_next_comment();
+  } else {
+    // otherwise, it's actually just a lit
+    internal_next();
+  }
+  return 0;
+}
+
 // consumes "async function foo ()"
-int consume_function(int context) {
+int consume_function(int context, int special) {
   int statement_context = context;
 
   // check for leading async and update context
@@ -186,7 +205,7 @@ int consume_function(int context) {
 
   // check for optional function name
   if (td->cursor.type == TOKEN_LIT) {
-    internal_next_update(TOKEN_SYMBOL);  // nb. should ban reserved words
+    _check(consume_defn_name(special));
   }
 
   // check for parens (nb. should be required)
@@ -211,7 +230,7 @@ int consume_async_expr(int context) {
   switch (peek_type) {
     case TOKEN_LIT:
       if (prsr_peek_is_function()) {
-        return consume_function(context);
+        return consume_function(context, 0);
       }
 
       // "async namehere"
@@ -658,12 +677,12 @@ static int consume_optional_expr(int context) {
 
           case LIT_FUNCTION:
             _transition_to_value();
-            _check(consume_function(context));
+            _check(consume_function(context, 0));
             continue;
 
           case LIT_CLASS:
             _transition_to_value();
-            _check(consume_class(context));
+            _check(consume_class(context, 0));
             continue;
 
         // nb. below here are mostly migrations (symbol or op)
@@ -841,7 +860,7 @@ static int consume_expr_group(int context) {
   return 0;
 }
 
-static int consume_class(int context) {
+static int consume_class(int context, int special) {
 #ifdef DEBUG
   if (td->cursor.hash != LIT_CLASS) {
     debugf("expected class keyword\n");
@@ -852,7 +871,7 @@ static int consume_class(int context) {
 
   if (td->cursor.type == TOKEN_LIT) {
     if (td->cursor.hash != LIT_EXTENDS) {
-      internal_next_update(TOKEN_SYMBOL);  // nb. should ban reserved words
+      _check(consume_defn_name(special));
     }
     if (td->cursor.hash == LIT_EXTENDS) {
       internal_next_update(TOKEN_KEYWORD);
@@ -918,7 +937,7 @@ static int consume_statement(int context, int special_scope) {
         case LIT_ASYNC: {
           if (prsr_peek() == TOKEN_LIT && prsr_peek_is_function()) {
             // only match "async function", as others are expr (e.g. "async () => {}")
-            return consume_function(context);
+            return consume_function(context, SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
           }
           // fall-through
         }
@@ -1007,10 +1026,10 @@ static int consume_statement(int context, int special_scope) {
       return consume_export(context);
 
     case LIT_CLASS:
-      return consume_class(context);
+      return consume_class(context, SPECIAL__DECLARE);
 
     case LIT_FUNCTION:
-      return consume_function(context);
+      return consume_function(context, SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
 
     case LIT_DEBUGGER: {
       int line_no = td->cursor.line_no;
