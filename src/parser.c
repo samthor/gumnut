@@ -90,7 +90,7 @@ static int consume_import_module_special() {
   return 0;
 }
 
-int consume_import(int context) {
+static int consume_import(int context) {
 #ifdef DEBUG
   if (td->cursor.hash != LIT_IMPORT) {
     debugf("missing import keyword\n");
@@ -114,7 +114,7 @@ int consume_import(int context) {
   return consume_import_module_special();
 }
 
-int consume_export(int context) {
+static int consume_export(int context) {
 #ifdef DEBUG
   if (td->cursor.hash != LIT_EXPORT) {
     debugf("missing export keyword\n");
@@ -188,7 +188,7 @@ inline static int consume_defn_name(int special) {
 }
 
 // consumes "async function foo ()"
-int consume_function(int context, int special) {
+static int consume_function(int context, int special) {
   int statement_context = context;
 
   // check for leading async and update context
@@ -223,7 +223,7 @@ int consume_function(int context, int special) {
   return consume_statement(statement_context, SPECIAL__SCOPE);
 }
 
-int is_arrowfunc_internal(int context) {
+static int is_arrowfunc_internal(int context) {
   if (td->cursor.hash == LIT_ASYNC) {
     internal_next_comment();
   }
@@ -303,10 +303,14 @@ int is_arrowfunc_internal(int context) {
   return ERROR__INTERNAL;
 }
 
-int is_arrowfunc(int context) {
-  // short-circuit for "blah =>"
-  if (td->cursor.type == TOKEN_LIT && td->cursor.hash != LIT_ASYNC) {
-    return (prsr_peek() == TOKEN_OP && td->peek_at[0] == '=' && td->peek_at[1] == '>');
+static int is_arrowfunc(int context) {
+  // short-circuit for "blah =>" and "async blah" (assumed => follows)
+  if (td->cursor.type == TOKEN_LIT) {
+    int peek = prsr_peek();
+    if (td->cursor.hash == LIT_ASYNC) {
+      return peek == TOKEN_LIT;
+    }
+    return peek == TOKEN_OP && td->peek_at[0] == '=' && td->peek_at[1] == '>';
   }
 
   // put this on stack so we don't have to actually allocate anything
@@ -340,7 +344,7 @@ int is_arrowfunc(int context) {
 }
 
 // we assume that we're pointing at one (is_arrowfunc has returned true)
-int consume_arrowfunc(int context) {
+static int consume_arrowfunc(int context) {
   int method_context = context;
 
   // "async" prefix
@@ -386,7 +390,7 @@ int consume_arrowfunc(int context) {
   return consume_optional_expr(method_context);
 }
 
-int consume_module_list(int context) {
+static int consume_module_list(int context) {
   for (;;) {
     if (td->cursor.type == TOKEN_BRACE) {
       internal_next();
