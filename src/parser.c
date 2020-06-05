@@ -574,8 +574,6 @@ static int consume_dict(int context) {
   internal_next();
 
   for (;;) {
-    int method_context = context;
-
     if (td->cursor.hash == MISC_SPREAD) {
       internal_next();
       _check(consume_optional_expr(context));
@@ -588,12 +586,22 @@ static int consume_dict(int context) {
     }
 
     // "async" prefix
-    if (td->cursor.hash == LIT_ASYNC && prsr_peek() != TOKEN_PAREN) {
-      // "async(" is a valid function name, sigh
-      method_context |= CONTEXT__ASYNC;
-      internal_next_update(TOKEN_KEYWORD);
-    } else {
-      method_context &= ~(CONTEXT__ASYNC);
+    int method_context = context & ~(CONTEXT__ASYNC);
+    if (td->cursor.hash == LIT_ASYNC) {
+      int peek_type = prsr_peek();
+      switch (peek_type) {
+        case TOKEN_OP:
+          if (td->peek_at[0] != '*') {
+            // nb. could be '**' or '*=' but invalid/nonsensical
+            break;
+          }
+          // fall-through
+
+        case TOKEN_LIT:
+          internal_next_update(TOKEN_KEYWORD);
+          method_context |= CONTEXT__ASYNC;
+          break;
+      }
     }
 
     // generator
