@@ -252,10 +252,14 @@ int is_arrowfunc_internal(int context) {
 
   internal_next_comment();  // move over TOKEN_PAREN
 
-  while (td->cursor.type != TOKEN_CLOSE) {
+  for (;;) {
     // consume until we find close
 
     switch (td->cursor.type) {
+      case TOKEN_CLOSE:
+        prsr_peek();
+        return (td->peek_at[0] == '=' && td->peek_at[1] == '>');
+
       case TOKEN_LIT:
         // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
         internal_next_comment();
@@ -267,18 +271,20 @@ int is_arrowfunc_internal(int context) {
           return 0;  // error is not arrowfunc!
         }
         break;
+
+      case TOKEN_OP:
+        // nb. "async(,)" isn't really allowed but eh
+        if (td->cursor.hash == MISC_COMMA) {
+          internal_next_comment();
+          continue;
+        }
+        return 0;
+
+      default:
+        return 0;
     }
 
-    if (td->cursor.type == TOKEN_CLOSE) {
-      break;  // leave loop, check for =>
-    } else if (td->cursor.hash == MISC_COMMA) {
-      internal_next_comment();  // consume comma
-
-      if (td->cursor.type != TOKEN_LIT) {
-        return 0;  // "(x,)" cannot be arrowfunc
-      }
-      continue;
-    } else if (td->cursor.hash == MISC_EQUALS) {
+    if (td->cursor.hash == MISC_EQUALS) {
       internal_next_comment();  // consume equals
 
       // right-side of equals can be a valid expr
@@ -286,15 +292,15 @@ int is_arrowfunc_internal(int context) {
       if (consume_optional_expr(context)) {
         return 0;  // error is not arrowfunc!
       }
-
-    } else {
-      // nb. should also catch EOF
-      return 0;
     }
+
+    if (td->cursor.hash == MISC_COMMA || td->cursor.type == TOKEN_CLOSE) {
+      continue;
+    }
+    return 0;
   }
 
-  prsr_peek();
-  return (td->peek_at[0] == '=' && td->peek_at[1] == '>');
+  return ERROR__INTERNAL;
 }
 
 int is_arrowfunc(int context) {
@@ -553,6 +559,13 @@ static int consume_definition_list(int context) {
         _check(consume_destructuring(context, special));
         break;
 
+      case TOKEN_OP:
+        if (td->cursor.hash == MISC_COMMA) {
+          internal_next();
+          continue;
+        }
+        return 0;
+
       default:
         return 0;  // unhandled/unexpected
     }
@@ -807,13 +820,14 @@ static int consume_optional_expr(int context) {
             continue;
 
           case LIT_ASYNC:
-            _transition_to_value();  // always results in value
             if (is_arrowfunc(context)) {
+              _transition_to_value();
               _check(consume_arrowfunc(context));
               continue;
             }
             prsr_peek();
             if (prsr_peek_is_function()) {
+              _transition_to_value();
               _check(consume_function(context, 0));
             }
             break;  // not "async () =>" or "async function", treat as value
