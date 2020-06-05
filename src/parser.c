@@ -304,7 +304,10 @@ int is_arrowfunc_internal(int context) {
 }
 
 int is_arrowfunc(int context) {
-  // TODO: we could short-circuit if we're a lit by peeking for =>
+  // short-circuit for "blah =>"
+  if (td->cursor.type == TOKEN_LIT && td->cursor.hash != LIT_ASYNC) {
+    return (prsr_peek() == TOKEN_OP && td->peek_at[0] == '=' && td->peek_at[1] == '>');
+  }
 
   // put this on stack so we don't have to actually allocate anything
   char *restore_resume = td->cursor.p;
@@ -879,6 +882,12 @@ static int consume_optional_expr(int context) {
 
             // regular symbol
             // FIXME: if _seen_any=0, could be lvalue
+        }
+
+        if (type == TOKEN_SYMBOL && is_arrowfunc(context)) {
+          _transition_to_value();
+          _check(consume_arrowfunc(context));
+          continue;
         }
 
         _check(prsr_update(type));
