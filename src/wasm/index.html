@@ -88,13 +88,7 @@ window.addEventListener('load', (ev) => {
         output.append('\n', node);
       }
 
-      const backing = view.subarray(token.at, token.at + token.len);
-      const s = decoder.decode(backing);
-      const node = append(s, TOKEN_LOOKUP(token.type));
-
-      if (token.invalid) {
-        node.classList.add('__invalid');
-      }
+      const node = append(token.s, TOKEN_LOOKUP(token.type));
 
       let special = token.special;
       for (let check = 1; special; check <<= 1) {
@@ -117,7 +111,7 @@ window.addEventListener('load', (ev) => {
     }
   };
 
-  runnerPromise.then((runner) => {
+  runnerPromise.then(({prepare, run}) => {
     const update = () => {
       const bytes = encoder.encode(input.value);
       const tokens = [];
@@ -126,11 +120,17 @@ window.addEventListener('load', (ev) => {
 
       let err = null;
       try {
-        runner(bytes.length, (buffer) => {
+        const token = prepare(bytes.length, (buffer) => {
           buffer.set(bytes);
-        }, (at, len, lineNo, type, special) => {
-          const token = {at, len, lineNo, type, special};
-          tokens.push(token);
+        });
+        run((special) => {
+          const t = {
+            lineNo: token.lineNo(),
+            type: token.type(),
+            s: token.string(),
+            special,
+          };
+          tokens.push(t);
         });
       } catch (e) {
         err = e;
@@ -204,9 +204,6 @@ document.addEventListener('drop', (ev) => {
     color: white;
     margin-right: 1ch;
   }
-  pre aside.__invalid {
-    background: red;
-  }
   pre aside.__skip {
     background: #777;
     color: transparent;
@@ -249,7 +246,7 @@ document.addEventListener('drop', (ev) => {
   pre span._property {
     font-style: italic;
   }
-  pre span.__invalid {
+  pre span._declare {
     text-decoration: underline;
   }
   pre span._import {

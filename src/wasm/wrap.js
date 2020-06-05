@@ -86,6 +86,7 @@ export default async function build(modulePromise) {
   });
 
   const {exports} = instance;
+  let tokenView = null;
 
   return {
     prepare(size, callback) {
@@ -105,7 +106,7 @@ export default async function build(modulePromise) {
       view[WRITE_AT + size] = 0;  // null-terminate
 
       const tokenAt = exports._xx_setup(WRITE_AT);
-      const tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);  // in 32-bit
+      tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);  // in 32-bit
 
       // nb. getters are slow, use real functions.
       return {
@@ -130,11 +131,11 @@ export default async function build(modulePromise) {
         },
 
         view() {
-          return view.subarray(tokenView[0], tokenView[1]);
+          return view.subarray(tokenView[0], tokenView[0] + tokenView[1]);
         },
 
         string() {
-          return decoder.decode(view.subarray(tokenView[0], tokenView[1]));
+          return decoder.decode(view.subarray(tokenView[0], tokenView[0] + tokenView[1]));
         },
       };
     },
@@ -156,6 +157,7 @@ export default async function build(modulePromise) {
         return;
       }
       const at = tokenView[0];
+      const view = new Uint8Array(memory.buffer);
 
       // Special-case crash on a NULL byte. There was no more input.
       if (view[at] === 0) {

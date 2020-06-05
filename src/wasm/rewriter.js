@@ -18,12 +18,8 @@
  * @fileoverview Node interface to a JS imports rewriter.
  */
 
-import fs from 'fs';
-import path from 'path';
-import build, {stringFrom, specials} from './wrap.js';
-import stream from 'stream';
-
-const PENDING_BUFFER_MAX = 1024 * 16;
+import {specials} from './wrap.js';
+import wrapper from './node.js';
 
 /**
  * Builds a method which rewrites imports from a passed filename.
@@ -32,61 +28,21 @@ const PENDING_BUFFER_MAX = 1024 * 16;
  * @return {function(string): !ReadableStream}
  */
 export default async function rewriter(resolve) {
-  const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
-  const wasm = fs.readFileSync(source);
-
-  const {prepare, run} = await build(wasm);
+  const w = await wrapper();
 
   return (f) => {
-    const fd = fs.openSync(f);
-    const stat = fs.fstatSync(fd);
-    const readable = new stream.Readable();
+    const {token, run} = w(f);
 
-    let buffer = null;
-    const token = prepare(stat.size, (b) => {
-      buffer = b;
-
-      const read = fs.readSync(fd, buffer, 0, stat.size, 0);
-      if (read !== stat.size) {
-        throw new Error(`did not read all bytes at once: ${read}/${stat.size}`);
-      }
-    });
-
-    let sent = 0;
-
-    run((special) => {
-      const p = token.at();
-
+    return run((special) => {
       if (special !== specials.modulePath) {
-        if (p - sent > PENDING_BUFFER_MAX) {
-          // send some data, we've gone through a lot
-          readable.push(buffer.subarray(sent, p));
-          sent = p;
-        }
         return;
       }
-
-      const len = token.len();
-      const s = stringFrom(buffer.subarray(p + 1, p + len - 1));
-      const out = resolve(s, f);
-      if (out == null || typeof out !== 'string') {
-        return;  // do nothing, data will be sent later
+      const s = token.string();
+      const out = resolve(s.substr(1, s.length - 2), f);
+      if (out && typeof out === 'string') {
+        return out;
       }
-
-      // bump to high water mark
-      readable.push(buffer.subarray(sent, p));
-
-      // write new import
-      readable.push(JSON.stringify(out), 'utf-8');
-
-      // move past the "original" string
-      sent = p + len;
     });
-
-    // send rest
-    readable.push(buffer.subarray(sent, buffer.length));
-    readable.push(null);
-    return readable;
   };
 }
 
