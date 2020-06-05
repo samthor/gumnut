@@ -485,6 +485,11 @@ static int consume_destructuring(int context, int special) {
           internal_next();
           continue;
         }
+        if (td->cursor.hash == MISC_SPREAD) {
+          // this basically effects the next lit or destructured thing
+          internal_next();
+          continue;
+        }
         // fall-through
 
       default:
@@ -510,13 +515,11 @@ static int consume_destructuring(int context, int special) {
       }
     }
 
-    if (td->cursor.hash == MISC_COMMA) {
+    // consume default
+    if (td->cursor.hash == MISC_EQUALS) {
       internal_next();
-    } else if (td->cursor.type != TOKEN_CLOSE) {
-      debugf("non-comma or close in destructuring: %d\n", td->cursor.type);
-      return ERROR__UNEXPECTED;
+      _check(consume_optional_expr(context));
     }
-
   }
 }
 
@@ -561,6 +564,12 @@ static int consume_definition_list(int context) {
 
       case TOKEN_OP:
         if (td->cursor.hash == MISC_COMMA) {
+          internal_next();
+          continue;
+        }
+        if (td->cursor.hash == MISC_SPREAD) {
+          // nb. this doesn't make sense in var/const/lit, but is nonsensical
+          // this basically effects the next lit or destructured thing
           internal_next();
           continue;
         }
