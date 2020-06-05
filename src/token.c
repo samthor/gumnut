@@ -919,3 +919,12 @@ int prsr_peek_is_function() {
     !lookup_symbol[p[8]]
   );
 }
+
+int prsr_peek_is_as() {
+  char *p = td->peek_at;
+  return (
+    p[0] == 'a' &&
+    p[1] == 's' &&
+    !lookup_symbol[p[2]]
+  );
+}

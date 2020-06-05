@@ -299,7 +299,17 @@ int consume_module_list(int context) {
         }
         internal_next();
       } else if (td->cursor.type == TOKEN_LIT) {
-        internal_next_update(TOKEN_SYMBOL);
+        // peek for "as x"
+        // nb. this can be "as" or "from", this is gross
+        if (prsr_peek() == TOKEN_LIT && prsr_peek_is_as()) {
+          // this isn't a definition, but it's a property of the thing being imported
+          modp_callback(SPECIAL__PROPERTY);
+          internal_next_comment();
+        } else {
+          prsr_update(TOKEN_SYMBOL);
+          modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+          internal_next_comment();
+        }
       } else {
         return 0;
       }
@@ -311,7 +321,9 @@ int consume_module_list(int context) {
           debugf("missing literal after 'as'\n");
           return ERROR__UNEXPECTED;
         }
-        internal_next_update(TOKEN_SYMBOL);
+        prsr_update(TOKEN_SYMBOL);
+        modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+        internal_next_comment();
       }
     }
 

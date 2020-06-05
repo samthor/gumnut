@@ -54,4 +54,7 @@ int prsr_peek();
 // Special-case. Is the current peek cursor pointing at "function"?
 int prsr_peek_is_function();
 
+// Special-case. Is the current peek cursor pointing at "as"?
+int prsr_peek_is_as();
+
 #endif//_TOKEN_H
