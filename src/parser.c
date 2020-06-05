@@ -48,6 +48,7 @@ static int consume_expr_compound(int);
 static int consume_definition_list(int);
 static int consume_string(int);
 static int consume_destructuring(int, int);
+static int consume_optional_arg_group(int);
 
 static inline void internal_next_comment() {
   for (;;) {
@@ -216,9 +217,7 @@ int consume_function(int context, int special) {
   }
 
   // check for parens (nb. should be required)
-  if (td->cursor.type == TOKEN_PAREN) {
-    _check(consume_expr_group(context));
-  }
+  _check(consume_optional_arg_group(context));
 
   // consume function body
   return consume_statement(statement_context, SPECIAL__SCOPE);
@@ -513,6 +512,21 @@ static int consume_destructuring(int context, int special) {
     }
 
   }
+}
+
+// consume (x=1, y=2) arg list
+static int consume_optional_arg_group(int context) {
+  if (td->cursor.type != TOKEN_PAREN) {
+    return 0;
+  }
+  internal_next();
+  _check(consume_definition_list(context));
+  if (td->cursor.type != TOKEN_CLOSE) {
+    debugf("arg_group did not finish with close\n");
+    return ERROR__UNEXPECTED;
+  }
+  internal_next();
+  return 0;
 }
 
 // consume list of definitions, i.e., on "var" etc (also allowed to be on first arg)
