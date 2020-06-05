@@ -26,5 +26,20 @@ async(/* anything can go here */) => {}
 
 See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-functions-break-javascript-parsers-1ldp) for more details.
 
-In this case, prsr reports `async` as a `TOKEN_LIT`, which is an ambigious token.
-You can change it after-the-fact if this is important to you.
+The parser resolves this ambiguity, but has a pathological expansion in some cases. For this parser to be useful as a bundler, non-async arrow functions also require this expansion: i.e., does `(` start an arrow function, or normal parens?
+
+The pathalogical expansion triggers where further arrow functions are found in the _arguments_ of an arrow function, e.g.:
+
+```js
+(a =
+  (b =
+    async (c =
+      (final =  () => {}) => {}
+    ) => {}
+  ) => {}
+) => {}
+```
+
+The above code (with five layered ambiguities) will result in 1+2+4+8+16 extra passes over this section, or `(2^depth - 1)` extra passes.
+
+At a minimum, any section that is ambigiously an arrow function will be parsed twice.

@@ -790,7 +790,7 @@ int prsr_next() {
   switch (ret) {
     case TOKEN_COLON:
       // inside ternary stack, close it
-      if (td->depth && td->stack[td->depth - 1] == TOKEN_TERNARY) {
+      if (td->stack[td->depth - 1] == TOKEN_TERNARY) {
         td->cursor.type = TOKEN_CLOSE;
         --td->depth;
       }
@@ -808,7 +808,7 @@ int prsr_next() {
       break;
 
     case TOKEN_CLOSE:
-      if (!td->depth) {
+      if (td->depth == 1) {
         ret = ERROR__STACK;
         break;
       }
@@ -830,6 +830,7 @@ int prsr_next() {
 void prsr_init_token(char *p) {
   bzero(td, sizeof(tokendef));
   td->line_no = 1;
+  td->depth = 1;
 
   if (p[0] == '#' && p[1] == '!') {
     // special-case hashbang opener

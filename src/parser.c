@@ -29,6 +29,13 @@
 #endif
 
 
+#define _modp_callback(v) { \
+  if (!skip_context) { \
+    modp_callback(v); \
+  } \
+}
+
+static int skip_context = 0;
 static int top_context;
 
 static int consume_statement(int, int);
@@ -40,6 +47,7 @@ static int consume_function(int, int);
 static int consume_expr_compound(int);
 static int consume_definition_list(int);
 static int consume_string(int);
+static int consume_destructuring(int, int);
 
 static inline void internal_next_comment() {
   for (;;) {
@@ -47,20 +55,20 @@ static inline void internal_next_comment() {
     if (out != TOKEN_COMMENT) {
       break;
     }
-    modp_callback(0);
+    _modp_callback(0);
   }
 }
 
 // yields previous, places the next useful token in curr, skipping comments
 static void internal_next() {
-  modp_callback(0);
+  _modp_callback(0);
   internal_next_comment();
 }
 
 static void internal_next_update(int type) {
   // TODO: we don't care about return type here
   prsr_update(type);
-  modp_callback(0);
+  _modp_callback(0);
   internal_next_comment();
 }
 
@@ -76,7 +84,7 @@ static int consume_import_module_special() {
     return 0;
   }
 
-  modp_callback(SPECIAL__MODULE_PATH);
+  _modp_callback(SPECIAL__MODULE_PATH);
   internal_next_comment();
   return 0;
 }
@@ -126,8 +134,7 @@ int consume_export(int context) {
       return consume_class(context, SPECIAL__DECLARE);
 
     case LIT_ASYNC:
-      prsr_peek();
-      if (!prsr_peek_is_function()) {
+      if (!(prsr_peek() == TOKEN_LIT && prsr_peek_is_function())) {
         break;
       }
       // fall-through
@@ -170,7 +177,7 @@ inline static int consume_defn_name(int special) {
   if (special) {
     // this is a decl so the name is important
     prsr_update(TOKEN_SYMBOL);  // nb. should ban reserved words
-    modp_callback(special);
+    _modp_callback(special);
     internal_next_comment();
   } else {
     // otherwise, it's actually just a lit
@@ -217,68 +224,158 @@ int consume_function(int context, int special) {
   return consume_statement(statement_context, SPECIAL__SCOPE);
 }
 
-// consumes something starting with async (might be function)
-int consume_async_expr(int context) {
-#ifdef DEBUG
-  if (td->cursor.hash != LIT_ASYNC) {
-    debugf("missing 'async' starter\n");
-    return ERROR__UNEXPECTED;
+int is_arrowfunc_internal(int context) {
+  if (td->cursor.hash == LIT_ASYNC) {
+    internal_next_comment();
   }
-#endif
 
-  int peek_type = prsr_peek();
-  switch (peek_type) {
+  switch (td->cursor.type) {
+  case TOKEN_LIT:
+    if (td->cursor.hash == LIT_FUNCTION) {
+      // found value "async function", not an arrowfunc
+      return 0;
+    }
+    // arrow functions cannot be "async {x} =>", must be lit without paren
+    internal_next_comment();
+    if (td->cursor.hash == MISC_ARROW) {
+      // "async foo =>" or "foo =>"
+      return 1;
+    }
+    // "blah ???", ignore
+    return 0;
+
+  case TOKEN_PAREN:
+    break;
+
+  default:
+    return 0;
+  }
+
+  internal_next_comment();  // move over TOKEN_PAREN
+
+  while (td->cursor.type != TOKEN_CLOSE) {
+    // consume until we find close
+
+    switch (td->cursor.type) {
+      case TOKEN_LIT:
+        // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
+        internal_next_comment();
+        break;
+
+      case TOKEN_BRACE:
+      case TOKEN_ARRAY:
+        if (consume_destructuring(context, 0)) {
+          return 0;  // error is not arrowfunc!
+        }
+        break;
+    }
+
+    if (td->cursor.type == TOKEN_CLOSE) {
+      break;  // leave loop, check for =>
+    } else if (td->cursor.hash == MISC_COMMA) {
+      internal_next_comment();  // consume comma
+
+      if (td->cursor.type != TOKEN_LIT) {
+        return 0;  // "(x,)" cannot be arrowfunc
+      }
+      continue;
+    } else if (td->cursor.hash == MISC_EQUALS) {
+      internal_next_comment();  // consume equals
+
+      // right-side of equals can be a valid expr
+      // TODO: if this doesn't move it's invalid/expr, which is a sign of not being arrowfunc
+      if (consume_optional_expr(context)) {
+        return 0;  // error is not arrowfunc!
+      }
+
+    } else {
+      // nb. should also catch EOF
+      return 0;
+    }
+  }
+
+  prsr_peek();
+  return (td->peek_at[0] == '=' && td->peek_at[1] == '>');
+}
+
+int is_arrowfunc(int context) {
+  // TODO: we could short-circuit if we're a lit by peeking for =>
+
+  // put this on stack so we don't have to actually allocate anything
+  char *restore_resume = td->cursor.p;
+  int restore_line_no = td->cursor.line_no;
+  uint16_t restore_depth = td->depth;
+  if (td->stack[td->depth - 1] == td->cursor.type) {
+    --restore_depth;  // this token increased depth, just pop for restore
+  }
+
+  ++skip_context;  // reentrant so must ++
+
+  int ret = is_arrowfunc_internal(context);
+
+  --skip_context;
+
+  td->resume = restore_resume;
+  td->peek_at = restore_resume;
+  td->line_no = restore_line_no;
+  td->depth = restore_depth;
+  td->cursor.len = 0;
+  td->cursor.type = TOKEN_UNKNOWN;
+
+  debugf("got is_arrowfunc=%d, resume=%c\n", ret, restore_resume[0]);
+  prsr_next();
+  if (td->cursor.type == TOKEN_COMMENT) {
+    return ERROR__INTERNAL;  // should never happen as we're pointing at value
+  }
+
+  return ret;
+}
+
+// we assume that we're pointing at one (is_arrowfunc has returned true)
+int consume_arrowfunc(int context) {
+  int method_context = context;
+
+  // "async" prefix
+  if (td->cursor.hash == LIT_ASYNC) {
+    method_context |= CONTEXT__ASYNC;
+    internal_next_update(TOKEN_KEYWORD);
+  } else {
+    method_context &= ~(CONTEXT__ASYNC);
+  }
+
+  switch (td->cursor.type) {
     case TOKEN_LIT:
-      if (prsr_peek_is_function()) {
-        return consume_function(context, 0);
-      }
-
-      // "async namehere"
-      internal_next_update(TOKEN_KEYWORD);
-      internal_next_update(TOKEN_SYMBOL);
-
-      if (td->cursor.hash != MISC_ARROW) {
-        debugf("could not match arrow after 'async foo'\n");
-        return ERROR__UNEXPECTED;
-      }
+      prsr_update(TOKEN_SYMBOL);
+      modp_callback(SPECIAL__DECLARE);
+      internal_next_comment();
       break;
 
     case TOKEN_PAREN:
-      // nb. we explicitly yield TOKEN_LIT here
-      modp_callback(SPECIAL__AMBIGUOUS_ASYNC);
-      internal_next_comment();
+      internal_next();
+      _check(consume_definition_list(context));
 
-      // _maybe_ function
-      _check(consume_expr_group(context));
-
-      if (td->cursor.hash != MISC_ARROW) {
-        return 0;  // not a function, just bail (has value)
+      if (td->cursor.type != TOKEN_CLOSE) {
+        debugf("arrowfunc () did not end with close\n");
+        return ERROR__UNEXPECTED;
       }
+      internal_next();
       break;
 
-    case TOKEN_OP:
-      if (td->peek_at[0] == '=' && td->peek_at[1] == '>') {
-        internal_next_update(TOKEN_KEYWORD);
-        // nb. allow "async =>" even though broken
-        break;
-      }
-      // fall-through
-
     default:
-      internal_next_update(TOKEN_SYMBOL);
-      return 0;  // unhandled
+      debugf("got unknown part of arrowfunc: %d\n", td->cursor.type);
+      return ERROR__UNEXPECTED;
   }
 
-  internal_next();  // consume arrow
+  if (td->cursor.hash != MISC_ARROW) {
+    debugf("arrowfunc missing =>\n");
+    return ERROR__UNEXPECTED;
+  }
+  internal_next();  // consume =>
 
-  int async_context = context | CONTEXT__ASYNC;
   if (td->cursor.type == TOKEN_BRACE) {
-    _check(consume_statement(async_context, SPECIAL__SCOPE));
-  } else {
-    _check(consume_optional_expr(async_context));
+    _check(consume_statement(method_context, SPECIAL__SCOPE));
   }
-
-  return 0;
+  return consume_optional_expr(method_context);
 }
 
 int consume_module_list(int context) {
@@ -303,11 +400,11 @@ int consume_module_list(int context) {
         // nb. this can be "as" or "from", this is gross
         if (prsr_peek() == TOKEN_LIT && prsr_peek_is_as()) {
           // this isn't a definition, but it's a property of the thing being imported
-          modp_callback(SPECIAL__PROPERTY);
+          _modp_callback(SPECIAL__PROPERTY);
           internal_next_comment();
         } else {
           prsr_update(TOKEN_SYMBOL);
-          modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+          _modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
           internal_next_comment();
         }
       } else {
@@ -322,7 +419,7 @@ int consume_module_list(int context) {
           return ERROR__UNEXPECTED;
         }
         prsr_update(TOKEN_SYMBOL);
-        modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+        _modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
         internal_next_comment();
       }
     }
@@ -354,11 +451,11 @@ static int consume_destructuring(int context, int special) {
       case TOKEN_LIT:
         // if this [foo] or {foo} without colon, announce now
         if (prsr_peek() == TOKEN_COLON) {
-          modp_callback(SPECIAL__PROPERTY);  // variable name is after colon
+          _modp_callback(SPECIAL__PROPERTY);  // variable name is after colon
         } else {
           // e.g. "const {x} = ...", x is a symbol, decl and property
           prsr_update(TOKEN_SYMBOL);
-          modp_callback(special | SPECIAL__PROPERTY);
+          _modp_callback(special | SPECIAL__PROPERTY);
         }
         internal_next_comment();
         break;
@@ -402,7 +499,7 @@ static int consume_destructuring(int context, int special) {
 
         case TOKEN_LIT:
           prsr_update(TOKEN_SYMBOL);
-          modp_callback(special);  // declaring new prop
+          _modp_callback(special);  // declaring new prop
           internal_next_comment();
           break;
       }
@@ -418,24 +515,22 @@ static int consume_destructuring(int context, int special) {
   }
 }
 
-// consume list of definitions, i.e., on "var" etc
+// consume list of definitions, i.e., on "var" etc (also allowed to be on first arg)
 static int consume_definition_list(int context) {
-  if (!(td->cursor.hash & _MASK_DECL)) {
-    return ERROR__UNEXPECTED;
+  int special = SPECIAL__DECLARE | SPECIAL__DECLARE_TOP;
+  if (td->cursor.hash == LIT_LET || td->cursor.hash == LIT_CONST) {
+    special = SPECIAL__DECLARE;
   }
-
-  int special = SPECIAL__DECLARE;
-  if (td->cursor.hash == LIT_VAR) {
-    special |= SPECIAL__DECLARE_TOP;
+  if (td->cursor.hash & _MASK_DECL) {
+    internal_next_update(TOKEN_KEYWORD);
   }
-  internal_next_update(TOKEN_KEYWORD);
 
   for (;;) {
     switch (td->cursor.type) {
       case TOKEN_LIT:
         // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
         prsr_update(TOKEN_SYMBOL);
-        modp_callback(special);
+        _modp_callback(special);
         internal_next_comment();
         break;
 
@@ -533,7 +628,7 @@ static int consume_dict(int context) {
         if (is_symbol) {
           prsr_update(TOKEN_SYMBOL);
         }
-        modp_callback(SPECIAL__PROPERTY);
+        _modp_callback(SPECIAL__PROPERTY);
         internal_next_comment();
         break;
       }
@@ -617,8 +712,10 @@ static int consume_dict(int context) {
 // consumes expr if found (but might not move cursor if cannot)
 static int consume_optional_expr(int context) {
   int value_line = 0;  // line_no of last value
-  int seen_any = 0;
-#define _transition_to_value() { if (value_line) { return 0; } value_line = td->cursor.line_no; seen_any = 1; }
+  char *start = td->cursor.p;
+
+#define _transition_to_value() { if (value_line) { return 0; } value_line = td->cursor.line_no; }
+#define _seen_any (start != td->cursor.p)
 
   for (;;) {
     switch (td->cursor.type) {
@@ -627,28 +724,33 @@ static int consume_optional_expr(int context) {
         continue;  // restart without move
 
       case TOKEN_BRACE:
-        if (seen_any && value_line) {
+        if (_seen_any && value_line) {
           // e.g. "(foo {})" is invalid, but "(foo + {})" is ok
           // we need this as "foo\n{}" must break out of this
           return 0;
         }
         _check(consume_dict(context));
         value_line = td->cursor.line_no;
-        seen_any = 1;
         continue;
 
       case TOKEN_TERNARY:
         // nb. needs value on left (and contents!), but nonsensical otherwise
         _check(consume_expr_group(context));
         value_line = 0;
-        seen_any = 1;
         continue;
 
-      case TOKEN_ARRAY:
       case TOKEN_PAREN:
+        if (!value_line && is_arrowfunc(context)) {
+          _check(consume_arrowfunc(context));
+          value_line = td->cursor.line_no;
+          break;
+        }
+        debugf("not arrowfunc, treating as group, cursor now=%d\n", td->cursor.type);
+        // fall-through, regular group
+
+      case TOKEN_ARRAY:
         _check(consume_expr_group(context));
         value_line = td->cursor.line_no;
-        seen_any = 1;
         continue;
 
       case TOKEN_STRING:
@@ -674,7 +776,7 @@ static int consume_optional_expr(int context) {
           case LIT_VAR:
           case LIT_LET:
           case LIT_CONST:
-            if (seen_any) {
+            if (_seen_any) {
               return 0;
             }
             // nb. only keyword at top-level and in for, but nonsensical otherwise
@@ -683,9 +785,16 @@ static int consume_optional_expr(int context) {
             continue;
 
           case LIT_ASYNC:
-            _transition_to_value();
-            _check(consume_async_expr(context));
-            continue;
+            _transition_to_value();  // always results in value
+            if (is_arrowfunc(context)) {
+              _check(consume_arrowfunc(context));
+              continue;
+            }
+            prsr_peek();
+            if (prsr_peek_is_function()) {
+              _check(consume_function(context, 0));
+            }
+            break;  // not "async () =>" or "async function", treat as value
 
           case LIT_FUNCTION:
             _transition_to_value();
@@ -724,7 +833,7 @@ static int consume_optional_expr(int context) {
             }
 
             // regular symbol
-            // FIXME: if seen_any=0, could be lvalue
+            // FIXME: if _seen_any=0, could be lvalue
         }
 
         _check(prsr_update(type));
@@ -733,7 +842,7 @@ static int consume_optional_expr(int context) {
 
       case TOKEN_OP:
         if (td->cursor.hash & _MASK_UNARY_OP) {
-          if (seen_any && value_line) {
+          if (_seen_any && value_line) {
             // e.g., "var x = 123 new foo" is invalid
             return 0;
           }
@@ -743,23 +852,10 @@ static int consume_optional_expr(int context) {
           case MISC_COMMA:
             return 0;
 
-          case MISC_ARROW: {
-            internal_next();
-            int normal_context = context & ~(CONTEXT__ASYNC);
-            if (td->cursor.type == TOKEN_BRACE) {
-              _check(consume_statement(normal_context, SPECIAL__SCOPE));
-            } else {
-              _check(consume_optional_expr(normal_context));
-            }
-            seen_any = 1;
-            // nb. this has value, but always ends with ) or , etc
-            continue;
-          }
-
           case MISC_NOT:
           case MISC_BITNOT:
             // nb. this matches _MASK_UNARY_OP above
-            if (seen_any && value_line) {
+            if (_seen_any && value_line) {
               // explicitly only takes right arg, so e.g.:
               //   "var x = 123 !foo"
               // ...is invalid.
@@ -774,10 +870,9 @@ static int consume_optional_expr(int context) {
             if (td->cursor.type != TOKEN_LIT) {
               return 0;
             }
-            modp_callback(SPECIAL__PROPERTY);  // not a symbol
+            _modp_callback(SPECIAL__PROPERTY);  // not a symbol
             internal_next_comment();
             value_line = td->cursor.line_no;
-            seen_any = 1;
             continue;
 
           case MISC_INCDEC:
@@ -848,7 +943,7 @@ static int consume_expr_group(int context) {
       break;
 
     default:
-      debugf("expected expr group\n");
+      debugf("expected expr group, was: %d\n", start);
       return ERROR__UNEXPECTED;
   }
   internal_next();
@@ -902,7 +997,7 @@ static int consume_statement(int context, int special_scope) {
       return 0;
 
     case TOKEN_BRACE:
-      modp_callback(special_scope);  // marks for functions
+      _modp_callback(special_scope);  // marks for functions
       internal_next_comment();
 
       while (td->cursor.type != TOKEN_CLOSE) {
@@ -914,7 +1009,7 @@ static int consume_statement(int context, int special_scope) {
         }
       }
 
-      modp_callback(special_scope);  // mark close too
+      _modp_callback(special_scope);  // mark close too
       internal_next_comment();
       return 0;
 
@@ -1082,6 +1177,7 @@ static int consume_statement(int context, int special_scope) {
 token *modp_init(char *p, int _context) {
   prsr_init_token(p);
   top_context = _context;
+  skip_context = 0;
 
   if (td->cursor.type != TOKEN_COMMENT) {
     // n.b. it's possible but unlikely for this to fail (e.g. opens with "}")
@@ -1095,7 +1191,7 @@ int modp_run() {
   char *head = td->cursor.p;
 
   while (td->cursor.type == TOKEN_COMMENT) {
-    modp_callback(0);
+    _modp_callback(0);
     prsr_next();
   }
   _check(consume_statement(top_context, 0));
