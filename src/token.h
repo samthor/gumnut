@@ -57,4 +57,7 @@ int prsr_peek_is_function();
 // Special-case. Is the current peek cursor pointing at "as"?
 int prsr_peek_is_as();
 
+// Special-case. Is the current peek cursor pointing at an op "=>"?
+int prsr_peek_is_arrow();
+
 #endif//_TOKEN_H

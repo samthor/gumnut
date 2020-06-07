@@ -258,7 +258,7 @@ static int is_arrowfunc_internal(int context) {
     switch (td->cursor.type) {
       case TOKEN_CLOSE:
         prsr_peek();
-        return (td->peek_at[0] == '=' && td->peek_at[1] == '>');
+        return prsr_peek_is_arrow();
 
       case TOKEN_LIT:
         // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
@@ -300,6 +300,7 @@ static int is_arrowfunc_internal(int context) {
     return 0;
   }
 
+  debugf("should not get here is_arrowfunc_internal\n");
   return ERROR__INTERNAL;
 }
 
@@ -309,9 +310,9 @@ static int is_arrowfunc(int context) {
     int peek = prsr_peek();
     if (td->cursor.hash != LIT_ASYNC) {
       // looks for "blah =>"
-      return peek == TOKEN_OP && td->peek_at[0] == '=' && td->peek_at[1] == '>';
+      return prsr_peek_is_arrow();
     } else if (peek == TOKEN_LIT) {
-      return 1;  // "async blah", always arrowfunc
+      return !prsr_peek_is_function();  // "async blah", always arrowfunc
     } else if (peek != TOKEN_PAREN) {
       return 0;  // "async ?", async use as e.g., op
     }
@@ -345,6 +346,7 @@ static int is_arrowfunc(int context) {
   debugf("got is_arrowfunc=%d, resume=%c\n", ret, restore_resume[0]);
   prsr_next();
   if (td->cursor.type == TOKEN_COMMENT) {
+    debugf("restore state ended on comment\n");
     return ERROR__INTERNAL;  // should never happen as we're pointing at value
   }
 
@@ -853,6 +855,7 @@ static int consume_optional_expr(int context) {
             if (prsr_peek_is_function()) {
               _transition_to_value();
               _check(consume_function(context, 0));
+              continue;
             }
             break;  // not "async () =>" or "async function", treat as value
 
@@ -996,6 +999,7 @@ static int consume_string(int context) {
 #endif
     internal_next();  // this must be string
   }
+  debugf("should not get here pointing at string\n");
   return ERROR__INTERNAL;  // should not get here
 }
 

@@ -19,6 +19,14 @@
 #include "helper.h"
 #include "token.h"
 
+#ifdef DEBUG
+#include <stdio.h>
+#define debugf(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define debugf (void)sizeof
+#endif
+
+
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
@@ -717,6 +725,7 @@ static inline void eat_token() {
                 break;
               }
               // TODO: match \u{1234}
+              debugf("TODO: handle \\u{1234}\n");
               _retz(ERROR__INTERNAL);
           }
         }
@@ -776,6 +785,7 @@ int prsr_next() {
 
   if (td->cursor.len == 0 && td->cursor.type != TOKEN_UNKNOWN) {
     // TODO: this could also be "TOKEN_OP" check
+    debugf("could not prsr_next(), zero-length cursor\n");
     return ERROR__INTERNAL;
   }
 
@@ -859,6 +869,7 @@ int prsr_update(int type) {
           td->cursor.len = consume_slash_regexp(td->cursor.p);
           break;
         default:
+          debugf("tried to update TOKEN_SLASH to: %d\n", type);
           return ERROR__INTERNAL;
       }
 
@@ -869,12 +880,14 @@ int prsr_update(int type) {
     case TOKEN_LIT:
       // nb. TOKEN_SYMBOL and above are all literal types
       if (!(type == TOKEN_OP || type >= TOKEN_SYMBOL)) {
+        debugf("tried to update TOKEN_LIT to: %d\n", type);
         return ERROR__INTERNAL;
       }
       td->cursor.type = type;
       return 0;
 
     default:
+      debugf("tried to update unhandled type: %d => %d\n", td->cursor.type, type);
       return ERROR__INTERNAL;
   }
 }
@@ -886,6 +899,12 @@ int prsr_peek() {
     return TOKEN_UNKNOWN;
   }
 
+  // nb. this isn't cached if run twice
+#ifdef DEBUG
+  if (td->peek_at > td->resume) {
+    debugf("peek run twice\n");
+  }
+#endif
   td->peek_at = td->resume;
 
   static int line_no = 0;  // never used, just needed as valid ptr
@@ -927,5 +946,13 @@ int prsr_peek_is_as() {
     p[0] == 'a' &&
     p[1] == 's' &&
     !lookup_symbol[p[2]]
+  );
+}
+
+int prsr_peek_is_arrow() {
+  char *p = td->peek_at;
+  return (
+    p[0] == '=' &&
+    p[1] == '>'  // only valid combo
   );
 }
