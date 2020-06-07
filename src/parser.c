@@ -304,13 +304,21 @@ static int is_arrowfunc_internal(int context) {
 }
 
 static int is_arrowfunc(int context) {
-  // short-circuit for "blah =>" and "async blah" (assumed => follows)
+  // short-circuits
   if (td->cursor.type == TOKEN_LIT) {
     int peek = prsr_peek();
-    if (td->cursor.hash == LIT_ASYNC) {
-      return peek == TOKEN_LIT;
+    if (td->cursor.hash != LIT_ASYNC) {
+      // looks for "blah =>"
+      return peek == TOKEN_OP && td->peek_at[0] == '=' && td->peek_at[1] == '>';
+    } else if (peek == TOKEN_LIT) {
+      return 1;  // "async blah", always arrowfunc
+    } else if (peek != TOKEN_PAREN) {
+      return 0;  // "async ?", async use as e.g., op
     }
-    return peek == TOKEN_OP && td->peek_at[0] == '=' && td->peek_at[1] == '>';
+    // otherwise, continue below
+  } else if (td->cursor.type != TOKEN_PAREN) {
+    // TODO: this should really be a failure but whatever
+    return 0;
   }
 
   // put this on stack so we don't have to actually allocate anything
