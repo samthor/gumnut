@@ -42,6 +42,29 @@ export const specials = Object.seal({
   stackTop: 32,
 });
 
+export const types = Object.seal({
+  eof: 0,
+  unknown: 1,
+  lit: 2,
+  slash: 3,
+  semicolon: 4,
+  op: 5,
+  colon: 6,
+  brace: 7,
+  array: 8,
+  paren: 9,
+  tBrace: 10,
+  ternary: 11,
+  close: 12,
+  comment: 13,
+  string: 14,
+  regexp: 15,
+  number: 16,
+  symbol: 17,
+  keyword: 18,
+  label: 19,
+});
+
 async function initialize(modulePromise, callback) {
   const memory = new WebAssembly.Memory({initial: 2});
 
@@ -69,7 +92,8 @@ async function initialize(modulePromise, callback) {
 }
 
 export default async function build(modulePromise) {
-  let handler = null;
+  let _callback = null;
+  let _stack = null;
 
   const {instance, memory} = await initialize(modulePromise, () => {
     return {
@@ -80,11 +104,11 @@ export default async function build(modulePromise) {
       },
 
       _modp_callback(special) {
-        handler(special);
+        _callback(special);
       },
 
-      _modp_stack(v) {
-
+      _modp_stack(special) {
+        _stack(special);
       },
     };
   });
@@ -144,8 +168,9 @@ export default async function build(modulePromise) {
       };
     },
 
-    run(callback) {
-      handler = callback;
+    run(callback, stack=() => {}) {
+      _callback = callback;
+      _stack = stack;
 
       let ret = 0;
       for (;;) {
@@ -155,7 +180,8 @@ export default async function build(modulePromise) {
         }
       }
 
-      handler = null;
+      _callback = null;
+      _stack = null;
 
       if (ret === 0) {
         return;
