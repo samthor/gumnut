@@ -37,9 +37,9 @@ export const specials = Object.seal({
   modulePath: 1,
   declare: 2,
   declareTop: 4,
-  ambigiousAsync: 8,
-  property: 16,
-  scope: 32,
+  property: 8,
+  stackInc: 16,
+  stackTop: 32,
 });
 
 async function initialize(modulePromise, callback) {
@@ -81,6 +81,10 @@ export default async function build(modulePromise) {
 
       _modp_callback(special) {
         handler(special);
+      },
+
+      _modp_stack(v) {
+
       },
     };
   });

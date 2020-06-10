@@ -45,6 +45,7 @@ int read_stdin(char **buf) {
 
 static token *out;
 static int tokens = 0;
+static int depth = 0;
 
 void modp_callback(int special) {
   ++tokens;
@@ -55,8 +56,16 @@ void modp_callback(int special) {
   //     c = 'm';
   //     break;
   // }
-  printf("%d\t%4d.%02d: %.*s\n", special, out->line_no, out->type, out->len, out->p);
+  printf("%d\t%d\t%4d.%02d: %.*s\n", depth, special, out->line_no, out->type, out->len, out->p);
 #endif
+}
+
+void modp_stack(int op) {
+  if (op) {
+    ++depth;
+  } else {
+    --depth;
+  }
 }
 
 int main() {

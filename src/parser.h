@@ -19,14 +19,15 @@
 #define CONTEXT__ASYNC 1  // pass for top-level-await
 
 #define SPECIAL__MODULE_PATH     1
-#define SPECIAL__DECLARE         2
-#define SPECIAL__DECLARE_TOP     4
-#define SPECIAL__AMBIGUOUS_ASYNC 8
-#define SPECIAL__PROPERTY        16
-#define SPECIAL__SCOPE           32   // found on {'s of functions
+#define SPECIAL__DECLARE         2   // let, const, var
+#define SPECIAL__DECLARE_TOP     4   // for "var" or var-like only (top-level)
+#define SPECIAL__PROPERTY        8
+#define SPECIAL__STACK_INC       16  // stack decrement (default decrement)
+#define SPECIAL__STACK_TOP       32  // whether this is top-level stack inc
 
 typedef void (*prsr_callback)(int special);
 token *modp_init(char *, int);
 int modp_run();
 
 void modp_callback(int);
+void modp_stack(int);

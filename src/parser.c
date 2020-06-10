@@ -35,13 +35,19 @@
   } \
 }
 
+#define _modp_stack(v) { \
+  if (!skip_context) { \
+    modp_stack(v); \
+  } \
+}
+
 static int skip_context = 0;
 static int top_context;
 
 static unsigned int ambig_arrowfunc_count;
 static uint32_t ambig_arrowfunc_cache;
 
-static int consume_statement(int, int);
+static int consume_statement(int);
 static int consume_expr_group(int);
 static int consume_optional_expr(int);
 static int consume_class(int, int);
@@ -220,11 +226,18 @@ static int consume_function(int context, int special) {
     _check(consume_defn_name(special));
   }
 
+  // top-level stack
+  _modp_stack(SPECIAL__STACK_INC | SPECIAL__STACK_TOP);
+
   // check for parens (nb. should be required)
   _check(consume_optional_arg_group(context));
 
   // consume function body
-  return consume_statement(statement_context, SPECIAL__SCOPE);
+  _check(consume_statement(statement_context));
+
+  // leave function stack
+  _modp_stack(0);
+  return 0;
 }
 
 static int is_arrowfunc_paren_internal(int context) {
@@ -297,7 +310,7 @@ static int consume_arrowfunc_arrow(int context) {
   internal_next();  // consume =>
 
   if (td->cursor.type == TOKEN_BRACE) {
-    _check(consume_statement(context, SPECIAL__SCOPE));
+    _check(consume_statement(context));
   }
   return consume_optional_expr(context);
 }
@@ -313,6 +326,8 @@ static int consume_arrowfunc(int context) {
   } else {
     method_context &= ~(CONTEXT__ASYNC);
   }
+
+  _modp_stack(SPECIAL__STACK_INC | SPECIAL__STACK_TOP);
 
   switch (td->cursor.type) {
     case TOKEN_LIT:
@@ -337,7 +352,9 @@ static int consume_arrowfunc(int context) {
       return ERROR__UNEXPECTED;
   }
 
-  return consume_arrowfunc_arrow(method_context);
+  _check(consume_arrowfunc_arrow(method_context));
+  _modp_stack(0);
+  return 0;
 }
 
 // returns: <0 for error, 0 for normal (arrowfunc or nothing), 1 for consumed _group_
@@ -351,7 +368,7 @@ static int maybe_consume_arrowfunc_or_reentrant_group(int context) {
       return 0;
     } else if (peek == TOKEN_LIT) {
       // if "async function", this is not an arrowfunc: anything else _is_
-      if (!prsr_peek_is_function()) {
+      if (prsr_peek_is_function()) {
         return 0;
       }
       return consume_arrowfunc(context);  // "async foo"
@@ -395,6 +412,7 @@ static int maybe_consume_arrowfunc_or_reentrant_group(int context) {
     debugf("cache now: %u (count=%d)\n", ambig_arrowfunc_cache, ambig_arrowfunc_count);
 
     if (is_arrowfunc) {
+      // no stack needed, not real code
       return consume_arrowfunc_arrow(method_context);
     }
     return 1;  // not arrowfunc, but group consumed with value
@@ -772,13 +790,15 @@ static int consume_dict(int context) {
     switch (td->cursor.type) {
       case TOKEN_PAREN:
         // method
+        _modp_stack(SPECIAL__STACK_INC | SPECIAL__STACK_TOP);
         _check(consume_optional_arg_group(context));
 
         if (td->cursor.type != TOKEN_BRACE) {
-          debugf("did not find brace after dict paren\n");
+          debugf("did not find brace after dict method paren\n");
           return ERROR__UNEXPECTED;
         }
-        _check(consume_statement(method_context, SPECIAL__SCOPE));
+        _check(consume_statement(method_context));
+        _modp_stack(0);
         break;
 
       case TOKEN_OP:
@@ -1127,17 +1147,17 @@ static int consume_class(int context, int special) {
   return consume_dict(context);
 }
 
-static int consume_statement(int context, int special_scope) {
+static int consume_statement(int context) {
   switch (td->cursor.type) {
     case TOKEN_EOF:
       return 0;
 
     case TOKEN_BRACE:
-      _modp_callback(special_scope);  // marks for functions
-      internal_next_comment();
+      internal_next();
+      _modp_stack(SPECIAL__STACK_INC);
 
       while (td->cursor.type != TOKEN_CLOSE) {
-        int ret = consume_statement(context, 0);
+        int ret = consume_statement(context);
         if (ret != 0) {
           return ret;
         } else if (td->cursor.type == TOKEN_EOF) {
@@ -1145,8 +1165,8 @@ static int consume_statement(int context, int special_scope) {
         }
       }
 
-      _modp_callback(special_scope);  // mark close too
-      internal_next_comment();
+      _modp_stack(0);
+      internal_next();
       return 0;
 
     case TOKEN_SEMICOLON:
@@ -1210,12 +1230,13 @@ static int consume_statement(int context, int special_scope) {
       }
     }
 
+    // stack starts before paren group
+    _modp_stack(SPECIAL__STACK_INC);
+
     if (td->cursor.type == TOKEN_PAREN) {
       _check(consume_expr_group(context));
     }
-    // TODO: we could remove the following since we're not generating an AST.
-    // ... it's not important that while(); is parsed as part of do-while.
-    _check(consume_statement(context, 0));
+    _check(consume_statement(context));
 
     // special-case trailing "while(...)" for a 'do-while'
     if (control_hash == LIT_DO) {
@@ -1238,6 +1259,7 @@ static int consume_statement(int context, int special_scope) {
       // nb. ; is not required to trail "while (...)
     }
 
+    _modp_stack(0);
     return 0;
   }
 
@@ -1331,7 +1353,7 @@ int modp_run() {
     _modp_callback(0);
     prsr_next();
   }
-  _check(consume_statement(top_context, 0));
+  _check(consume_statement(top_context));
 
   int len = td->cursor.p - head;
   if (len == 0 && td->cursor.type != TOKEN_EOF) {
