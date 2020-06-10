@@ -38,7 +38,7 @@
 static int skip_context = 0;
 static int top_context;
 
-static int ambig_arrowfunc_count;
+static unsigned int ambig_arrowfunc_count;
 static uint32_t ambig_arrowfunc_cache;
 
 static int consume_statement(int, int);
@@ -373,18 +373,26 @@ static int maybe_consume_arrowfunc_or_reentrant_group(int context) {
       method_context &= ~(CONTEXT__ASYNC);
     }
 
-    _check(consume_expr_group(context));
+    // we'll write our cached value at this bit (will be unset/zero if >32)
+    // first cached value is at right-most bit, and so on
+    uint32_t bit = 0;
+    if (ambig_arrowfunc_count < 32) {
+      // only increment count if we can cache it
+      bit = (1 << ambig_arrowfunc_count);
+      ++ambig_arrowfunc_count;
+    }
+    debugf("bit is=%u, count=%d\n", bit, ambig_arrowfunc_count);
 
     // arrowfunc!
-    int is_arrowfunc = (td->cursor.hash == MISC_ARROW) ? 1 : 0;
+    _check(consume_expr_group(context));
+    int is_arrowfunc = (td->cursor.hash == MISC_ARROW) ? bit : 0;
 
-    // tail case: put at 0th index from right (count=0), otherwise, insert in
-    ambig_arrowfunc_cache |= (is_arrowfunc << ambig_arrowfunc_count);
-    if (++ambig_arrowfunc_count == 31) {
-      debugf("got 31 nested ambig arrowfunc\n");
-      return ERROR__STACK;
+    if (is_arrowfunc) {
+      ambig_arrowfunc_cache |= is_arrowfunc;
+    } else {
+      ambig_arrowfunc_cache &= ~(is_arrowfunc);
     }
-    debugf("cache now: %d (count=%d)\n", ambig_arrowfunc_cache, ambig_arrowfunc_count);
+    debugf("cache now: %u (count=%d)\n", ambig_arrowfunc_cache, ambig_arrowfunc_count);
 
     if (is_arrowfunc) {
       return consume_arrowfunc_arrow(method_context);
@@ -395,9 +403,10 @@ static int maybe_consume_arrowfunc_or_reentrant_group(int context) {
   int is_arrowfunc;
 
   if (ambig_arrowfunc_count) {
-    // we have a cached result, read left-most bit
-    int check = 1 << (--ambig_arrowfunc_count);
-    is_arrowfunc = (ambig_arrowfunc_cache & check);
+    // we have a cached result, read right-most bit and push
+    is_arrowfunc = (ambig_arrowfunc_cache & 1);
+    ambig_arrowfunc_cache >>= 1;
+    --ambig_arrowfunc_count;
     debugf("read cache: is_arrowfunc=%d\n", is_arrowfunc);
   } else {
     // put this on stack so we don't have to actually allocate anything

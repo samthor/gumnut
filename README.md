@@ -2,7 +2,8 @@ A fast, permissive JavaScript tokenizer and parser in C.
 Assumes code written in "module mode", and should support all ECMAScript language features in the [draft specification](https://github.com/tc39/proposals/blob/master/finished-proposals.md) (as of May 2020).
 
 This code is intended for rewriting tasks, and can be compiled via Web Assembly for the web (or Node).
-It does not generate an AST as part of its work.
+It's not reentrant, so you can't parse another file from within callbacks.
+It does not generate an AST as part of its work and does not use `malloc`.
 
 ## Coverage
 
@@ -17,33 +18,38 @@ JavaScript has a single 'after-the-fact' ambiguity, as `async` is not a keywordâ
 Here's an example:
 
 ```js
-// this is a function call to a method "async"
+// this is a function call of a method named "async"
 async(/* anything can go here */) {}
 
 // this is an async arrow function
 async(/* anything can go here */) => {}
+
+// this calls the async method on foo, and is _not_ ambiguous
+foo.async() {}
 ```
 
 See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-functions-break-javascript-parsers-1ldp) for more details.
 
-### Implementation
+### Solution
 
-The parser resolves this ambiguity, but must parse your code twice, or more in a pathological^ case.
+The parser resolves this ambiguity, but may parse your code twice, or more in a pathological^ case.
 And, for this parser to be useful as a bundler, non-async arrow functions also require this resolution: i.e., does `(` start an arrow function, or normal parens?
 
-The slow expansion triggers where further arrow functions are found in the _arguments_ of an arrow function, e.g.:
+Here's an extreme case:
 
 ```js
-(a =
-  (b =
-    async (c =
-      (final = () => {}) => {}
-    ) => {}
-  ) => {}
-) => {}
+(
+  a = (b =
+      async (c =
+        (final = () => {}) => {}
+      ) => {}
+    ) => {},
+  foo(),
+  x = () => {},
+)
 ```
 
-Each ambigious arrow function will parse until it is found to be unambiguous.
-Inner ambigious arrow functions found during this step will be resolved as part of the top-level pass.
+In this case, the outer arrow function will parse until it is found to be unambiguous (upon finding `foo()`, it's definitely not an arrow function).
+As a side-effect, the first cluster of inner ambiguous arrow functions will be resolved and their status cached.
 
-<small>^This uses a bitmask, and will crash if you include more than 32 inner ambiguous arrow functions. Don't do this.</small>
+<small>^The parser uses a <code>uint32_t</code> to cache inner resolutions. Don't put more than 32 ambiguous arrow functions inside another.</small>
