@@ -17,24 +17,25 @@ JavaScript has a single 'after-the-fact' ambiguity, as `async` is not a keywordâ
 Here's an example:
 
 ```js
-// this is a function call
+// this is a function call to a method "async"
 async(/* anything can go here */) {}
 
-// this is the value of an arrow function
+// this is an async arrow function
 async(/* anything can go here */) => {}
 ```
 
 See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-functions-break-javascript-parsers-1ldp) for more details.
 
-The parser resolves this ambiguity, but has a pathological expansion in some cases. For this parser to be useful as a bundler, non-async arrow functions also require this expansion: i.e., does `(` start an arrow function, or normal parens?
+The parser resolves this ambiguity, but has a pathological expansion in some cases.
+And, for this parser to be useful as a bundler, non-async arrow functions also require this expansion: i.e., does `(` start an arrow function, or normal parens?
 
-The pathalogical expansion triggers where further arrow functions are found in the _arguments_ of an arrow function, e.g.:
+The pathological expansion triggers where further arrow functions are found in the _arguments_ of an arrow function, e.g.:
 
 ```js
 (a =
   (b =
     async (c =
-      (final =  () => {}) => {}
+      (final = () => {}) => {}
     ) => {}
   ) => {}
 ) => {}

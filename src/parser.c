@@ -308,19 +308,20 @@ static int is_arrowfunc(int context) {
   // short-circuits
   if (td->cursor.type == TOKEN_LIT) {
     int peek = prsr_peek();
-    if (td->cursor.hash != LIT_ASYNC) {
-      // looks for "blah =>"
-      return prsr_peek_is_arrow();
+    if (prsr_peek_is_arrow()) {
+      return 1;  // "blah =>" or even "async =>"
+    } else if (td->cursor.hash != LIT_ASYNC) {
+      return 0;
     } else if (peek == TOKEN_LIT) {
-      return !prsr_peek_is_function();  // "async blah", always arrowfunc
+      // if "async function", this is not an arrowfunc: anything else _is_
+      return !prsr_peek_is_function();
     } else if (peek != TOKEN_PAREN) {
-      return 0;  // "async ?", async use as e.g., op
+      return 0;  // "async ???" ignored
     }
-    // otherwise, continue below
   } else if (td->cursor.type != TOKEN_PAREN) {
-    // TODO: this should really be a failure but whatever
     return 0;
   }
+  // nb. we are either "(" or "async (" here
 
   // put this on stack so we don't have to actually allocate anything
   char *restore_resume = td->cursor.p;
@@ -330,6 +331,11 @@ static int is_arrowfunc(int context) {
     --restore_depth;  // this token increased depth, just pop for restore
   }
 
+#ifdef DEBUG
+  if (skip_context) {
+    debugf("already reentrant: %d\n", skip_context);
+  }
+#endif
   ++skip_context;  // reentrant so must ++
 
   int ret = is_arrowfunc_internal(context);
@@ -343,7 +349,7 @@ static int is_arrowfunc(int context) {
   td->cursor.len = 0;
   td->cursor.type = TOKEN_UNKNOWN;
 
-  debugf("got is_arrowfunc=%d, resume=%c\n", ret, restore_resume[0]);
+  debugf("LOOKAHEAD got is_arrowfunc=%d, resume=%c\n", ret, restore_resume[0]);
   prsr_next();
   if (td->cursor.type == TOKEN_COMMENT) {
     debugf("restore state ended on comment\n");
@@ -357,8 +363,8 @@ static int is_arrowfunc(int context) {
 static int consume_arrowfunc(int context) {
   int method_context = context;
 
-  // "async" prefix
-  if (td->cursor.hash == LIT_ASYNC) {
+  // "async" prefix without immediate =>
+  if (td->cursor.hash == LIT_ASYNC && !(prsr_peek() == TOKEN_OP && prsr_peek_is_arrow())) {
     method_context |= CONTEXT__ASYNC;
     internal_next_update(TOKEN_KEYWORD);
   } else {
@@ -772,6 +778,12 @@ static int consume_dict(int context) {
 
 // consumes expr if found (but might not move cursor if cannot)
 static int consume_optional_expr(int context) {
+restart_expr:
+  if (is_arrowfunc(context)) {
+    // arrowfunc is only allowed at start of expr, and is _whole_ expr
+    return consume_arrowfunc(context);
+  }
+
   int value_line = 0;  // line_no of last value
   char *start = td->cursor.p;
 
@@ -801,14 +813,6 @@ static int consume_optional_expr(int context) {
         continue;
 
       case TOKEN_PAREN:
-        if (!value_line && is_arrowfunc(context)) {
-          _check(consume_arrowfunc(context));
-          value_line = td->cursor.line_no;
-          break;
-        }
-        debugf("not arrowfunc, treating as group, cursor now=%d\n", td->cursor.type);
-        // fall-through, regular group
-
       case TOKEN_ARRAY:
         _check(consume_expr_group(context));
         value_line = td->cursor.line_no;
@@ -846,18 +850,14 @@ static int consume_optional_expr(int context) {
             continue;
 
           case LIT_ASYNC:
-            if (is_arrowfunc(context)) {
-              _transition_to_value();
-              _check(consume_arrowfunc(context));
-              continue;
-            }
+            // we check for arrowfunc at head, so this must be symbol or "async function"
             prsr_peek();
             if (prsr_peek_is_function()) {
               _transition_to_value();
               _check(consume_function(context, 0));
               continue;
             }
-            break;  // not "async () =>" or "async function", treat as value
+            break;  // not "async function", treat as value
 
           case LIT_FUNCTION:
             _transition_to_value();
@@ -899,12 +899,6 @@ static int consume_optional_expr(int context) {
             // FIXME: if _seen_any=0, could be lvalue
         }
 
-        if (type == TOKEN_SYMBOL && is_arrowfunc(context)) {
-          _transition_to_value();
-          _check(consume_arrowfunc(context));
-          continue;
-        }
-
         _check(prsr_update(type));
         continue;
       }
@@ -918,6 +912,17 @@ static int consume_optional_expr(int context) {
         }
 
         switch (td->cursor.hash) {
+#ifdef DEBUG
+          case MISC_ARROW:
+            debugf("got orphaned arrow =>\n");
+            break;
+#endif
+
+          case MISC_EQUALS:
+            // nb. special-case for = as we allow arrowfunc after it
+            internal_next();
+            goto restart_expr;
+
           case MISC_COMMA:
             return 0;
 
@@ -963,7 +968,9 @@ static int consume_optional_expr(int context) {
 
     return 0;
   }
+
 #undef _transition_to_value
+#undef _seen_any
 }
 
 // consumes a compound expr separated by ,'s
