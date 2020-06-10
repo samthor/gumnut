@@ -223,33 +223,16 @@ static int consume_function(int context, int special) {
   return consume_statement(statement_context, SPECIAL__SCOPE);
 }
 
-static int is_arrowfunc_internal(int context) {
+static int is_arrowfunc_paren_internal(int context) {
   if (td->cursor.hash == LIT_ASYNC) {
     internal_next_comment();
   }
-
-  switch (td->cursor.type) {
-  case TOKEN_LIT:
-    if (td->cursor.hash == LIT_FUNCTION) {
-      // found value "async function", not an arrowfunc
-      return 0;
-    }
-    // arrow functions cannot be "async {x} =>", must be lit without paren
-    internal_next_comment();
-    if (td->cursor.hash == MISC_ARROW) {
-      // "async foo =>" or "foo =>"
-      return 1;
-    }
-    // "blah ???", ignore
-    return 0;
-
-  case TOKEN_PAREN:
-    break;
-
-  default:
-    return 0;
+#ifdef DEBUG
+  if (td->cursor.type != TOKEN_PAREN) {
+    debugf("internal error, is_arrowfunc_internal could not find paren\n");
+    return ERROR__UNEXPECTED;
   }
-
+#endif
   internal_next_comment();  // move over TOKEN_PAREN
 
   for (;;) {
@@ -338,7 +321,7 @@ static int is_arrowfunc(int context) {
 #endif
   ++skip_context;  // reentrant so must ++
 
-  int ret = is_arrowfunc_internal(context);
+  int ret = is_arrowfunc_paren_internal(context);
 
   --skip_context;
 

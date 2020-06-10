@@ -26,6 +26,8 @@ async(/* anything can go here */) => {}
 
 See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-functions-break-javascript-parsers-1ldp) for more details.
 
+### Implementation
+
 The parser resolves this ambiguity, but has a pathological expansion in some cases.
 And, for this parser to be useful as a bundler, non-async arrow functions also require this expansion: i.e., does `(` start an arrow function, or normal parens?
 
@@ -43,4 +45,8 @@ The pathological expansion triggers where further arrow functions are found in t
 
 The above code (with five layered ambiguities) will result in 1+2+4+8+16 extra passes over this section, or `(2^depth - 1)` extra passes.
 
-At a minimum, any section that is ambigiously an arrow function will be parsed twice.
+### Future Plans
+
+It's possible to reduce this to at most two passes, by special-casing reentrant parsing of ambiguous arrow functions, and caching the result.
+But it's unlikely this causes too much slowdown right now.
+Maybe don't put whole programs in the parameters of arrow functions.
