@@ -317,7 +317,7 @@ static int consume_arrowfunc(int context) {
   switch (td->cursor.type) {
     case TOKEN_LIT:
       prsr_update(TOKEN_SYMBOL);
-      modp_callback(SPECIAL__DECLARE);
+      _modp_callback(SPECIAL__DECLARE);
       internal_next_comment();
       break;
 
@@ -772,7 +772,7 @@ static int consume_dict(int context) {
     switch (td->cursor.type) {
       case TOKEN_PAREN:
         // method
-        _check(consume_expr_group(context));
+        _check(consume_optional_arg_group(context));
 
         if (td->cursor.type != TOKEN_BRACE) {
           debugf("did not find brace after dict paren\n");
