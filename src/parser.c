@@ -38,6 +38,9 @@
 static int skip_context = 0;
 static int top_context;
 
+static int ambig_arrowfunc_count;
+static uint32_t ambig_arrowfunc_cache;
+
 static int consume_statement(int, int);
 static int consume_expr_group(int);
 static int consume_optional_expr(int);
@@ -49,6 +52,7 @@ static int consume_definition_list(int);
 static int consume_string(int);
 static int consume_destructuring(int, int);
 static int consume_optional_arg_group(int);
+static int consume_arrowfunc_arrow(int);
 
 static inline void internal_next_comment() {
   for (;;) {
@@ -224,9 +228,6 @@ static int consume_function(int context, int special) {
 }
 
 static int is_arrowfunc_paren_internal(int context) {
-  if (td->cursor.hash == LIT_ASYNC) {
-    internal_next_comment();
-  }
 #ifdef DEBUG
   if (td->cursor.type != TOKEN_PAREN) {
     debugf("internal error, is_arrowfunc_internal could not find paren\n");
@@ -287,59 +288,18 @@ static int is_arrowfunc_paren_internal(int context) {
   return ERROR__INTERNAL;
 }
 
-static int is_arrowfunc(int context) {
-  // short-circuits
-  if (td->cursor.type == TOKEN_LIT) {
-    int peek = prsr_peek();
-    if (prsr_peek_is_arrow()) {
-      return 1;  // "blah =>" or even "async =>"
-    } else if (td->cursor.hash != LIT_ASYNC) {
-      return 0;
-    } else if (peek == TOKEN_LIT) {
-      // if "async function", this is not an arrowfunc: anything else _is_
-      return !prsr_peek_is_function();
-    } else if (peek != TOKEN_PAREN) {
-      return 0;  // "async ???" ignored
-    }
-  } else if (td->cursor.type != TOKEN_PAREN) {
-    return 0;
+// consume arrowfunc from and including "=>"
+static int consume_arrowfunc_arrow(int context) {
+  if (td->cursor.hash != MISC_ARROW) {
+    debugf("arrowfunc missing =>\n");
+    return ERROR__UNEXPECTED;
   }
-  // nb. we are either "(" or "async (" here
+  internal_next();  // consume =>
 
-  // put this on stack so we don't have to actually allocate anything
-  char *restore_resume = td->cursor.p;
-  int restore_line_no = td->cursor.line_no;
-  uint16_t restore_depth = td->depth;
-  if (td->stack[td->depth - 1] == td->cursor.type) {
-    --restore_depth;  // this token increased depth, just pop for restore
+  if (td->cursor.type == TOKEN_BRACE) {
+    _check(consume_statement(context, SPECIAL__SCOPE));
   }
-
-#ifdef DEBUG
-  if (skip_context) {
-    debugf("already reentrant: %d\n", skip_context);
-  }
-#endif
-  ++skip_context;  // reentrant so must ++
-
-  int ret = is_arrowfunc_paren_internal(context);
-
-  --skip_context;
-
-  td->resume = restore_resume;
-  td->peek_at = restore_resume;
-  td->line_no = restore_line_no;
-  td->depth = restore_depth;
-  td->cursor.len = 0;
-  td->cursor.type = TOKEN_UNKNOWN;
-
-  debugf("LOOKAHEAD got is_arrowfunc=%d, resume=%c\n", ret, restore_resume[0]);
-  prsr_next();
-  if (td->cursor.type == TOKEN_COMMENT) {
-    debugf("restore state ended on comment\n");
-    return ERROR__INTERNAL;  // should never happen as we're pointing at value
-  }
-
-  return ret;
+  return consume_optional_expr(context);
 }
 
 // we assume that we're pointing at one (is_arrowfunc has returned true)
@@ -377,16 +337,115 @@ static int consume_arrowfunc(int context) {
       return ERROR__UNEXPECTED;
   }
 
-  if (td->cursor.hash != MISC_ARROW) {
-    debugf("arrowfunc missing =>\n");
-    return ERROR__UNEXPECTED;
-  }
-  internal_next();  // consume =>
+  return consume_arrowfunc_arrow(method_context);
+}
 
-  if (td->cursor.type == TOKEN_BRACE) {
-    _check(consume_statement(method_context, SPECIAL__SCOPE));
+// returns: <0 for error, 0 for normal (arrowfunc or nothing), 1 for consumed _group_
+static int maybe_consume_arrowfunc_or_reentrant_group(int context) {
+  // short-circuits
+  if (td->cursor.type == TOKEN_LIT) {
+    int peek = prsr_peek();
+    if (prsr_peek_is_arrow()) {
+      return consume_arrowfunc(context);  // "blah =>" or even "async =>"
+    } else if (td->cursor.hash != LIT_ASYNC) {
+      return 0;
+    } else if (peek == TOKEN_LIT) {
+      // if "async function", this is not an arrowfunc: anything else _is_
+      if (!prsr_peek_is_function()) {
+        return 0;
+      }
+      return consume_arrowfunc(context);  // "async foo"
+    } else if (peek != TOKEN_PAREN) {
+      return 0;  // "async ???" ignored
+    }
+  } else if (td->cursor.type != TOKEN_PAREN) {
+    return 0;
   }
-  return consume_optional_expr(method_context);
+
+  // reentrant, parse as group
+  if (skip_context) {
+    int method_context = context;
+
+    if (td->cursor.hash == LIT_ASYNC) {
+      method_context |= CONTEXT__ASYNC;
+      internal_next_comment();  // don't need to yield, is reentrant
+    } else {
+      method_context &= ~(CONTEXT__ASYNC);
+    }
+
+    _check(consume_expr_group(context));
+
+    // arrowfunc!
+    int is_arrowfunc = (td->cursor.hash == MISC_ARROW) ? 1 : 0;
+
+    // tail case: put at 0th index from right (count=0), otherwise, insert in
+    ambig_arrowfunc_cache |= (is_arrowfunc << ambig_arrowfunc_count);
+    if (++ambig_arrowfunc_count == 31) {
+      debugf("got 31 nested ambig arrowfunc\n");
+      return ERROR__STACK;
+    }
+    debugf("cache now: %d (count=%d)\n", ambig_arrowfunc_cache, ambig_arrowfunc_count);
+
+    if (is_arrowfunc) {
+      return consume_arrowfunc_arrow(method_context);
+    }
+    return 1;  // not arrowfunc, but group consumed with value
+  }
+
+  int is_arrowfunc;
+
+  if (ambig_arrowfunc_count) {
+    // we have a cached result, read left-most bit
+    int check = 1 << (--ambig_arrowfunc_count);
+    is_arrowfunc = (ambig_arrowfunc_cache & check);
+    debugf("read cache: is_arrowfunc=%d\n", is_arrowfunc);
+  } else {
+    // put this on stack so we don't have to actually allocate anything
+    char *restore_resume = td->cursor.p;
+    int restore_line_no = td->cursor.line_no;
+
+    if (td->cursor.hash == LIT_ASYNC) {
+      internal_next_comment();  // async keyword has no effect on arguments
+    }
+  #ifdef DEBUG
+    if (td->cursor.type != TOKEN_PAREN) {
+      debugf("reentrant start should begin with TOKEN_PAREN, was: %d\n", td->cursor.type);
+      return ERROR__UNEXPECTED;
+    }
+  #endif
+    uint16_t restore_depth = td->depth - 1;  // since this is TOKEN_PAREN, reduce by one
+
+  #ifdef DEBUG
+    if (skip_context) {
+      debugf("already reentrant: %d\n", skip_context);
+      return ERROR__INTERNAL;
+    }
+  #endif
+    ++skip_context;  // reentrant so must ++
+
+    is_arrowfunc = is_arrowfunc_paren_internal(context);
+
+    --skip_context;
+
+    td->resume = restore_resume;
+    td->peek_at = restore_resume;
+    td->line_no = restore_line_no;
+    td->depth = restore_depth;
+    td->cursor.len = 0;
+    td->cursor.type = TOKEN_UNKNOWN;
+
+    debugf("LOOKAHEAD got is_arrowfunc=%d, resume=%c\n", is_arrowfunc, restore_resume[0]);
+    prsr_next();
+    if (td->cursor.type == TOKEN_COMMENT) {
+      debugf("restore state ended on comment\n");
+      return ERROR__INTERNAL;  // should never happen as we're pointing at value
+    }
+  }
+
+  if (is_arrowfunc) {
+    return consume_arrowfunc(context);
+  }
+  return 0;
 }
 
 static int consume_module_list(int context) {
@@ -762,13 +821,21 @@ static int consume_dict(int context) {
 // consumes expr if found (but might not move cursor if cannot)
 static int consume_optional_expr(int context) {
 restart_expr:
-  if (is_arrowfunc(context)) {
-    // arrowfunc is only allowed at start of expr, and is _whole_ expr
-    return consume_arrowfunc(context);
-  }
-
-  int value_line = 0;  // line_no of last value
+  (void)sizeof(0);
   char *start = td->cursor.p;
+  int value_line = 0;  // line_no of last value
+
+  int ret = maybe_consume_arrowfunc_or_reentrant_group(context);
+  if (ret < 0) {
+    return ret;
+  } else if (ret == 0) {
+    if (start != td->cursor.p) {
+      return 0;
+    }
+    // we consumed nothing
+  } else {
+    value_line = td->cursor.line_no;  // we're reentrant and hit a group
+  }
 
 #define _transition_to_value() { if (value_line) { return 0; } value_line = td->cursor.line_no; }
 #define _seen_any (start != td->cursor.p)
@@ -1238,6 +1305,7 @@ token *modp_init(char *p, int _context) {
   prsr_init_token(p);
   top_context = _context;
   skip_context = 0;
+  ambig_arrowfunc_count = 0;
 
   if (td->cursor.type != TOKEN_COMMENT) {
     // n.b. it's possible but unlikely for this to fail (e.g. opens with "}")

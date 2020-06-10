@@ -28,10 +28,10 @@ See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-func
 
 ### Implementation
 
-The parser resolves this ambiguity, but has a pathological expansion in some cases.
-And, for this parser to be useful as a bundler, non-async arrow functions also require this expansion: i.e., does `(` start an arrow function, or normal parens?
+The parser resolves this ambiguity, but must parse your code twice, or more in a pathological^ case.
+And, for this parser to be useful as a bundler, non-async arrow functions also require this resolution: i.e., does `(` start an arrow function, or normal parens?
 
-The pathological expansion triggers where further arrow functions are found in the _arguments_ of an arrow function, e.g.:
+The slow expansion triggers where further arrow functions are found in the _arguments_ of an arrow function, e.g.:
 
 ```js
 (a =
@@ -43,10 +43,7 @@ The pathological expansion triggers where further arrow functions are found in t
 ) => {}
 ```
 
-The above code (with five layered ambiguities) will result in 1+2+4+8+16 extra passes over this section, or `(2^depth - 1)` extra passes.
+Each ambigious arrow function will parse until it is found to be unambiguous.
+Inner ambigious arrow functions found during this step will be resolved as part of the top-level pass.
 
-### Future Plans
-
-It's possible to reduce this to at most two passes, by special-casing reentrant parsing of ambiguous arrow functions, and caching the result.
-But it's unlikely this causes too much slowdown right now.
-Maybe don't put whole programs in the parameters of arrow functions.
+<small>^This uses a bitmask, and will crash if you include more than 32 inner ambiguous arrow functions. Don't do this.</small>
