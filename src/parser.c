@@ -1234,7 +1234,26 @@ static int consume_statement(int context) {
     _modp_stack(SPECIAL__STACK_INC);
 
     if (td->cursor.type == TOKEN_PAREN) {
-      _check(consume_expr_group(context));
+      // special-case catch, which creates a local scoped var
+      if (control_hash == LIT_CATCH) {
+        internal_next();
+
+        if (td->cursor.type != TOKEN_LIT) {
+          debugf("could not find var inside catch()\n");
+          return ERROR__UNEXPECTED;
+        }
+        prsr_update(TOKEN_SYMBOL);
+        modp_callback(SPECIAL__DECLARE);  // not __TOP
+        internal_next_comment();
+
+        if (td->cursor.type != TOKEN_CLOSE) {
+          debugf("could not find closer of catch()\n");
+          return ERROR__UNEXPECTED;
+        }
+        internal_next();
+      } else {
+        _check(consume_expr_group(context));
+      }
     }
     _check(consume_statement(context));
 
