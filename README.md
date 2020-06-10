@@ -35,21 +35,23 @@ See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-func
 The parser resolves this ambiguity, but may parse your code twice, or more in a pathological^ case.
 And, for this parser to be useful as a bundler, non-async arrow functions also require this resolution: i.e., does `(` start an arrow function, or normal parens?
 
-Here's an extreme case:
+Here's an extreme example:
 
 ```js
 (
   a = (b =
-      async (c =
-        (final = () => {}) => {}
-      ) => {}
-    ) => {},
+        async (c =
+          (final = () => {}) => {}
+        )
+      ) => {},
   foo(),
   x = () => {},
 )
 ```
 
-In this case, the outer arrow function will parse until it is found to be unambiguous (upon finding `foo()`, it's definitely not an arrow function).
-As a side-effect, the first cluster of inner ambiguous arrow functions will be resolved and their status cached.
+Here, `a` is an arrow function, `b` is a call to `async()`, and `c` plus `final` are both arrow functions.
+
+The parser answers whether this question by parsing an outermost arrow function until it is found to be unambiguous (upon finding `foo()`, the outermost paren in the example is definitely not an arrow function).
+As a side-effect, the first cluster of inner ambiguous arrows functions will be resolved and their status cached.
 
 <small>^The parser uses a <code>uint32_t</code> to cache inner resolutions. Don't put more than 32 ambiguous arrow functions inside another.</small>
