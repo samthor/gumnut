@@ -19,8 +19,127 @@
  * @fileoverview Node interface to a JS bundler.
  */
 
+import fs from 'fs';
 import {specials, types} from './wrap.js';
-import wrapper from './node.js';
+import build from './wrap.js';
+import path from 'path';
+import stream from 'stream';
+
+
+class Scope {
+  constructor(parent) {
+    this.parent = parent;
+    this.vars = {};
+  }
+
+  _get(cand) {
+    let found = this.vars[cand];
+    if (found === undefined) {
+      this.vars[cand] = found = {decl: false, at: []};
+    }
+    return found;
+  }
+
+  /**
+   * @param {!Set<string>} toplevels where to mark global use
+   */
+  external(toplevels) {
+    for (const cand in this.vars) {
+      if (!this.vars[cand].decl) {
+        toplevels.add(cand);
+      }
+    }
+  }
+
+  /**
+   * @param {!Set<string>} toplevels that are already being used
+   * @return {!Array<{at: number, cand: string, update: string}>} updates in reverse order
+   */
+  updates(toplevels) {
+    let updates = [];
+
+    for (const cand in this.vars) {
+      const {decl, at} = this.vars[cand];
+
+      // Not defined at the top-level, so it must be a global. Don't rename it.
+      if (decl === false) {
+        continue;
+      }
+
+      // We can use this variable name at the top-level, it's not already defined.
+      if (!toplevels.has(cand)) {
+        toplevels.add(cand);
+        continue;
+      }
+
+      // Try to rename this top-level var. It's possible but odd that "foo$1" is already defined
+      // (maybe output from another bundler), so increment until we find an empty slot.
+      let index = 0;
+      for (;;) {
+        let update = `${cand}$${++index}`;
+        if (toplevels.has(update)) {
+          continue;
+        }
+        updates = updates.concat(at.map((at) => ({at, cand, update})));
+        break;
+      }
+    }
+
+    updates.sort(({at: a}, {at: b}) => b - a);
+    return updates;
+  }
+
+  /**
+   * Consume a previous child scope.
+   *
+   * @param {!Scope} child
+   */
+  consume(child) {
+    for (const cand in child.vars) {
+      const od = child.vars[cand];
+      if (od.decl) {
+        continue;
+      }
+
+      const d = this._get(cand);
+      d.at = d.at.concat(od.at);
+    }
+  }
+
+  /**
+   * Mark a variable as being used. This only records if we're at the top level
+   * or not already declared locally.
+   *
+   * @param {string} cand
+   * @param {number} at
+   */
+  use(cand, at) {
+    let d = this.vars[cand];
+    if (d === undefined) {
+      this.vars[cand] = {decl: false, at: [at]};
+    } else if (this.parent === null || !d.decl) {
+      d.at.push(at);
+    }
+  }
+
+  /**
+   * Declares a variable as being defined here.
+   *
+   * @param {string} cand
+   * @param {number} at
+   */
+  declare(cand, at) {
+    let d = this.vars[cand];
+    if (d === undefined) {
+      this.vars[cand] = d = {decl: true, at: [at]};
+    } else {
+      d.decl = true;
+      d.at.push(at);
+    }
+  }
+}
+
+
 
 /**
  * Builds a method which rewrites imports from a passed filename.
@@ -28,97 +147,110 @@ import wrapper from './node.js';
  * @return {function(string): !ReadableStream}
  */
 export default async function rewriter() {
-  const w = await wrapper();
+  const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
+  const wasm = fs.readFileSync(source);
+
+  const {prepare, run} = await build(wasm);
 
   return async (files) => {
-    // TODO: just prints info about files right now
+    const toplevels = new Set();
 
+    const fileQueue = new Set();
     for (const f of files) {
-      const {token, run} = w(f);
+      fileQueue.add(path.resolve(f));
+    }
+    const fileData = new Map();
 
-      const scopes = [{}];
+    for (const f of fileQueue) {
+      const fd = fs.openSync(f);
+      const stat = fs.fstatSync(fd);
+
+      let buffer = null;
+      const token = prepare(stat.size, (b) => {
+        buffer = b;
+        fs.readSync(fd, buffer, 0, stat.size, 0);
+      });
+
+      const scopes = [new Scope(null)];
       const tops = [0];
       let top = scopes[0];
-
-      const lookup = (name) => {
-        const len = scopes.length;
-        for (let i = 0; i < len; ++i) {
-          if (scopes[i][name]) {
-            return true;
-          }
-        }
-        return false;
-      };
+      let scope = scopes[0];
 
       const callback = (special) => {
+        if (special & specials.modulePath) {
+          // FIXME: avoid eval
+          const other = eval(token.string());
+          if (/^\.\.?\//.test(other)) {
+            fileQueue.add(path.join(path.dirname(f), other));
+          }
+          return;
+        }
+
         if (special & specials.declare) {
           const cand = token.string();
-          const isTop = (special & specials.declareTop);
-          if (isTop) {
-            if (top[cand] === false) {
-              // TODO: found hoisted use, might need to reparse
-              // (the var was used before being declared as a top-var)
-              console.warn(cand, 'hoisted');
+          const where = (special & specials.declareTop) ? top : scope;
+          where.declare(cand, token.at());
+
+          if (special & specials.declareTop) {
+            if (cand in top.vars) {
+              // This is a hoisted var use, we probably don't care.
             }
-            top[cand] = true;
-          } else {
-            // nb. if we see "x" in a non-top scope, then "let x", this assumes the first is only
-            // hoisted access (and this is a new var): it's a TDZ invalid access _anyway_
-            const scope = scopes[0];
-            scope[cand] = true;
           }
+          // nb. Treat "let" and "const" like "var" w.r.t. hoisting. Use like this is invalid (TDZ)
+          // so there's nothing we can do anyway.
+
         } else if (token.type() === types.symbol) {
           const cand = token.string();
-          const found = lookup(cand);
-          if (!found) {
-            // This is either a global, or its "var"-like is after this code. Record it as required
-            // and it will be popped out of the stack until it's found.
-            // TODO: If it _is_ found, then we probably need to do 2nd pass, hoisted.
-            top[cand] = false;
-          }
+          scope.use(cand, token.at());
         }
       };
 
       const stack = (special) => {
         if (special) {
-          const next = {};
+          const next = new Scope(scope);
           if (special & specials.stackTop) {
             tops.unshift(scopes.length);
             top = next;
           }
           scopes.unshift(next);
+          scope = next;
           return;
         }
 
+        const previous = scope;
         scopes.shift();
-        if (tops[0] !== scopes.length) {
-          return;
-        }
+        scope = scopes[0];
+        scope.consume(previous);
 
-        const previous = top;
-        tops.shift();
-        top = scopes[tops[0]];
-
-        // Pop out any symbols we couldn't find, and hope the parent scope has them.
-        for (const key in previous) {
-          if (previous[key] === false) {
-            if (top[key]) {
-              throw new TypeError(`value ${key} should have been spotted`);
-            }
-            top[key] = false;
-          }
+        if (tops[0] === scopes.length) {
+          tops.shift();
+          top = scopes[tops[0]];
         }
       };
 
       const s = run(callback, stack);
+      top.external(toplevels);
 
-      for (const key in top) {
-        if (!top[key]) {
-          console.warn(key, 'global');
-        }
+      fileData.set(f, {top, buffer});
+    }
+    console.warn('globals', toplevels);
+
+    for (const {top, buffer} of fileData.values()) {
+      const updates = top.updates(toplevels);
+      const readable = new stream.Readable({emitClose: true});
+
+      let at = 0;
+      while (updates.length) {
+        const next = updates.pop();
+
+        readable.push(buffer.subarray(at, next.at));
+        readable.push(next.update);
+        at = next.at + next.cand.length;  // FIXME: length only works for utf-8
       }
+      readable.push(buffer.subarray(at));
 
-      await streamTo(s);  // otherwise we clobber ourselves
+      readable.push(null);
+      await streamTo(readable);
     }
   };
 }
