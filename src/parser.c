@@ -29,6 +29,11 @@
 #endif
 
 
+#define MODULE_LIST__EXPORT   1
+#define MODULE_LIST__REEXPORT 2
+#define MODULE_LIST__DEEP     4
+
+
 #define _modp_callback(v) { \
   if (!skip_context) { \
     modp_callback(v); \
@@ -54,7 +59,7 @@ static int consume_class(int, int);
 static int consume_module_list(int);
 static int consume_function(int, int);
 static int consume_expr_compound(int);
-static int consume_definition_list(int);
+static int consume_definition_list(int, int);
 static int consume_string(int);
 static int consume_destructuring(int, int);
 static int consume_optional_arg_group(int);
@@ -110,7 +115,7 @@ static int consume_import(int context) {
   internal_next_update(TOKEN_KEYWORD);
 
   if (td->cursor.type != TOKEN_STRING) {
-    _check(consume_module_list(context));
+    _check(consume_module_list(0));
 
     // consume "from"
     if (td->cursor.hash != LIT_FROM) {
@@ -134,15 +139,18 @@ static int consume_export(int context) {
   internal_next_update(TOKEN_KEYWORD);
 
   int is_default = 0;
+  int special_external = SPECIAL__EXTERNAL;
   if (td->cursor.hash == LIT_DEFAULT) {
-    internal_next_update(TOKEN_SYMBOL);
+    // exporting default _still_ creates a local var named...
+    internal_next_update(TOKEN_KEYWORD);
     is_default = 1;
+    special_external = 0;
   }
 
-  // if this is class/function, consume with no value
+  // if this is class/function, consume with no value (needed as they act statement-like)
   switch (td->cursor.hash) {
     case LIT_CLASS:
-      return consume_class(context, SPECIAL__DECLARE);
+      return consume_class(context, SPECIAL__DECLARE | special_external);
 
     case LIT_ASYNC:
       if (!(prsr_peek() == TOKEN_LIT && prsr_peek_is_function())) {
@@ -151,12 +159,40 @@ static int consume_export(int context) {
       // fall-through
 
     case LIT_FUNCTION:
-      return consume_function(context, SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+      return consume_function(context, SPECIAL__DECLARE | SPECIAL__DECLARE_TOP | special_external);
   }
 
   // "export {..." or "export *" or "export default *"
   if ((!is_default && td->cursor.type == TOKEN_BRACE) || td->cursor.hash == MISC_STAR) {
-    _check(consume_module_list(context));
+    // nb. we actually _need_ to look-ahead to search for "from".
+    // whole programs can't appear here, it's probably fine.
+
+    char *restore_resume = td->cursor.p;
+    int restore_line_no = td->cursor.line_no;
+    uint16_t restore_depth = td->depth;
+    if (td->cursor.type == TOKEN_BRACE) {
+      restore_depth--;
+    }
+
+    ++skip_context;
+
+    int flags = MODULE_LIST__EXPORT;
+    consume_module_list(flags);
+    if (td->cursor.hash == LIT_FROM) {
+      flags |= MODULE_LIST__REEXPORT;
+    }
+
+    --skip_context;
+
+    td->resume = restore_resume;
+    td->peek_at = restore_resume;
+    td->line_no = restore_line_no;
+    td->depth = restore_depth;
+    td->cursor.len = 0;
+    td->cursor.type = TOKEN_UNKNOWN;
+
+    prsr_next();
+    _check(consume_module_list(flags));
 
     // consume optional "from"
     if (td->cursor.hash != LIT_FROM) {
@@ -168,14 +204,14 @@ static int consume_export(int context) {
     return consume_import_module_special();
   }
 
-  int has_decl = (td->cursor.hash & _MASK_DECL) ? 1 : 0;
-  if (has_decl == is_default) {
-    // can't default export "var foo", can't _not_ "export var".
-    // TODO: should fail, allow for now
+  if (is_default) {
+    if (td->cursor.hash & _MASK_DECL) {
+      debugf("can't default export a var/const/let\n");
+      return ERROR__UNEXPECTED;
+    }
+     return consume_optional_expr(context);
   }
-
-  // otherwise, treat as expr (this catches var/let/const too)
-  return consume_expr_compound(context);
+  return consume_definition_list(context, special_external);
 }
 
 inline static int consume_defn_name(int special) {
@@ -338,7 +374,7 @@ static int consume_arrowfunc(int context) {
 
     case TOKEN_PAREN:
       internal_next();
-      _check(consume_definition_list(context));
+      _check(consume_definition_list(context, 0));
 
       if (td->cursor.type != TOKEN_CLOSE) {
         debugf("arrowfunc () did not end with close\n");
@@ -475,11 +511,15 @@ static int maybe_consume_arrowfunc_or_reentrant_group(int context) {
   return 0;
 }
 
-static int consume_module_list(int context) {
+static int consume_module_list(int flags) {
   for (;;) {
     if (td->cursor.type == TOKEN_BRACE) {
+      if (flags & MODULE_LIST__DEEP) {
+        debugf("only one layer of braces allowed in module list\n");
+        return ERROR__UNEXPECTED;
+      }
       internal_next();
-      _check(consume_module_list(context));
+      _check(consume_module_list(flags | MODULE_LIST__DEEP));
       if (td->cursor.type != TOKEN_CLOSE) {
         debugf("missing close after module list\n");
         return ERROR__UNEXPECTED;
@@ -497,26 +537,58 @@ static int consume_module_list(int context) {
         // nb. this can be "as" or "from", this is gross
         if (prsr_peek() == TOKEN_LIT && prsr_peek_is_as()) {
           // this isn't a definition, but it's a property of the thing being imported
-          _modp_callback(SPECIAL__PROPERTY);
-          internal_next_comment();
+
+          if ((flags & (MODULE_LIST__EXPORT | MODULE_LIST__REEXPORT)) == MODULE_LIST__EXPORT) {
+            // foo=symbol, bar=external
+            internal_next_update(TOKEN_SYMBOL);
+          } else {
+            // foo=external, bar=?
+            _modp_callback(SPECIAL__EXTERNAL);
+            internal_next_comment();
+          }
+
         } else {
-          prsr_update(TOKEN_SYMBOL);
-          _modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+          // we found "foo" on its own
+          if (flags & MODULE_LIST__REEXPORT) {
+            // reexport, not a symbol here
+            _modp_callback(SPECIAL__EXTERNAL);
+          } else if (flags & MODULE_LIST__EXPORT) {
+            // symbol (not decl) being exported
+            // nb. technically modules can't export globals, but eh
+            prsr_update(TOKEN_SYMBOL);
+            _modp_callback(SPECIAL__EXTERNAL);
+          } else {
+            // declares new value being imported from elsewhere
+            prsr_update(TOKEN_SYMBOL);
+            if (flags & MODULE_LIST__DEEP) {
+              // inside e.g. "{foo}", so foo is the var from elsewhere
+              _modp_callback(SPECIAL__EXTERNAL | SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+            } else {
+              // this _isn't_ external as it fundamentally points to "default"
+              _modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+            }
+
+          }
           internal_next_comment();
         }
       } else {
         return 0;
       }
 
-      // catch optional "as x"
+      // catch optional "as x" (this is here as we can be "* as x" or "foo as x")
       if (td->cursor.hash == LIT_AS) {
         internal_next_update(TOKEN_KEYWORD);
         if (td->cursor.type != TOKEN_LIT) {
           debugf("missing literal after 'as'\n");
           return ERROR__UNEXPECTED;
         }
-        prsr_update(TOKEN_SYMBOL);
-        _modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+
+        if (flags & MODULE_LIST__EXPORT) {
+          _modp_callback(SPECIAL__EXTERNAL);
+        } else {
+          prsr_update(TOKEN_SYMBOL);
+          _modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+        }
         internal_next_comment();
       }
     }
@@ -621,7 +693,7 @@ static int consume_optional_arg_group(int context) {
     return 0;
   }
   internal_next();
-  _check(consume_definition_list(context));
+  _check(consume_definition_list(context, 0));
   if (td->cursor.type != TOKEN_CLOSE) {
     debugf("arg_group did not finish with close\n");
     return ERROR__UNEXPECTED;
@@ -631,11 +703,12 @@ static int consume_optional_arg_group(int context) {
 }
 
 // consume list of definitions, i.e., on "var" etc (also allowed to be on first arg)
-static int consume_definition_list(int context) {
+static int consume_definition_list(int context, int extra_special) {
   int special = SPECIAL__DECLARE | SPECIAL__DECLARE_TOP;
   if (td->cursor.hash == LIT_LET || td->cursor.hash == LIT_CONST) {
     special = SPECIAL__DECLARE;
   }
+  special |= extra_special;
   if (td->cursor.hash & _MASK_DECL) {
     internal_next_update(TOKEN_KEYWORD);
   }
@@ -925,7 +998,7 @@ restart_expr:
             }
             // nb. only keyword at top-level and in for, but nonsensical otherwise
             // FIXME: move to top-level since we can call this externally
-            _check(consume_definition_list(context));
+            _check(consume_definition_list(context, 0));
             continue;
 
           case LIT_ASYNC:

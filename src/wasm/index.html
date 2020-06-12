@@ -3,7 +3,7 @@
 <head>
 <script type="module">
 
-import build from './wrap.js';
+import build, {specials} from './wrap.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -50,6 +50,7 @@ const SPECIALS = {
   DECLARE: 2,
   DECLARE_TOP: 4,
   PROPERTY: 8,
+  EXTERNAL: 16,
 };
 const SPECIAL_LOOKUP = reverseDict(SPECIALS);
 
@@ -240,11 +241,11 @@ document.addEventListener('drop', (ev) => {
   pre span.symbol {
     color: blue;
   }
-  pre span.lit:not(._property) {
-    background: red;
-    color: white;
-  }
   pre span._property {
+    font-style: italic;
+  }
+  pre span._external {
+    background: #ccc !important;
     font-style: italic;
   }
   pre span._declare {

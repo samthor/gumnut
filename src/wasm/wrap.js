@@ -38,8 +38,9 @@ export const specials = Object.seal({
   declare: 2,
   declareTop: 4,
   property: 8,
-  stackInc: 16,
-  stackTop: 32,
+  external: 16,
+  stackInc: 32,
+  stackTop: 64,
 });
 
 export const types = Object.seal({
