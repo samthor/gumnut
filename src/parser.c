@@ -136,15 +136,71 @@ static int consume_export(int context) {
     return ERROR__UNEXPECTED;
   }
 #endif
-  internal_next_update(TOKEN_KEYWORD);
 
-  int is_default = 0;
+  int peek = prsr_peek();
+  switch (peek) {
+    case TOKEN_LIT:
+      // TODO: must be DECL, default, class or function
+      break;
+
+    case TOKEN_OP:
+      if (!prsr_peek_is_star()) {
+        debugf("unexpected non-star op after export\n");
+        return ERROR__UNEXPECTED;
+      }
+      break;
+
+    case TOKEN_BRACE:
+      break;
+
+    default:
+      debugf("unexpected symbol after export: %d\n", peek);
+      return ERROR__UNEXPECTED;
+  }
+
+  int special_reexport = 0;
+  int flags = MODULE_LIST__EXPORT;
+  if (peek == TOKEN_BRACE || peek == TOKEN_OP) {
+    // nb. we actually _need_ to look-ahead to search for "from".
+    // whole programs can't appear here, it's probably fine.
+
+    // TODO: "export foo" is actually invalid. It's caught below, but we could be more aggressive here.
+
+    char *restore_resume = td->cursor.p;
+    int restore_line_no = td->cursor.line_no;
+    uint16_t restore_depth = td->depth;
+
+    ++skip_context;
+    internal_next_comment();  // step over "export"
+
+    consume_module_list(flags);
+    if (td->cursor.hash == LIT_FROM) {
+      flags |= MODULE_LIST__REEXPORT;
+      special_reexport = SPECIAL__EXTERNAL;
+    }
+
+    --skip_context;
+
+    td->resume = restore_resume;
+    td->peek_at = restore_resume;
+    td->line_no = restore_line_no;
+    td->depth = restore_depth;
+    td->cursor.len = 0;
+    td->cursor.type = TOKEN_UNKNOWN;
+
+    prsr_next();
+  }
+
+  prsr_update(TOKEN_KEYWORD);
+  _modp_callback(special_reexport);
+  internal_next_comment();
+
   int special_external = SPECIAL__EXTERNAL;
+  int is_default = 0;
   if (td->cursor.hash == LIT_DEFAULT) {
     // exporting default _still_ creates a local var named...
     internal_next_update(TOKEN_KEYWORD);
     is_default = 1;
-    special_external = 0;
   }
 
   // if this is class/function, consume with no value (needed as they act statement-like)
@@ -164,34 +220,6 @@ static int consume_export(int context) {
 
   // "export {..." or "export *" or "export default *"
   if ((!is_default && td->cursor.type == TOKEN_BRACE) || td->cursor.hash == MISC_STAR) {
-    // nb. we actually _need_ to look-ahead to search for "from".
-    // whole programs can't appear here, it's probably fine.
-
-    char *restore_resume = td->cursor.p;
-    int restore_line_no = td->cursor.line_no;
-    uint16_t restore_depth = td->depth;
-    if (td->cursor.type == TOKEN_BRACE) {
-      restore_depth--;
-    }
-
-    ++skip_context;
-
-    int flags = MODULE_LIST__EXPORT;
-    consume_module_list(flags);
-    if (td->cursor.hash == LIT_FROM) {
-      flags |= MODULE_LIST__REEXPORT;
-    }
-
-    --skip_context;
-
-    td->resume = restore_resume;
-    td->peek_at = restore_resume;
-    td->line_no = restore_line_no;
-    td->depth = restore_depth;
-    td->cursor.len = 0;
-    td->cursor.type = TOKEN_UNKNOWN;
-
-    prsr_next();
     _check(consume_module_list(flags));
 
     // consume optional "from"
@@ -210,6 +238,10 @@ static int consume_export(int context) {
       return ERROR__UNEXPECTED;
     }
      return consume_optional_expr(context);
+  }
+  if (!(td->cursor.hash & _MASK_DECL)) {
+    debugf("can't export anything but var/const/let\n");
+    return ERROR__UNEXPECTED;
   }
   return consume_definition_list(context, special_external);
 }

@@ -60,4 +60,7 @@ int prsr_peek_is_as();
 // Special-case. Is the current peek cursor pointing at an op "=>"?
 int prsr_peek_is_arrow();
 
+// Special-case. Is the current peek cursor pointing at an op "*"?
+int prsr_peek_is_star();
+
 #endif//_TOKEN_H

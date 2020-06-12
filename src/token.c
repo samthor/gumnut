@@ -962,3 +962,10 @@ int prsr_peek_is_arrow() {
     p[1] == '>'  // only valid combo
   );
 }
+
+int prsr_peek_is_star() {
+  char *p = td->peek_at;
+  return (
+    p[0] == '*' && !(p[1] == '*' || p[1] == '=')
+  );
+}
