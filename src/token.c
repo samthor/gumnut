@@ -633,6 +633,9 @@ static inline void eat_token() {
         // simple cases that are hashed
         switch (start) {
           case '*':
+            if (c == '=') {
+              break;
+            }
             _reth(1, TOKEN_OP, MISC_STAR);
           case '~':
             _reth(1, TOKEN_OP, MISC_BITNOT);
@@ -661,6 +664,9 @@ static inline void eat_token() {
           // match equals specially
           _reth(1, TOKEN_OP, MISC_EQUALS);
         }
+      } else if (c == '=') {
+        // for 2 and 3-cases, allow = as suffix
+        ++len;
       }
 
       _ret(len, TOKEN_OP);
