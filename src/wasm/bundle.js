@@ -154,6 +154,7 @@ export default async function rewriter() {
 
   return async (files) => {
     const toplevels = new Set();
+    let changes = 0;
 
     const fileQueue = new Set();
     for (const f of files) {
@@ -246,12 +247,15 @@ export default async function rewriter() {
         readable.push(buffer.subarray(at, next.at));
         readable.push(next.update);
         at = next.at + next.cand.length;  // FIXME: length only works for utf-8
+        ++changes;
       }
       readable.push(buffer.subarray(at));
 
       readable.push(null);
       await streamTo(readable);
     }
+
+    console.warn('made', changes, 'changes');
   };
 }
 
