@@ -24,7 +24,9 @@ import {specials, types, hashes} from './wrap.js';
 import build from './wrap.js';
 import path from 'path';
 import stream from 'stream';
-import { type } from 'os';
+
+
+const globExport = '__';
 
 
 class Scope {
@@ -231,7 +233,7 @@ export default async function rewriter() {
 
   return async (files) => {
     const toplevels = new Set();
-    let changes = 0;
+    const externals = new Map();
 
     const fileQueue = new Set();
     for (const f of files) {
@@ -250,7 +252,8 @@ export default async function rewriter() {
       let top = scopes[0];
       let scope = scopes[0];
 
-      const modules = {};
+      const refs = {};
+
       let importCallback = null;
 
       const callback = (special) => {
@@ -311,17 +314,30 @@ export default async function rewriter() {
               return;  // FIXME
             }
 
+            // If this is an external bundle, then build up our knowledge of what it exports.
+            if (!bundled) {
+              let prev = externals.get(from);
+              if (prev === undefined) {
+                prev = {};
+                externals.set(from, prev);
+              }
+              // Invert the mapping struct, with first-wins semantics. We need to use the imported
+              // name as we assume the user has chosen a valid one.
+              for (const key in mapping) {
+                const cand = mapping[key];
+                if (cand === '*') {
+                  // TODO: do we need to include this?
+                }
+                if (!(cand in prev)) {
+                  prev[cand] = key;
+                }
+              }
+            }
+
             // Declare the variables just imported (e.g. "import x from foo" => "x" exists now).
             for (const cand in mapping) {
               top.declare(cand);
-            }
-
-            // We only want to include modules which actually import things or which aren't known.
-            // Bundled modules with side-effects are already implied since they're queued above.
-            const def = modules[from] || {};
-            Object.assign(def, mapping);
-            if (Object.keys(def).length || !bundled) {
-              modules[from] = def;
+              refs[cand] = {from, name: mapping[cand]};
             }
           });
         }
@@ -365,17 +381,27 @@ export default async function rewriter() {
           exports[cand] = cand;
         }
       }
-      fileData.set(f, {top, buffer, modules, exports});
+      exports[globExport] = globExport;
+      top.declare(globExport);
+      fileData.set(f, {top, buffer, refs, exports});
     }
 
     // Reverse the order, so we emit the last module imported first (hoisting woop).
-    console.warn('globals', toplevels);
     const output = Array.from(fileData.values()).reverse();
+
+    // Create fake data for all external deps.
+    for (const [dep, exports] of externals) {
+      const top = new Scope(null);
+      for (const key in exports) {
+        top.declare(key);
+      }
+      fileData.set(dep, {exports, top});
+    }
 
     // Pass #2: Prepare all outputs by filling up the top-level namespace. Finds needed renames so
     // we don't globber global use by bundled files. Update named exports to point to their actual
     // top-level generated names.
-    for (const info of output) {
+    for (const info of fileData.values()) {
       const {exports, top} = info;
 
       const renames = top.prepare(toplevels);
@@ -390,42 +416,52 @@ export default async function rewriter() {
       info.renames = renames;
     }
 
+    for (const dep of externals.keys()) {
+      const {exports} = fileData.get(dep);
+      console.info(`${rebuildModuleDeclaration(false, exports, dep)};`);
+    }
+
     // Pass #3: Actually rename vars and stream output.
     for (const f of output) {
-      const {modules, buffer, renames, top} = f;
+      const {refs, buffer, renames, top, exports} = f;
+      const readable = new stream.Readable({emitClose: true});
 
-      for (const from in modules) {
-        const mapping = modules[from];
-        if (!fileData.has(from)) {
-          // FIXME: this is an unknown/external file
+      // TODO: don't emit this unless it's required by someone else
+      const inner = Object.keys(exports).filter((key) => key !== globExport).map((key) => {
+        return `  get ${key}() { return ${exports[key]}; },\n`;
+      }).join('');
+      readable.push(`const ${exports[globExport]} = Object.freeze({\n${inner}});\n`);
+
+      for (const cand in refs) {
+        // This variable actually refers to something else we know about. Insert it into renames.
+        const {from, name} = refs[cand];
+
+        const {exports} = fileData.get(from);
+        if (!(name in exports)) {
+          if (name !== '*') {
+            throw new TypeError(`module ${from} has no export: ${name}`);
+          }
+          renames[cand] = exports[globExport];
           continue;
         }
-        const {exports} = fileData.get(from);
 
-        for (const name in mapping) {
-          const cand = mapping[name];
-
-          if (!(cand in exports)) {
-            throw new TypeError(`module ${from} has no export: ${cand}`);
-          }
-
-          renames[name] = exports[cand];
-        }
+        renames[cand] = exports[name];
       }
 
       const updates = top.updatesFor(renames);
       updates.sort(({at: a}, {at: b}) => a - b);
-
-      const readable = new stream.Readable({emitClose: true});
 
       let at = 0;
       for (const next of updates) {
         readable.push(buffer.subarray(at, next.at));
         readable.push(next.update);
         at = next.at + next.length;
-        ++changes;
       }
       readable.push(buffer.subarray(at));
+
+      if (buffer[buffer.length - 1] !== 10) {
+        readable.push('\n');  // force newlines
+      }
 
       readable.push(null);
       await streamTo(readable);
@@ -462,11 +498,8 @@ function rebuildModuleDeclaration(isExport, mapping, target=null) {
       continue;
     }
     const v = mapping[key];
-    if (v === '*') {
-      parts.push(key === '*' ? '*' : `* as ${key}`);
-    } else {
-      grouped.push(v === key ? v : `${v} as ${key}`)
-    }
+    const target = (key === '*' ? parts : grouped);
+    target.push(v === key ? v : `${key} as ${v}`);
   }
 
   if (grouped.length) {
