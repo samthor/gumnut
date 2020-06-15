@@ -20,11 +20,10 @@
 
 #define SPECIAL__MODULE_PATH     1
 #define SPECIAL__DECLARE         2   // let, const, var
-#define SPECIAL__DECLARE_TOP     4   // for "var" or var-like only (top-level)
+#define SPECIAL__TOP             4   // for "var" or var-like only (top-level)
 #define SPECIAL__PROPERTY        8
 #define SPECIAL__EXTERNAL        16  // is an external reference (import/export)
 #define SPECIAL__STACK_INC       32  // stack decrement (default decrement)
-#define SPECIAL__STACK_TOP       64  // whether this is top-level stack inc
 
 typedef void (*prsr_callback)(int special);
 token *modp_init(char *, int);

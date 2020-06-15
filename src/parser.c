@@ -215,7 +215,7 @@ static int consume_export(int context) {
       // fall-through
 
     case LIT_FUNCTION:
-      return consume_function(context, SPECIAL__DECLARE | SPECIAL__DECLARE_TOP | special_external);
+      return consume_function(context, SPECIAL__DECLARE | SPECIAL__TOP | special_external);
   }
 
   // "export {..." or "export *" or "export default *"
@@ -295,7 +295,7 @@ static int consume_function(int context, int special) {
   }
 
   // top-level stack
-  _modp_stack(SPECIAL__STACK_INC | SPECIAL__STACK_TOP);
+  _modp_stack(SPECIAL__STACK_INC | SPECIAL__TOP);
 
   // check for parens (nb. should be required)
   _check(consume_optional_arg_group(context));
@@ -395,7 +395,7 @@ static int consume_arrowfunc(int context) {
     method_context &= ~(CONTEXT__ASYNC);
   }
 
-  _modp_stack(SPECIAL__STACK_INC | SPECIAL__STACK_TOP);
+  _modp_stack(SPECIAL__STACK_INC | SPECIAL__TOP);
 
   switch (td->cursor.type) {
     case TOKEN_LIT:
@@ -594,10 +594,10 @@ static int consume_module_list(int flags) {
             prsr_update(TOKEN_SYMBOL);
             if (flags & MODULE_LIST__DEEP) {
               // inside e.g. "{foo}", so foo is the var from elsewhere
-              _modp_callback(SPECIAL__EXTERNAL | SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+              _modp_callback(SPECIAL__EXTERNAL | SPECIAL__DECLARE | SPECIAL__TOP);
             } else {
               // this _isn't_ external as it fundamentally points to "default"
-              _modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+              _modp_callback(SPECIAL__DECLARE | SPECIAL__TOP);
             }
 
           }
@@ -619,7 +619,7 @@ static int consume_module_list(int flags) {
           _modp_callback(SPECIAL__EXTERNAL);
         } else {
           prsr_update(TOKEN_SYMBOL);
-          _modp_callback(SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+          _modp_callback(SPECIAL__DECLARE | SPECIAL__TOP);
         }
         internal_next_comment();
       }
@@ -736,7 +736,7 @@ static int consume_optional_arg_group(int context) {
 
 // consume list of definitions, i.e., on "var" etc (also allowed to be on first arg)
 static int consume_definition_list(int context, int extra_special) {
-  int special = SPECIAL__DECLARE | SPECIAL__DECLARE_TOP;
+  int special = SPECIAL__DECLARE | SPECIAL__TOP;
   if (td->cursor.hash == LIT_LET || td->cursor.hash == LIT_CONST) {
     special = SPECIAL__DECLARE;
   }
@@ -895,7 +895,7 @@ static int consume_dict(int context) {
     switch (td->cursor.type) {
       case TOKEN_PAREN:
         // method
-        _modp_stack(SPECIAL__STACK_INC | SPECIAL__STACK_TOP);
+        _modp_stack(SPECIAL__STACK_INC | SPECIAL__TOP);
         _check(consume_optional_arg_group(context));
 
         if (td->cursor.type != TOKEN_BRACE) {
@@ -1305,7 +1305,7 @@ static int consume_statement(int context) {
         case LIT_ASYNC: {
           if (prsr_peek() == TOKEN_LIT && prsr_peek_is_function()) {
             // only match "async function", as others are expr (e.g. "async () => {}")
-            return consume_function(context, SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+            return consume_function(context, SPECIAL__DECLARE | SPECIAL__TOP);
           }
           // fall-through
         }
@@ -1418,7 +1418,7 @@ static int consume_statement(int context) {
       return consume_class(context, SPECIAL__DECLARE);
 
     case LIT_FUNCTION:
-      return consume_function(context, SPECIAL__DECLARE | SPECIAL__DECLARE_TOP);
+      return consume_function(context, SPECIAL__DECLARE | SPECIAL__TOP);
 
     case LIT_DEBUGGER: {
       int line_no = td->cursor.line_no;

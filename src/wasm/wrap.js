@@ -33,17 +33,23 @@ const ERRORS = Object.freeze({
   [ERROR__INTERNAL]: 'internal',
 });
 
-export const specials = Object.seal({
+export const specials = Object.freeze({
   modulePath: 1,
   declare: 2,
-  declareTop: 4,
+  top: 4,
   property: 8,
   external: 16,
   stackInc: 32,
-  stackTop: 64,
 });
 
-export const types = Object.seal({
+// nb. Just includes hashes used by bundlers.
+export const hashes = Object.freeze({
+  as: 389816320,
+  export: 931962883,
+  import: 920461360,
+});
+
+export const types = Object.freeze({
   eof: 0,
   unknown: 1,
   lit: 2,

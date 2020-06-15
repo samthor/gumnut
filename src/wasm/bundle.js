@@ -20,7 +20,7 @@
  */
 
 import fs from 'fs';
-import {specials, types} from './wrap.js';
+import {specials, types, hashes} from './wrap.js';
 import build from './wrap.js';
 import path from 'path';
 import stream from 'stream';
@@ -140,7 +140,6 @@ class Scope {
 }
 
 
-
 /**
  * Builds a method which rewrites imports from a passed filename.
  *
@@ -163,19 +162,16 @@ export default async function rewriter() {
     const fileData = new Map();
 
     for (const f of fileQueue) {
-      const fd = fs.openSync(f);
-      const stat = fs.fstatSync(fd);
-
-      let buffer = null;
-      const token = prepare(stat.size, (b) => {
-        buffer = b;
-        fs.readSync(fd, buffer, 0, stat.size, 0);
-      });
+      // nb. read here, because we need all buffers at end (can't reuse wasm space)
+      const buffer = fs.readFileSync(f);
+      const token = prepare(buffer.length, (b) => b.set(buffer));
 
       const scopes = [new Scope(null)];
       const tops = [0];
       let top = scopes[0];
       let scope = scopes[0];
+
+      let importMode = 0;
 
       const callback = (special) => {
         if (special & specials.modulePath) {
@@ -184,15 +180,27 @@ export default async function rewriter() {
           if (/^\.\.?\//.test(other)) {
             fileQueue.add(path.join(path.dirname(f), other));
           }
+        }
+
+        if (importMode) {
+          if (special & specials.declare) {
+            console.warn('got declare from import', token.string());
+
+            // TODO: this might be a different var in source, just do simple for now
+          }
+
+          if (special & specials.modulePath) {
+            importMode = 0;
+          }
           return;
         }
 
         if (special & specials.declare) {
           const cand = token.string();
-          const where = (special & specials.declareTop) ? top : scope;
+          const where = (special & specials.top) ? top : scope;
           where.declare(cand, token.at());
 
-          if (special & specials.declareTop) {
+          if (special & specials.top) {
             if (cand in top.vars) {
               // This is a hoisted var use, we probably don't care.
             }
@@ -204,12 +212,26 @@ export default async function rewriter() {
           const cand = token.string();
           scope.use(cand, token.at());
         }
+
+        if (token.type() === types.keyword) {
+          const h = token.hash();
+          if (h === hashes.import) {
+            console.warn('got import');
+          } else if (h === hashes.export && (special & specials.external)) {
+            console.warn('got import-like-export');
+          } else {
+            // TODO: "regular" export
+            return;
+          }
+          importMode = 1;
+        }
+
       };
 
       const stack = (special) => {
         if (special) {
           const next = new Scope(scope);
-          if (special & specials.stackTop) {
+          if (special & specials.top) {
             tops.unshift(scopes.length);
             top = next;
           }
@@ -236,7 +258,8 @@ export default async function rewriter() {
     }
     console.warn('globals', toplevels);
 
-    for (const {top, buffer} of fileData.values()) {
+    const output = Array.from(fileData.values()).reverse();
+    for (const {top, buffer} of output) {
       const updates = top.updates(toplevels);
       const readable = new stream.Readable({emitClose: true});
 

@@ -46,9 +46,9 @@ const TOKENS = {
 const TOKEN_LOOKUP = reverseDict(TOKENS);
 
 const SPECIALS = {
-  IMPORT: 1,
+  MODULE_PATH: 1,
   DECLARE: 2,
-  DECLARE_TOP: 4,
+  TOP: 4,
   PROPERTY: 8,
   EXTERNAL: 16,
 };
@@ -253,10 +253,10 @@ document.addEventListener('drop', (ev) => {
     text-decoration-skip-ink: none;
     text-decoration-color: black;
   }
-  pre span._declare_top {
+  pre span._top {
     text-decoration-color: red;
   }
-  pre span._import {
+  pre span._module_path {
     background: blue;
     color: white;
   }
