@@ -47,6 +47,9 @@ export const hashes = Object.freeze({
   as: 389816320,
   export: 931962883,
   import: 920461360,
+  from: 657244160,
+  _star: 134561792,
+  _comma: 134578176,
 });
 
 export const types = Object.freeze({
@@ -101,6 +104,8 @@ async function initialize(modulePromise, callback) {
 export default async function build(modulePromise) {
   let _callback = null;
   let _stack = null;
+  let pendingCallback = null;
+  let pendingDepth = 0;
 
   const {instance, memory} = await initialize(modulePromise, () => {
     return {
@@ -149,7 +154,7 @@ export default async function build(modulePromise) {
           return tokenView[0] - WRITE_AT;
         },
 
-        len() {
+        length() {
           return tokenView[1];
         },
 
