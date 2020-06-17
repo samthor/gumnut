@@ -76,14 +76,13 @@ int main() {
   }
   fprintf(stderr, ">> read %d bytes\n", len);
 
-  out = modp_init(buf, 0);
-  int ret;
+  out = modp_token();
 
-  for (;;) {
-    ret = modp_run();
-    if (ret <= 0) {
-      break;
-    }
+  int ret = modp_init(buf, 0);
+  if (ret >= 0) {
+    do {
+      ret = modp_run();
+    } while (ret > 0);
   }
 
   if (ret) {

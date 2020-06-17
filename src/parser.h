@@ -24,9 +24,11 @@
 #define SPECIAL__PROPERTY        8
 #define SPECIAL__EXTERNAL        16  // is an external reference (import/export)
 #define SPECIAL__STACK_INC       32  // stack decrement (default decrement)
+#define SPECIAL__DEFAULT_HOIST   64  // function or class hoisted in "export default"
 
 typedef void (*prsr_callback)(int special);
-token *modp_init(char *, int);
+token *modp_token();
+int modp_init(char *, int);
 int modp_run();
 
 void modp_callback(int);

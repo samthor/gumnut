@@ -129,6 +129,24 @@ static int consume_import(int context) {
   return consume_import_module_special();
 }
 
+// used by look-ahead only, is this a class or function
+// should be pointing at "async", "function" or "class"
+inline static int lookahead_hoisted_decl() {
+  switch (td->cursor.hash) {
+    case LIT_CLASS:
+      return SPECIAL__DEFAULT_HOIST;
+
+    case LIT_ASYNC:
+      internal_next_comment();
+      break;
+  }
+
+  if (td->cursor.hash != LIT_FUNCTION) {
+    return 0;
+  }
+  return SPECIAL__DEFAULT_HOIST;
+}
+
 static int consume_export(int context) {
 #ifdef DEBUG
   if (td->cursor.hash != LIT_EXPORT) {
@@ -158,11 +176,10 @@ static int consume_export(int context) {
       return ERROR__UNEXPECTED;
   }
 
-  int special_reexport = 0;
+  int special_export = 0;
   int flags = MODULE_LIST__EXPORT;
-  if (peek == TOKEN_BRACE || peek == TOKEN_OP) {
-    // nb. we actually _need_ to look-ahead to search for "from".
-    // whole programs can't appear here, it's probably fine.
+  if (peek == TOKEN_BRACE || peek == TOKEN_OP || peek == TOKEN_LIT) {
+    // need to look-ahead to check for something; whole programs can't appear here, probably fine
 
     // TODO: "export foo" is actually invalid. It's caught below, but we could be more aggressive here.
 
@@ -173,10 +190,20 @@ static int consume_export(int context) {
     ++skip_context;
     internal_next_comment();  // step over "export"
 
-    consume_module_list(flags);
-    if (td->cursor.hash == LIT_FROM) {
-      flags |= MODULE_LIST__REEXPORT;
-      special_reexport = SPECIAL__EXTERNAL;
+    if (td->cursor.type == TOKEN_LIT) {
+      // TODO: we might not need this if the bundler can infer hoisted from (later) name alone
+      // #1: we're checking for "export default" of function/class
+      if (td->cursor.hash == LIT_DEFAULT) {
+        internal_next_comment();  // move over default
+        special_export = lookahead_hoisted_decl();
+      }
+    } else {
+      // #2: checking for 'reeexport'
+      consume_module_list(flags);
+      if (td->cursor.hash == LIT_FROM) {
+        flags |= MODULE_LIST__REEXPORT;
+        special_export = SPECIAL__EXTERNAL;
+      }
     }
 
     --skip_context;
@@ -192,21 +219,22 @@ static int consume_export(int context) {
   }
 
   prsr_update(TOKEN_KEYWORD);
-  _modp_callback(special_reexport);
+  _modp_callback(special_export);
   internal_next_comment();
 
-  int special_external = SPECIAL__EXTERNAL;
   int is_default = 0;
   if (td->cursor.hash == LIT_DEFAULT) {
     // exporting default _still_ creates a local var named...
     internal_next_update(TOKEN_KEYWORD);
     is_default = 1;
+  } else {
+    special_export = SPECIAL__EXTERNAL;
   }
 
   // if this is class/function, consume with no value (needed as they act statement-like)
   switch (td->cursor.hash) {
     case LIT_CLASS:
-      return consume_class(context, SPECIAL__DECLARE | special_external);
+      return consume_class(context, SPECIAL__DECLARE | special_export);
 
     case LIT_ASYNC:
       if (!(prsr_peek() == TOKEN_LIT && prsr_peek_is_function())) {
@@ -215,7 +243,7 @@ static int consume_export(int context) {
       // fall-through
 
     case LIT_FUNCTION:
-      return consume_function(context, SPECIAL__DECLARE | SPECIAL__TOP | special_external);
+      return consume_function(context, SPECIAL__DECLARE | SPECIAL__TOP | special_export);
   }
 
   // "export {..." or "export *" or "export default *"
@@ -243,7 +271,7 @@ static int consume_export(int context) {
     debugf("can't export anything but var/const/let\n");
     return ERROR__UNEXPECTED;
   }
-  return consume_definition_list(context, special_external);
+  return consume_definition_list(context, special_export);
 }
 
 inline static int consume_defn_name(int special) {
@@ -263,6 +291,26 @@ inline static int consume_defn_name(int special) {
     internal_next();
   }
   return 0;
+}
+
+static void emit_empty_symbol(int special) {
+  if (skip_context) {
+    return;
+  }
+
+  int restore_len = td->cursor.len;
+  int restore_type = td->cursor.type;
+  int restore_hash = td->cursor.hash;
+
+  td->cursor.len = 0;
+  td->cursor.type = TOKEN_SYMBOL;
+  td->cursor.hash = 0;
+
+  modp_callback(special);
+
+  td->cursor.len = restore_len;
+  td->cursor.type = restore_type;
+  td->cursor.hash = restore_hash;
 }
 
 // consumes "async function foo ()"
@@ -292,6 +340,8 @@ static int consume_function(int context, int special) {
   // check for optional function name
   if (td->cursor.type == TOKEN_LIT) {
     _check(consume_defn_name(special));
+  } else if (special) {
+    emit_empty_symbol(special);
   }
 
   // top-level stack
@@ -1240,6 +1290,8 @@ static int consume_class(int context, int special) {
   if (td->cursor.type == TOKEN_LIT) {
     if (td->cursor.hash != LIT_EXTENDS) {
       _check(consume_defn_name(special));
+    } else if (special) {
+      emit_empty_symbol(special);
     }
     if (td->cursor.hash == LIT_EXTENDS) {
       internal_next_update(TOKEN_KEYWORD);
@@ -1247,6 +1299,8 @@ static int consume_class(int context, int special) {
       // nb. something must be here (but if it's not, that's an error, as we expect a '{' following)
       _check(consume_optional_expr(context));
     }
+  } else if (special) {
+    emit_empty_symbol(special);
   }
 
   return consume_dict(context);
@@ -1456,18 +1510,24 @@ static int consume_statement(int context) {
   return consume_expr_compound(context);
 }
 
-token *modp_init(char *p, int _context) {
+token *modp_token() {
+  return &(td->cursor);
+}
+
+int modp_init(char *p, int _context) {
   prsr_init_token(p);
   top_context = _context;
   skip_context = 0;
   ambig_arrowfunc_count = 0;
 
-  if (td->cursor.type != TOKEN_COMMENT) {
-    // n.b. it's possible but unlikely for this to fail (e.g. opens with "}")
-    prsr_next();
+  // We matched an initial #! comment, return its length.
+  if (td->cursor.type == TOKEN_COMMENT) {
+    return td->cursor.p - p;
   }
 
-  return &(td->cursor);
+  // n.b. it's possible but unlikely for this to fail (e.g., opens with "}")
+  _check(prsr_next());
+  return 0;
 }
 
 int modp_run() {
