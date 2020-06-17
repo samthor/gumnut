@@ -12,10 +12,14 @@ static_assert(__builtin_offsetof(token, line_no) == 8, "line_no=8");
 static_assert(__builtin_offsetof(token, type) == 12, "type=12");
 static_assert(__builtin_offsetof(token, hash) == 16, "hash=16");
 
-// setup, assumed allocated prsr_size() bytes for us
 EMSCRIPTEN_KEEPALIVE
-void *xx_setup(char *p) {
-  return (void *) modp_init(p, 0);
+void *xx_token() {
+  return (void *) modp_token();
+}
+
+EMSCRIPTEN_KEEPALIVE
+int xx_init(char *p) {
+  return modp_init(p, 0);
 }
 
 EMSCRIPTEN_KEEPALIVE

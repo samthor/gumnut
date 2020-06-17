@@ -51,6 +51,8 @@ const SPECIALS = {
   TOP: 4,
   PROPERTY: 8,
   EXTERNAL: 16,
+  STACK_INC: 32,
+  DEFAULT_HOIST: 64,
 };
 const SPECIAL_LOOKUP = reverseDict(SPECIALS);
 
@@ -113,7 +115,7 @@ window.addEventListener('load', (ev) => {
     }
   };
 
-  runnerPromise.then(({prepare, run}) => {
+  runnerPromise.then(({prepare, run, token}) => {
     const update = () => {
       const bytes = encoder.encode(input.value);
       const tokens = [];
@@ -122,9 +124,8 @@ window.addEventListener('load', (ev) => {
 
       let err = null;
       try {
-        const token = prepare(bytes.length, (buffer) => {
-          buffer.set(bytes);
-        });
+        const buffer = prepare(bytes.length);
+        buffer.set(bytes);
         run((special) => {
           const t = {
             lineNo: token.lineNo(),
@@ -255,6 +256,9 @@ document.addEventListener('drop', (ev) => {
   }
   pre span._top {
     text-decoration-color: red;
+  }
+  pre span._default_hoist {
+    background: pink;
   }
   pre span._module_path {
     background: blue;

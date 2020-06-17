@@ -40,16 +40,18 @@ export const specials = Object.freeze({
   property: 8,
   external: 16,
   stackInc: 32,
+  defaultHoist: 64,
 });
 
 // nb. Just includes hashes used by bundlers.
 export const hashes = Object.freeze({
   as: 389816320,
+  default: 1046249491,
   export: 931962883,
-  import: 920461360,
   from: 657244160,
-  _star: 134561792,
+  import: 920461360,
   _comma: 134578176,
+  _star: 134561792,
 });
 
 export const types = Object.freeze({
@@ -102,10 +104,9 @@ async function initialize(modulePromise, callback) {
 }
 
 export default async function build(modulePromise) {
+  const shadowed = [];  // shadowed callbacks
   let _callback = null;
   let _stack = null;
-  let pendingCallback = null;
-  let pendingDepth = 0;
 
   const {instance, memory} = await initialize(modulePromise, () => {
     return {
@@ -126,70 +127,97 @@ export default async function build(modulePromise) {
   });
 
   const {exports} = instance;
-  let tokenView = null;
+  const tokenAt = exports._xx_token();
+  if (tokenAt >= WRITE_AT) {
+    throw new Error(`token in invalid location`);
+  }
+
+  // These views need to be mutable as they'll point to a new WebAssembly.Memory when it gets
+  // resized for a new run.
+  let view = new Uint8Array(0);
+  let tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);
 
   return {
-    prepare(size, callback) {
+
+    token: {
+      at() {
+        return tokenView[0] - WRITE_AT;
+      },
+
+      length() {
+        return tokenView[1];
+      },
+
+      lineNo() {
+        return tokenView[2];
+      },
+
+      type() {
+        return tokenView[3];
+      },
+
+      hash() {
+        return tokenView[4];
+      },
+
+      view() {
+        return view.subarray(tokenView[0], tokenView[0] + tokenView[1]);
+      },
+
+      string() {
+        return decoder.decode(view.subarray(tokenView[0], tokenView[0] + tokenView[1]));
+      },
+    },
+
+    /**
+     * @param {number} size
+     * @return {!Uint8Array}
+     */
+    prepare(size) {
       const memoryNeeded = WRITE_AT + size + 1;
       if (memory.buffer.byteLength < memoryNeeded) {
         memory.grow(Math.ceil((memoryNeeded - memory.buffer.byteLength) / PAGE_SIZE));
       }
-      const view = new Uint8Array(memory.buffer);
-      const inner = view.subarray(WRITE_AT, WRITE_AT + size);
-      let written = callback(inner);
-      if (written == null) {
-        written = size;
-      }
-      if (written > inner.length) {
-        throw new Error(`got too many bytes: ${written}`);
-      }
+
+      tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);  // in 32-bit
+      view = new Uint8Array(memory.buffer);
       view[WRITE_AT + size] = 0;  // null-terminate
 
-      const tokenAt = exports._xx_setup(WRITE_AT);
-      tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);  // in 32-bit
-
-      // nb. getters are slow, use real functions.
-      return {
-        at() {
-          return tokenView[0] - WRITE_AT;
-        },
-
-        length() {
-          return tokenView[1];
-        },
-
-        lineNo() {
-          return tokenView[2];
-        },
-
-        type() {
-          return tokenView[3];
-        },
-
-        hash() {
-          return tokenView[4];
-        },
-
-        view() {
-          return view.subarray(tokenView[0], tokenView[0] + tokenView[1]);
-        },
-
-        string() {
-          return decoder.decode(view.subarray(tokenView[0], tokenView[0] + tokenView[1]));
-        },
-      };
+      return new Uint8Array(memory.buffer, WRITE_AT, size);
     },
 
+    /**
+     * @param {!function(number): void} callback to push
+     */
+    push(callback) {
+      shadowed.push(_callback);
+      _callback = callback;
+    },
+
+    /**
+     * @return {!function(number): void} now active callback
+     */
+    pop() {
+      if (shadowed.length) {
+        _callback = shadowed.pop();
+      }
+      return _callback;
+    },
+
+    /**
+     * @param {!function(number): void} callback
+     * @param {(!function(number): void)=} stack
+     */
     run(callback, stack=() => {}) {
       _callback = callback;
       _stack = stack;
+      shadowed.splice(0, shadowed.length);  // clear previous shadowed callbacks
 
-      let ret = 0;
-      for (;;) {
-        ret = exports._xx_run();
-        if (ret <= 0) {
-          break;
-        }
+      let ret = exports._xx_init(WRITE_AT);
+      if (ret >= 0) {
+        do {
+          ret = exports._xx_run();
+        } while (ret > 0);
       }
 
       _callback = null;
@@ -223,7 +251,7 @@ export function stringFrom(view) {
   if (view.some((c) => c === 92)) {
     // take the slow train, choo choo, filter out slashes
     let skip = false;
-    view = view.filter((c, index) => {
+    view = view.filter((c) => {
       if (skip) {
         skip = false;
         return true;  // always allow
