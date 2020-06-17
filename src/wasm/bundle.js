@@ -26,25 +26,10 @@ import path from 'path';
 import stream from 'stream';
 
 
-const globExport = '__';
-
-
 class Scope {
   constructor(parent) {
     this.parent = parent;
     this.vars = {};
-  }
-
-  _get(cand) {
-    let found = this.vars[cand];
-    if (found === undefined) {
-      this.vars[cand] = found = {decl: false, at: []};
-    }
-    return found;
-  }
-
-  declared(cand) {
-    return this.vars[cand]?.decl || false;
   }
 
   /**
@@ -90,7 +75,7 @@ class Scope {
       const isEmpty = (cand.length === 0);
       let prefix = cand;
       if (cand === '') {
-        prefix = '__default';
+        prefix = 'default';
       }
 
       // Try to rename this top-level var. It's possible but odd that "foo$1" is already defined
@@ -147,8 +132,11 @@ class Scope {
         continue;
       }
 
-      const d = this._get(cand);
-      d.at = d.at.concat(od.at);
+      let d = this.vars[cand];
+      if (d === undefined) {
+        this.vars[cand] = d = {decl: false, at: [], length: od.length};
+      }
+      d.at = d.at.concat(od.at);  // always concat so we don't clobber child (just nice semantics)
     }
   }
 
