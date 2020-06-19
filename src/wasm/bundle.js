@@ -62,10 +62,25 @@ function internalBundle(runner, files) {
 
   const globals = new Set(['', 'default', '*']);
 
+  // Shared registry for variable renames.
+  const registry = {};
+  const register = (name, f) => {
+    const key = `${name}~${f}`;
+
+    const prev = registry[key];
+    if (prev !== undefined) {
+      return prev;
+    }
+    const update = nameGlobal(globals, name);
+    registry[key] = update;
+    return update;
+  };
+
   const fileData = new Map();
   const unbundledImports = new Map();
 
-  // Recursively process every input file. Match ESM execution order.
+  // Part #1: Parse every file and proceed recursively into dependencies. This matches ESM execution
+  // order.
   const processed = new Set();
   const process = (f) => {
     if (processed.has(f)) {
@@ -81,11 +96,7 @@ function internalBundle(runner, files) {
     const buffer = fs.readFileSync(f);
     const {deps, externals, imports, exports, render} = processFile(runner, buffer);
 
-    deps.forEach((dep) => {
-      const resolved = resolve(dep, f);
-      process(resolved);
-    });
-
+    deps.forEach((dep) => process(resolve(dep, f)));
     externals.forEach((external) => globals.add(external));
 
     // processFile doesn't know how to resolve external imports; resolve here.
@@ -94,29 +105,16 @@ function internalBundle(runner, files) {
       d.from = resolve(d.from, f);
     }
 
-    fileData.set(f, {imports, exports, render});
+    fileData.set(f, {imports, exports, render, renames: {}});
   };
   for (const f of files) {
     process(path.resolve(f));
   }
 
-  // Shared registry for variable renames.
-  const registry = {};
-  const register = (name, f) => {
-    const key = `${name}~${f}`;
-
-    const prev = registry[key];
-    if (prev !== undefined) {
-      return prev;
-    }
-    const update = nameGlobal(globals, name);
-    registry[key] = update;
-    return update;
-  };
-
-  for (const [f, data] of fileData) {
-    const {imports, exports, render} = data;
-    const renames = {};
+  // Part #2: Remap all imports. This needs to be done before exports, as we might require the
+  // additional glob export from another bundled file.
+  for (const data of fileData.values()) {
+    const {imports, renames} = data;
 
     for (const x in imports) {
       let {from, name} = imports[x];
@@ -127,9 +125,13 @@ function internalBundle(runner, files) {
         const {exports: otherExports} = fileData.get(from);
         const real = otherExports[name];
         if (real === undefined) {
-          throw new Error(`${from} does not export: ${name}`);
+          if (name !== '*') {
+            throw new Error(`${from} does not export: ${name}`);
+          }
+          otherExports['*'] = '*';
+        } else {
+          name = real;
         }
-        name = real;
       }
 
       const update = register(name, from);
@@ -141,10 +143,21 @@ function internalBundle(runner, files) {
         mapping[name] = update;
       }
     }
+  }
 
+  // Part #3: Announce all external modules we depend on.
+  for (const [f, mapping] of unbundledImports) {
+    write(`${rebuildModuleDeclaration(false, mapping, f)}\n`);
+  }
+
+  // Part #4: Remap exports, and rewrite/render module content.
+  for (const [f, {render, exports, renames}] of fileData) {
     for (const x in exports) {
       const real = exports[x];
       renames[real] = register(real, f);
+    }
+    if ('*' in exports) {
+      readable.push(`const ${renames['*']} = ${rebuildGlobExports(exports, renames)};\n`);
     }
 
     render(write, (name) => {
@@ -158,267 +171,16 @@ function internalBundle(runner, files) {
     });
   }
 
-  // TODO(samthor): While allowed, this is the opposite of fast, and should be at the top.
-  for (const [f, mapping] of unbundledImports) {
-    write(`${rebuildModuleDeclaration(false, mapping, f)}\n`);
-  }
-
-  readable.push(null);
-  return readable;
-}
-
-/**
- *
- */
-function internalBundleOld(runner, files) {
-  const {token} = runner;
-  const readable = new stream.Readable({emitClose: true});
-
-  const toplevels = new Set(['', 'default', '*']);  // specials that cannot really exist
-  const externals = new Map();
-  const globsFor = new Map();
-
-  const fileQueue = new Set();
-  for (const f of files) {
-    fileQueue.add(path.resolve(f));
-  }
-  const queue = (f, other, mapping) => {
-    if (/^\.\.?\//.test(other)) {
-      // Make 'other' an absolute path.
-      other = path.join(path.dirname(f), other);
-      if (fs.existsSync(other)) {
-        fileQueue.add(other);
-        return {bundled: true, resolved: other};
-      }
-    }
-
-    // Otherwise, this is an external.
-    let known = externals.get(other);
-    if (known === undefined) {
-      known = {};
-      externals.set(other, known);
-    }
-
-    // Invert the mapping struct, with first-wins semantics. We need to use the imported
-    // name as we assume the user has chosen a valid one.
-    for (const key in mapping) {
-      const cand = mapping[key];
-      if (cand === '*') {
-        // TODO: do we need to include this?
-      }
-      if (!(cand in known)) {
-        known[cand] = key;
-      }
-    }
-
-    return {bundled: false, resolved: other};
-  };
-
-  const fileData = new Map();
-
-  // Pass #1: process all files. Read their imports/exports.
-  for (const f of fileQueue) {
-    // nb. read here, because we need all buffers at end (can't reuse wasm space)
-    const buffer = fs.readFileSync(f);
-    const sharedBuffer = runner.prepare(buffer.length);
-    sharedBuffer.set(buffer);
-
-    const scopes = [new Scope(null)];
-    const tops = [0];
-    let top = scopes[0];
-    let scope = scopes[0];
-
-    const refs = {};
-
-    const callback = (special) => {
-      if (special & specials.declare) {
-        const cand = token.string();
-        const where = (special & specials.top) ? top : scope;
-        where.mark(token, true);
-
-        if (special & specials.top) {
-          if (cand in top.vars) {
-            // This is a hoisted var use, we probably don't care.
-          }
-        }
-        // nb. Treat "let" and "const" like "var" w.r.t. hoisting. Use like this is invalid (TDZ)
-        // so there's nothing we can do anyway.
-
-      } else if (token.type() === types.symbol) {
-        scope.mark(token, false);
-      }
-
-      if (token.type() !== types.keyword) {
-        return;
-      }
-      const h = token.hash();
-      if (!(h === hashes.import || h === hashes.export)) {
-        return;
-      }
-
-      const start = token.at();
-      const defaultExportHoist = Boolean(special & specials.defaultHoist);
-
-      if (h === hashes.export) {
-        exportHandler(runner, (mapping, other) => {
-          const defaultExport = (mapping === null && token.hash() === hashes.default);
-          console.warn('handled export', other, mapping, 'default?', defaultExport, 'default hoist?', defaultExportHoist);
-          // TODO: otherwise unhandled right now
-//            commentRange(buffer.slice(start, token.at()));
-        });
-        return;
-      }
-      importHandler(runner, (mapping, other) => {
-        const {resolved, bundled} = queue(f, other, mapping);
-
-        commentRange(buffer.slice(start, token.at()));
-
-        for (const cand in mapping) {
-          // e.g., "x as bar", declare "bar" so it doesn't look like a global
-          top.declare(cand);
-
-          // indicate that "bar" points to another file with another name (could be "*")
-          refs[cand] = {from: resolved, name: mapping[cand]};
-
-          // the "*" export isn't requested unless we ask for it
-          if (mapping[cand] === '*' && !globsFor.has(resolved)) {
-            globsFor.set(resolved, cand);
-          }
-        }
-      });
-
-    };
-
-    const stack = (special) => {
-      if (special) {
-        const next = new Scope(scope);
-        if (special & specials.top) {
-          tops.unshift(scopes.length);
-          top = next;
-        }
-        scopes.unshift(next);
-        scope = next;
-        return;
-      }
-
-      const previous = scope;
-      scopes.shift();
-      scope = scopes[0];
-      scope.consume(previous);
-
-      if (tops[0] === scopes.length) {
-        tops.shift();
-        top = scopes[tops[0]];
-      }
-    };
-
-    // Parse and mark externals. We can do this immediately, and there's no race conditions about
-    // which file's globals "wins": the union of globals must be treated as global.
-    runner.run(callback, stack);
-    top.external(toplevels);
-
-    // FIXME: for now we basically say everything top-level is exported
-    // nb. Exports is actually inverse; it is "exported name" => "var name".
-    const exports = {};
-    for (const cand in top.vars) {
-      const {decl} = top.vars[cand];
-      if (decl) {
-        exports[cand] = cand;
-      }
-    }
-    fileData.set(f, {top, buffer, refs, exports});
-  }
-
-  // Reverse the order, so we emit the last module imported first (hoisting woop).
-  const output = Array.from(fileData.values()).reverse();
-
-  // Create fake data for all external deps.
-  for (const [dep, exports] of externals) {
-    const top = new Scope(null);
-    for (const key in exports) {
-      top.declare(key);
-    }
-    fileData.set(dep, {exports, top});
-  }
-
-  // Pass #2: Prepare all outputs by filling up the top-level namespace. Finds needed renames so
-  // we don't clobber global use by bundled files. Update named exports to point to their actual
-  // top-level generated names.
-  for (const [f, info] of fileData) {
-    const {exports, top} = info;
-
-    // If someone wants the glob for this file, pretend that the "*" variable exists so it can be
-    // renamed to something valid.
-    const nameForGlob = globsFor.get(f);
-    if (nameForGlob !== undefined) {
-      const safe = top.declare(nameForGlob, true);
-      exports['*'] = safe;
-    }
-
-    const renames = top.prepare(toplevels);
-    for (const key in exports) {
-      const cand = exports[key];
-      if (cand in renames) {
-        // e.g. Instead of "x" exporting "x", maybe it now exports "x$1".
-        exports[key] = renames[cand];
-      }
-    }
-
-    info.renames = renames;
-  }
-
-  for (const dep of externals.keys()) {
-    const {exports} = fileData.get(dep);
-    readable.push(`${rebuildModuleDeclaration(false, exports, dep)};\n`);
-  }
-
-  // Pass #3: Actually rename vars and stream output.
-  for (const info of output) {
-    const {refs, buffer, renames, top, exports} = info;
-
-    // Emit an object-like for the glob for this file.
-    if ('*' in exports) {
-      readable.push(`const ${exports['*']} = ${rebuildGlobExports(exports)};\n`);
-    }
-
-    for (const cand in refs) {
-      // This variable actually refers to something else we know about. Insert it into renames.
-      const {from, name} = refs[cand];
-
-      const {exports} = fileData.get(from);
-      if (!(name in exports)) {
-        throw new TypeError(`module ${from} has no export: ${name}`);
-      }
-
-      // We want "x" from some other file. Find out what it's called now.
-      renames[cand] = exports[name];
-    }
-
-    const updates = top.updatesFor(renames);
-    updates.sort(({at: a}, {at: b}) => a - b);
-
-    let at = 0;
-    for (const next of updates) {
-      readable.push(buffer.subarray(at, next.at));
-      readable.push(next.update);
-      at = next.at + next.length;
-    }
-    readable.push(buffer.subarray(at));
-
-    if (buffer[buffer.length - 1] !== 10) {
-      readable.push('\n');  // force newlines
-    }
-  }
-
   readable.push(null);
   return readable;
 }
 
 
-function rebuildGlobExports(exports) {
+function rebuildGlobExports(exports, renames) {
   const validExport = (key) => key && key !== '*';
   const inner = Object.keys(exports).filter(validExport).map((key) => {
-    return `  get ${key}() { return ${exports[key]}; },\n`;
+    const v = renames[exports[key]];
+    return `  get ${key}() { return ${v}; },\n`;
   }).join('');
   return `Object.freeze({\n${inner}})`;
 }
