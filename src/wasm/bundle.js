@@ -25,192 +25,156 @@ import build from './wrap.js';
 import path from 'path';
 import stream from 'stream';
 
+import {processFile} from '../bundler/file.js';
 
-class Scope {
-  constructor(parent) {
-    this.parent = parent;
-    this.vars = {};
+
+function nameGlobal(globals, name) {
+  let base;
+  if (name === '*') {
+    base = 'all';
+  } else if (name === '') {
+    base = 'default';
+  } else {
+    base = name;
   }
+  let update = base;
+  let count = 0;
 
-  /**
-   * Adds this scope's externals to the passed Set. This must happen for all files first, as these
-   * cannot be renamed (e.g. "window", "this").
-   *
-   * @param {!Set<string>} toplevels where to mark global use
-   */
-  external(toplevels) {
-    for (const cand in this.vars) {
-      const {decl} = this.vars[cand];
-      if (decl === false) {
-        toplevels.add(cand);
-      }
-    }
+  while (globals.has(update)) {
+    update = `${base}$${++count}`;
   }
-
-  /**
-   * @param {!Set<string>} toplevels to use and mark
-   * @return {!Object<string, string>} renames to apply to this scope
-   */
-  prepare(toplevels) {
-    const renames = {};
-
-    for (const cand in this.vars) {
-      const {decl} = this.vars[cand];
-
-      // Not defined at the top-level, so it must be a global. Don't rename it.
-      if (decl === false) {
-        continue;
-      }
-
-      // We can use this variable name at the top-level, it's not already defined.
-      if (!toplevels.has(cand)) {
-        // TODO: "import {x as y}" will block out "y", even if not used: probably fine?
-        // There's two cases here: when "x" is eventually bundled, we prefer using its name.
-        // If "x" is left as external, then we prefer "y".
-        // TODO: Could we use a totally invalid name (e.g. ":foo") and always prefer the left? use e.g. ":x"?
-        toplevels.add(cand);
-        continue;
-      }
-
-      const isEmpty = (cand.length === 0);
-      let prefix = cand;
-      if (cand === '') {
-        prefix = 'default';
-      }
-
-      // Try to rename this top-level var. It's possible but odd that "foo$1" is already defined
-      // (maybe output from another bundler), so increment until we find an empty slot.
-      let update;
-      for (let index = 0; ++index; ) {
-        update = `${prefix}$${index}`;
-        if (!toplevels.has(update)) {
-          break;
-        }
-      }
-      toplevels.add(update);
-
-      // If the candidate is the empty string (unnamed function statement in export default), then
-      // it needs to be padded by spaces. This can result in slightly odd spacing but whatever.
-      if (isEmpty) {
-        update = ` ${update} `;
-      }
-      renames[cand] = update;
-    }
-
-    return renames;
-  }
-
-  updatesFor(renames) {
-    let updates = [];
-
-    for (const cand in this.vars) {
-      const {decl, length, at} = this.vars[cand];
-
-      // Not renamed. Skip.
-      if (!(cand in renames)) {
-        continue;
-      } else if (decl === false) {
-        throw new Error(`got global rename: ${cand}`);
-      }
-
-      const update = renames[cand];
-      updates = updates.concat(at.map((at) => ({at, length, update})));
-    }
-
-    return updates;
-  }
-
-  /**
-   * Consume a previous child scope.
-   *
-   * @param {!Scope} child
-   */
-  consume(child) {
-    for (const cand in child.vars) {
-      const od = child.vars[cand];
-      if (od.decl) {
-        continue;
-      }
-
-      let d = this.vars[cand];
-      if (d === undefined) {
-        this.vars[cand] = d = {decl: false, at: [], length: od.length};
-      }
-      d.at = d.at.concat(od.at);  // always concat so we don't clobber child (just nice semantics)
-    }
-  }
-
-  /**
-   * Mark a variable as being used, with it being an optional declaration.
-   *
-   * This only records if we're a declaration, or we're at the top level, or not already declared
-   * locally.
-   * 
-   * @param {!Token} token
-   * @param {boolean} decl whether this is a declaration
-   */
-   mark(token, decl) {
-    const cand = token.string();
-    const at = token.at();
-    let d = this.vars[cand];
-    if (d === undefined) {
-      this.vars[cand] = {decl, at: [at], length: token.length()};
-    } else if (decl || (this.parent === null || !d.decl)) {
-      // decl always gets marked (shadows); or
-      // top-level use always get marked; or
-      // if we weren't yet confidently declared here (maybe hoisted)
-      if (decl) {
-        d.decl = true;
-      }
-      d.at.push(at);
-    }
-  }
-
-  /**
-   * Declares a variable, but without actually marking it for update.
-   *
-   * @param {string} cand
-   * @param {boolean=} safe whether to rename to always be new
-   * @return {string} updated variable name (if safe)
-   */
-  declare(cand, safe=false) {
-    if (safe) {
-      let update = cand;
-      for (let index = 0; ++index; ) {
-        if (!(update in this.vars)) {
-          break;
-        }
-        update = `${cand}$${index}`;
-      }
-      cand = update;
-    }
-
-    let d = this.vars[cand];
-    if (d === undefined) {
-      // FIXME: we need to recalc length
-      const te = new TextEncoder('utf-8');
-      const buf = te.encode(cand);
-      this.vars[cand] = {decl: true, at: [], length: buf.length};
-    } else {
-      if (safe) {
-        throw new Error(`didn't find safe var: ${cand}`);
-      }
-      d.decl = true;
-    }
-
-    return cand;
-  }
+  globals.add(update);
+  return update;
 }
 
 
-/**
- * 
- */
+function resolve(other, importer) {
+  if (/^\.{0,2}\//.test(other)) {
+    return path.join(path.dirname(importer), other);
+  }
+  return other;
+}
+
+
 function internalBundle(runner, files) {
+  const readable = new stream.Readable({emitClose: true});
+  const write = readable.push.bind(readable);
+
+  const globals = new Set(['', 'default', '*']);
+
+  const fileData = new Map();
+  const unbundledImports = new Map();
+
+  // Recursively process every input file. Match ESM execution order.
+  const processed = new Set();
+  const process = (f) => {
+    if (processed.has(f)) {
+      return false;
+    }
+    processed.add(f);
+
+    if (!fs.existsSync(f)) {
+      unbundledImports.set(f, {});
+      return true;;
+    }
+
+    const buffer = fs.readFileSync(f);
+    const {deps, externals, imports, exports, render} = processFile(runner, buffer);
+
+    deps.forEach((dep) => {
+      const resolved = resolve(dep, f);
+      process(resolved);
+    });
+
+    externals.forEach((external) => globals.add(external));
+
+    // processFile doesn't know how to resolve external imports; resolve here.
+    for (const name in imports) {
+      const d = imports[name];
+      d.from = resolve(d.from, f);
+    }
+
+    fileData.set(f, {imports, exports, render});
+  };
+  for (const f of files) {
+    process(path.resolve(f));
+  }
+
+  // Shared registry for variable renames.
+  const registry = {};
+  const register = (name, f) => {
+    const key = `${name}~${f}`;
+
+    const prev = registry[key];
+    if (prev !== undefined) {
+      return prev;
+    }
+    const update = nameGlobal(globals, name);
+    registry[key] = update;
+    return update;
+  };
+
+  for (const [f, data] of fileData) {
+    const {imports, exports, render} = data;
+    const renames = {};
+
+    for (const x in imports) {
+      let {from, name} = imports[x];
+
+      // If the referenced export comes from within our bundle, then prefer its original name.
+      const isBundledExport = fileData.has(from);
+      if (isBundledExport) {
+        const {exports: otherExports} = fileData.get(from);
+        const real = otherExports[name];
+        if (real === undefined) {
+          throw new Error(`${from} does not export: ${name}`);
+        }
+        name = real;
+      }
+
+      const update = register(name, from);
+      renames[x] = update;
+
+      // If the export is unbundled, we need to record what it's called so we can import it later.
+      if (!isBundledExport) {
+        const mapping = unbundledImports.get(from);
+        mapping[name] = update;
+      }
+    }
+
+    for (const x in exports) {
+      const real = exports[x];
+      renames[real] = register(real, f);
+    }
+
+    render(write, (name) => {
+      const update = renames[name];
+      if (update !== undefined) {
+        return update;
+      }
+
+      // Otherwise, this is local to this file: just make it unique to our bundle.
+      return nameGlobal(globals, name);
+    });
+  }
+
+  // TODO(samthor): While allowed, this is the opposite of fast, and should be at the top.
+  for (const [f, mapping] of unbundledImports) {
+    write(`${rebuildModuleDeclaration(false, mapping, f)}\n`);
+  }
+
+  readable.push(null);
+  return readable;
+}
+
+/**
+ *
+ */
+function internalBundleOld(runner, files) {
   const {token} = runner;
   const readable = new stream.Readable({emitClose: true});
 
-  const toplevels = new Set(['', '*']);  // specials that cannot really exist
+  const toplevels = new Set(['', 'default', '*']);  // specials that cannot really exist
   const externals = new Map();
   const globsFor = new Map();
 
@@ -508,189 +472,6 @@ function rebuildModuleDeclaration(isExport, mapping, target=null) {
     out.push(JSON.stringify(target));
   }
   return out.join(' ');
-}
-
-
-/**
- * Fills the passed view with a comment and the same number of newlines as the source.
- *
- * @param {!Uint8Array} view
- */
-function commentRange(view) {
-  let target = view.length;
-  view.forEach((c) => {
-    if (c === 10) {
-      --target;
-    }
-  });
-
-  if (view.length < 4) {
-    // Just fill with spaces. This range is too tiny.
-    view.fill(32, 0, target);
-  } else {
-    // Fill with a comment containing dots.
-    view[0] = 47;
-    view[1] = 42;
-    view.fill(46, 2, target - 2);
-    view[target - 2] = 42;
-    view[target - 1] = 47;
-  }
-
-  while (target < view.length) {
-    view[target++] = 10;
-  }
-}
-
-
-/**
- * Adds an import handler. Assumes token currently points to "import" keyword.
- */
-function importHandler(runner, callback) {
-  const mapping = {};
-  let pendingSource = '';
-
-  const {token} = runner;
-
-  runner.push((special) => {
-
-    if (special & specials.modulePath) {
-      // FIXME: avoid eval
-      const other = eval(token.string());
-      runner.pop();
-      runner.push((special) => {
-        // Push this handler so we can trigger callback _after_ the modulePath.
-        const prev = runner.pop();
-        callback(mapping, other);
-        prev(special);
-      })
-      return;
-    }
-
-    if (token.hash() === hashes._star) {
-      pendingSource = '*';
-      return;
-    }
-
-    if (token.hash() === hashes._comma || token.type() == types.close) {
-      // TODO: needed in import-only?
-      pendingSource = '';
-      return;
-    }
-
-    if (special & specials.external) {
-      pendingSource = token.string();
-    }
-
-    if (special & specials.declare) {
-      mapping[token.string()] = pendingSource || 'default';
-      pendingSource = '';
-    }
-
-  });
-}
-
-
-/**
- * Adds an export handler. Assumes token currently points to "export" keyword. Returns early if
- * this is actually an export an expr-like thing (or var, function, class etc).
- */
-function exportHandler(runner, callback) {
-  const mapping = {};
-  let pendingSource = '';
-
-  const {token} = runner;
-
-  const tailCallback = (special) => {
-    if (token.type() === types.comment) {
-      return;  // nb. we consume comments
-    }
-
-    if (token.hash() === hashes.from) {
-      return;  // ok
-    }
-
-    if (special & specials.modulePath) {
-      const other = eval(token.string());
-      runner.pop();
-      runner.push((special) => {
-        // Push this handler so we can trigger callback _after_ the modulePath.
-        const prev = runner.pop();
-        callback(mapping, other);
-        prev(special);
-      })
-      return;
-    }
-
-    // Unhandled, so call our parent handler immediately.
-    const prev = runner.pop();
-    callback(mapping, null);
-    prev(special);
-  };
-
-  // Cleanup for mapping code.
-  const cleanup = () => {
-    if (pendingSource) {
-      mapping[pendingSource] = pendingSource;
-    }
-    pendingSource = '';
-  };
-
-  // Handles normal mappings: "* as y", "foo as bar, zing, default as woo".
-  const mappingCallback = (special) => {
-    const type = token.type();
-    const hash = token.hash();
-
-    if (type == types.close || (type === types.keyword && hash === hashes.from)) {
-      cleanup();
-      runner.pop();
-      runner.push(tailCallback);
-      return;
-    }
-
-    if (hash === hashes._star) {
-      pendingSource = '*';
-      return;
-    }
-
-    if (hash === hashes._comma) {
-      cleanup();
-      return;
-    }
-
-    if (special & specials.external) {
-      if (pendingSource) {
-        mapping[token.string()] = pendingSource;
-        pendingSource = '';
-      } else {
-        pendingSource = token.string();
-      }
-    }
-
-    if (type === types.symbol) {
-      pendingSource = token.string();
-    }
-  };
-
-  // Push an initial handler to catch '*', '{' or 'default'.
-  runner.push((special) => {
-    if (token.type() === types.comment) {
-      return;  // nb. we consume comments
-    }
-
-    const prev = runner.pop();
-
-    if (token.hash() === hashes._star) {
-      runner.push(mappingCallback);
-      mappingCallback();
-    } else if (token.type() == types.brace) {
-      runner.push(mappingCallback);
-    } else {
-      // This is just a regular export of a var, or function etc.
-      // It includes "default", so the callback should check.
-      callback(null, null);
-      prev(special);
-    }
-  });
 }
 
 
