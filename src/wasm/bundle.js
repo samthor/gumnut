@@ -82,7 +82,7 @@ function internalBundle(runner, files) {
   // Part #1: Parse every file and proceed recursively into dependencies. This matches ESM execution
   // order.
   const processed = new Set();
-  const process = (f) => {
+  const process = (f, toplevel = false) => {
     if (processed.has(f)) {
       return false;
     }
@@ -90,11 +90,12 @@ function internalBundle(runner, files) {
 
     if (!fs.existsSync(f)) {
       unbundledImports.set(f, {});
-      return true;;
+      return true;
     }
 
     const buffer = fs.readFileSync(f);
     const {deps, externals, imports, exports, render} = processFile(runner, buffer);
+    console.info('got imports', imports, f);
 
     deps.forEach((dep) => process(resolve(dep, f)));
     externals.forEach((external) => globals.add(external));
@@ -105,23 +106,23 @@ function internalBundle(runner, files) {
       d.from = resolve(d.from, f);
     }
 
-    fileData.set(f, {imports, exports, render, renames: {}});
+    fileData.set(f, {imports, exports, render, renames: {}, toplevel});
   };
   for (const f of files) {
-    process(path.resolve(f));
+    process(path.resolve(f), true);
   }
 
   // Part #2: Remap all imports. This needs to be done before exports, as we might require the
   // additional glob export from another bundled file.
-  for (const data of fileData.values()) {
+  for (const [f, data] of fileData) {
     const {imports, renames} = data;
 
     for (const x in imports) {
       let {from, name} = imports[x];
 
       // If the referenced export comes from within our bundle, then prefer its original name.
-      const isBundledExport = fileData.has(from);
-      if (isBundledExport) {
+      const isBundled = fileData.has(from);
+      if (isBundled) {
         const {exports: otherExports} = fileData.get(from);
         const real = otherExports[name];
         if (real === undefined) {
@@ -137,8 +138,8 @@ function internalBundle(runner, files) {
       const update = register(name, from);
       renames[x] = update;
 
-      // If the export is unbundled, we need to record what it's called so we can import it later.
-      if (!isBundledExport) {
+      // If the dep is unbundled, we need to record what it's called so we can import it later.
+      if (!isBundled) {
         const mapping = unbundledImports.get(from);
         mapping[name] = update;
       }
@@ -151,13 +152,23 @@ function internalBundle(runner, files) {
   }
 
   // Part #4: Remap exports, and rewrite/render module content.
-  for (const [f, {render, exports, renames}] of fileData) {
+  for (const [f, {render, exports, renames, toplevel}] of fileData) {
     for (const x in exports) {
       const real = exports[x];
-      renames[real] = register(real, f);
+      if (!(real in renames)) {
+        renames[real] = register(x, f);
+      }
     }
     if ('*' in exports) {
       readable.push(`const ${renames['*']} = ${rebuildGlobExports(exports, renames)};\n`);
+    }
+    if (toplevel) {
+      // gross but seems to work (exports are flipped)
+      const inverted = {};
+      for (const k in exports) {
+        inverted[renames[exports[k]] || exports[k]] = k;
+      }
+      write(`${rebuildModuleDeclaration(true, inverted)};\n`);
     }
 
     render(write, (name) => {

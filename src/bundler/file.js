@@ -83,6 +83,18 @@ class Scope {
   }
 
   /**
+   * Marks a variable as being silently used. Must happen before delclareIfExists.
+   *
+   * @param {string} cand
+   */
+  declareSilentUse(cand) {
+    const d = this.vars[cand];
+    if (d === undefined) {
+      this.vars[cand] = {decl: false, at: [], length: 0};
+    }
+  }
+
+  /**
    * Marks a variable as a declaration, if it's used anywhere in this file.
    *
    * @param {string} cand
@@ -276,13 +288,19 @@ export function processFile(runner, buffer) {
   // which file's globals "wins": the union of globals must be treated as global.
   runner.run(callback, stack);
 
+  // Look for variables which we only export. Technically the only way these are allowed is if they
+  // are also imported (can't export e.g., a global or whatever).
+  for (const key in exports) {
+    top.declareSilentUse(exports[key]);
+  }
+
   // Look for disused imports and remove them. This doesn't remove the import itself, as it might
   // be included for its side-effects. (There's some simple checks for side-effects if we cared.)
   for (const key in imports) {
-    if (key in exports || key[0] === ':') {
-      continue;
+    if (key[0] === ':') {
+      continue;  // re-export
     } else if (top.declareIfExists(key)) {
-      continue;
+      continue;  // exists, hooray!
     }
     delete imports[key];
   }
