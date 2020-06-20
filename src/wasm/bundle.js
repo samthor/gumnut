@@ -329,7 +329,6 @@ function rebuildImportModuleDeclaration(mapping, target) {
   const parts = [];
   let defaultMapping = '';
 
-  // "import foo from './bar.js';" is ok, "export foo from './bar.js';" is not
   for (const key in mapping) {
     if (mapping[key] === 'default') {
       parts.push(key);
