@@ -20,7 +20,6 @@
  */
 
 import fs from 'fs';
-import {specials, types, hashes} from './wrap.js';
 import build from './wrap.js';
 import path from 'path';
 import stream from 'stream';
@@ -154,6 +153,12 @@ function internalBundle(runner, files) {
 
   // Part #3: Announce all external modules we depend on.
   for (const [f, mapping] of unbundledImports) {
+    // We can't include a glob-style with regular imports.
+    // TODO(samthor): default also has odd rules (can go with either glob or misc).
+    if ('*' in mapping) {
+      write(`${rebuildModuleDeclaration(false, {'*': mapping['*']}, f)};\n`)
+    }
+    delete mapping['*'];
     write(`${rebuildModuleDeclaration(false, mapping, f)}\n`);
   }
 
