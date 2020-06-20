@@ -297,9 +297,7 @@ export function processFile(runner, buffer) {
   // Look for disused imports and remove them. This doesn't remove the import itself, as it might
   // be included for its side-effects. (There's some simple checks for side-effects if we cared.)
   for (const key in imports) {
-    if (key[0] === ':') {
-      continue;  // re-export
-    } else if (top.declareIfExists(key)) {
+    if (top.declareIfExists(key)) {
       continue;  // exists, hooray!
     }
     delete imports[key];

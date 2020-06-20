@@ -27,26 +27,6 @@ import stream from 'stream';
 import {processFile} from '../bundler/file.js';
 
 
-function nameGlobal(globals, name) {
-  let base;
-  if (name === '*') {
-    base = 'all';
-  } else if (name === '') {
-    base = 'default';
-  } else {
-    base = name;
-  }
-  let update = base;
-  let count = 0;
-
-  while (globals.has(update)) {
-    update = `${base}$${++count}`;
-  }
-  globals.add(update);
-  return update;
-}
-
-
 function resolve(other, importer) {
   if (/^\.{0,2}\//.test(other)) {
     return path.join(path.dirname(importer), other);
@@ -55,26 +35,82 @@ function resolve(other, importer) {
 }
 
 
+/**
+ * Registry for managing global names across a bundle.
+ */
+class Registry {
+  #map = {};
+  #globals = new Set(['', 'default', '*']);
+
+  /**
+   * Register a variable from a specific file in the global namespace. Returns the updated name, or
+   * any previously chosen name for this pair.
+   *
+   * @param {string} name
+   * @param {string} f
+   * @return {string}
+   */
+  register(name, f) {
+    const key = `${name}~${f}`;
+
+    const prev = this.#map[key];
+    if (prev !== undefined) {
+      return prev;
+    }
+    const update = this.name(name);
+    this.#map[key] = update;
+    // console.warn(`...>>> update '${key}' to '${update}'`);
+    return update;
+  }
+
+  /**
+   * Mark a variable from a specific file as actually referencing a global. It won't be renamed.
+   *
+   * @param {string} name
+   * @param {string} f
+   */
+  global(name, f) {
+    this.#globals.add(name);
+
+    // This deals with a rare and possibly invalid case. We need to record that this file's use of
+    // this global should always be renamed to itself. This hits us when a user tries to export a
+    // named global (invalid but we allow it).
+    const key = `${name}~${f}`;
+    this.#map[key] = name;
+  }
+
+  /**
+   * Mark a variable in the global namespace, possibly updating to do so.
+   *
+   * @param {string} name
+   * @return {string}
+   */
+  name(name) {
+    let base;
+    if (name === '*') {
+      base = 'all';
+    } else if (name === '') {
+      base = 'default';
+    } else {
+      base = name;
+    }
+    let update = base;
+    let count = 0;
+  
+    while (this.#globals.has(update)) {
+      update = `${base}$${++count}`;
+    }
+    this.#globals.add(update);
+    return update;
+  }
+}
+
+
 function internalBundle(runner, files) {
   const readable = new stream.Readable({emitClose: true});
   const write = readable.push.bind(readable);
 
-  const globals = new Set(['', 'default', '*']);
-
-  // Shared registry for variable renames.
-  const registry = {};
-  const register = (name, f) => {
-    const key = `${name}~${f}`;
-
-    const prev = registry[key];
-    if (prev !== undefined) {
-      return prev;
-    }
-    const update = nameGlobal(globals, name);
-    registry[key] = update;
-    return update;
-  };
-
+  const registry = new Registry();
   const fileData = new Map();
   const unbundledImports = new Map();
 
@@ -101,7 +137,7 @@ function internalBundle(runner, files) {
     // Store externals globally, and ensure they're not renamed here.
     const renames = {};
     externals.forEach((external) => {
-      globals.add(external);
+      registry.global(external, f);
       renames[external] = external;
     });
 
@@ -140,7 +176,7 @@ function internalBundle(runner, files) {
         }
       }
 
-      const update = register(name, from);
+      const update = registry.register(name, from);
       renames[x] = update;
 
       // If the dep is unbundled, we need to record what it's called so we can import it later.
@@ -156,10 +192,10 @@ function internalBundle(runner, files) {
     // We can't include a glob-style with regular imports.
     // TODO(samthor): default also has odd rules (can go with either glob or misc).
     if ('*' in mapping) {
-      write(`${rebuildModuleDeclaration(false, {'*': mapping['*']}, f)};\n`)
+      write(`${rebuildImportModuleDeclaration({'*': mapping['*']}, f)};\n`)
     }
     delete mapping['*'];
-    write(`${rebuildModuleDeclaration(false, mapping, f)}\n`);
+    write(`${rebuildImportModuleDeclaration(mapping, f)}\n`);
   }
 
   // Part #4: Remap exports, and rewrite/render module content.
@@ -167,20 +203,19 @@ function internalBundle(runner, files) {
     for (const x in exports) {
       const real = exports[x];
       if (!(real in renames)) {
-        renames[real] = register(x, f);
-        console.warn('renaming', real, 'to', renames[real], 'was', x);
+        renames[real] = registry.register(real, f);
       }
     }
     if ('*' in exports) {
       readable.push(`const ${renames['*']} = ${rebuildGlobExports(exports, renames)};\n`);
     }
     if (toplevel) {
-      // gross but seems to work (exports are flipped)
-      const inverted = {};
-      for (const k in exports) {
-        inverted[renames[exports[k]] || exports[k]] = k;
+      // Create a renamed export map before displaying it.
+      const r = {};
+      for (const key in exports) {
+        r[key] = renames[exports[key]];
       }
-      write(`${rebuildModuleDeclaration(true, inverted)};\n`);
+      write(`${rebuildExportMappingDeclaration(r)};\n`);
     }
 
     render(write, (name) => {
@@ -190,7 +225,7 @@ function internalBundle(runner, files) {
       }
 
       // Otherwise, this is local to this file: just make it unique to our bundle.
-      return nameGlobal(globals, name);
+      return registry.name(name);
     });
   }
 
@@ -210,24 +245,47 @@ function rebuildGlobExports(exports, renames) {
 
 
 /**
- * Builds a module import/export statement.
+ * Builds a module export statement.
  *
- * @param {boolean} isExport whether this is an export
  * @param {!Object<string, string>} mapping
- * @param {?string=} target imported from
+ * @param {?string=} target re-exported from
  */
-function rebuildModuleDeclaration(isExport, mapping, target=null) {
+function rebuildExportMappingDeclaration(mapping, target=null) {
+  const grouped = [];
+
+  for (const key in mapping) {
+    const v = mapping[key];
+    grouped.push(v === key ? v : `${v} as ${key}`);
+  }
+
+  const out = ['export'];
+  out.push(`{${grouped.join(', ')}}`)
+
+  if (target !== null) {
+    out.push('from');
+    out.push(JSON.stringify(target));
+  }
+
+  return out.join(' ');
+}
+
+
+/**
+ * Builds a module import statement.
+ *
+ * @param {!Object<string, string>} mapping
+ * @param {string} target imported from
+ */
+function rebuildImportModuleDeclaration(mapping, target) {
   const parts = [];
   let defaultMapping = '';
 
   // "import foo from './bar.js';" is ok, "export foo from './bar.js';" is not
-  if (!isExport) {
-    for (const key in mapping) {
-      if (mapping[key] === 'default') {
-        parts.push(key);
-        defaultMapping = key;
-        break;
-      }
+  for (const key in mapping) {
+    if (mapping[key] === 'default') {
+      parts.push(key);
+      defaultMapping = key;
+      break;
     }
   }
 
@@ -237,25 +295,20 @@ function rebuildModuleDeclaration(isExport, mapping, target=null) {
       continue;
     }
     const v = mapping[key];
-    const target = (key === '*' ? parts : grouped);
-    target.push(v === key ? v : `${key} as ${v}`);
+    const goal = (key === '*' ? parts : grouped);
+    goal.push(v === key ? v : `${key} as ${v}`);
   }
 
   if (grouped.length) {
     parts.push(`{${grouped.join(', ')}}`);
   }
 
-  const out = [isExport ? 'export' : 'import'];
+  const out = ['import'];
 
-  if (target === null && !parts.length) {
-    parts.push('{}');  // no target, include an empty dict so it's valid...-ish
-  }
   parts.length && out.push(parts.join(', '));
+  parts.length && out.push('from');
+  out.push(JSON.stringify(target));
 
-  if (target !== null) {
-    parts.length && out.push('from');
-    out.push(JSON.stringify(target));
-  }
   return out.join(' ');
 }
 
