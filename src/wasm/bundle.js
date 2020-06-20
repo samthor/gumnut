@@ -212,10 +212,12 @@ function internalBundle(runner, files) {
     if (toplevel) {
       // Create a renamed export map before displaying it.
       const r = {};
+      let any = false;
       for (const key in exports) {
         r[key] = renames[exports[key]];
+        any = true;
       }
-      write(`${rebuildExportMappingDeclaration(r)};\n`);
+      any && write(`${rebuildExportMappingDeclaration(r)};\n`);
     }
 
     render(write, (name) => {
