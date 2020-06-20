@@ -193,8 +193,18 @@ function internalBundle(runner, files) {
     // TODO(samthor): default also has odd rules (can go with either glob or misc).
     if ('*' in mapping) {
       write(`${rebuildImportModuleDeclaration({'*': mapping['*']}, f)};\n`)
+      delete mapping['*'];
+
+      // If we import anything else, we need to reimport below.
+      let done = true;
+      for (const key in mapping) {
+        done = false;
+        continue;
+      }
+      if (done) {
+        continue;
+      }
     }
-    delete mapping['*'];
     write(`${rebuildImportModuleDeclaration(mapping, f)}\n`);
   }
 
@@ -212,11 +222,48 @@ function internalBundle(runner, files) {
     if (toplevel) {
       // Create a renamed export map before displaying it.
       const r = {};
+      const starQueue = new Set();
+
       let any = false;
       for (const key in exports) {
+        console.info('work on', key, exports[key], renames[exports[key]]);
+
+        if (key[0] === '*') {
+          const from = resolve(exports[key].substr(1), f);
+          starQueue.add(from);
+          continue;
+        }
+
         r[key] = renames[exports[key]];
         any = true;
       }
+
+      // Traverse all found "export * from ..." imports, including recursively.
+      for (const f of starQueue) {
+        if (!fileData.has(f)) {
+          // This is an external file, so just export it blindly.
+          // TODO(samthor): Not sure what order this ends up occuring in.
+          write(`export * from ${JSON.stringify(f)};\n`);
+          continue;
+        }
+        const {exports: otherExports} = fileData.get(f);
+
+        for (const key in otherExports) {
+          if (key[0] === '*') {
+            if (key.length === 1) {
+              // TODO: This is just a sign that something is requesting * from this file.
+              // However it also shows up even in reexport mode.
+              continue;
+            }
+            const from = resolve(otherExports[key].substr(1), f);
+            starQueue.add(from);
+            continue;
+          }
+          r[key] = registry.register(otherExports[key], f);
+          any = true;
+        }
+      }
+
       any && write(`${rebuildExportMappingDeclaration(r)};\n`);
     }
 
@@ -237,7 +284,7 @@ function internalBundle(runner, files) {
 
 
 function rebuildGlobExports(exports, renames) {
-  const validExport = (key) => key && key !== '*';
+  const validExport = (key) => key && key[0] !== '*';
   const inner = Object.keys(exports).filter(validExport).map((key) => {
     const v = renames[exports[key]];
     return `  get ${key}() { return ${v}; },\n`;

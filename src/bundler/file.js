@@ -168,15 +168,19 @@ export function processFile(runner, buffer) {
     if (other !== null) {
       deps.add(other);
       for (const cand in mapping) {
-        if (cand === '*') {
-          // Mark glob re-exports with a number so they're ordered and don't clobber each other, as
-          // they're (unfortunately) quite special.
-          exports[`*${++exportAllStarCount}`] = `*${other}`;
-        } else {
+        if (cand !== '*') {
           // We import _as_ the exported name, as it's guaranteed not to be a duplicate.
+          // Note that "mapping[cand]" might still be "*", e.g., "* as foo".
           imports[':' + cand] = {from: other, name: mapping[cand]};
           exports[cand] = ':' + cand;
+          continue;
         }
+
+        // Mark unnamed glob re-exports with a number so they're ordered and don't clobber each
+        // each other, as they're (unfortunately) quite special.
+        const key = `*${++exportAllStarCount}`;
+        imports[key] = {from: other, name: '*'};
+        exports[key] = `*${other}`;
       }
       return;
     }
@@ -299,6 +303,8 @@ export function processFile(runner, buffer) {
   for (const key in imports) {
     if (top.declareIfExists(key)) {
       continue;  // exists, hooray!
+    } else if (key[0] === '*') {
+      continue;
     }
     delete imports[key];
   }
