@@ -95,10 +95,16 @@ function internalBundle(runner, files) {
 
     const buffer = fs.readFileSync(f);
     const {deps, externals, imports, exports, render} = processFile(runner, buffer);
-    console.info('got imports', imports, f);
 
+    // Immediately resolve future dependencies.
     deps.forEach((dep) => process(resolve(dep, f)));
-    externals.forEach((external) => globals.add(external));
+
+    // Store externals globally, and ensure they're not renamed here.
+    const renames = {};
+    externals.forEach((external) => {
+      globals.add(external);
+      renames[external] = external;
+    });
 
     // processFile doesn't know how to resolve external imports; resolve here.
     for (const name in imports) {
@@ -106,7 +112,7 @@ function internalBundle(runner, files) {
       d.from = resolve(d.from, f);
     }
 
-    fileData.set(f, {imports, exports, render, renames: {}, toplevel});
+    fileData.set(f, {imports, exports, render, renames, toplevel});
   };
   for (const f of files) {
     process(path.resolve(f), true);
@@ -157,6 +163,7 @@ function internalBundle(runner, files) {
       const real = exports[x];
       if (!(real in renames)) {
         renames[real] = register(x, f);
+        console.warn('renaming', real, 'to', renames[real], 'was', x);
       }
     }
     if ('*' in exports) {
