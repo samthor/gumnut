@@ -50,13 +50,13 @@ static int depth = 0;
 void modp_callback(int special) {
   ++tokens;
 #ifndef SPEED
-  // char c = ' ';
-  // switch (special) {
-  //   case SPECIAL__MODULE_PATH:
-  //     c = 'm';
-  //     break;
-  // }
-  printf("%d\t%d\t%4d.%02d: %.*s\n", depth, special, out->line_no, out->type, out->len, out->p);
+  char c = ' ';
+  if (special & SPECIAL__MODULE_PATH) {
+    c = 'm';
+  } else if (special & SPECIAL__DECLARE) {
+    c = 'd';
+  }
+  printf("%d\t%d%c\t%4d.%02d: %.*s\n", depth, special, c, out->line_no, out->type, out->len, out->p);
 #endif
 }
 

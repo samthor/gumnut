@@ -217,8 +217,8 @@ static char lookup_op[256] = {
   _LOOKUP__LIT,  // 117, u
   _LOOKUP__LIT,  // 118, v
   _LOOKUP__LIT,  // 119, w
-  _LOOKUP__LIT,  // 120, y
   _LOOKUP__SYMBOL,  // 121, x
+  _LOOKUP__LIT,  // 120, y
   _LOOKUP__SYMBOL,  // 122, z
 
   _LOOKUP__TOKEN | TOKEN_BRACE,  // 123, {

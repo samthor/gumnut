@@ -1114,15 +1114,25 @@ restart_expr:
             break;
 
           case LIT_AWAIT:
-            if (context & CONTEXT__ASYNC) {
-              type = TOKEN_OP;
+            if (value_line) {
+              return 0;
             }
-            break;
+            if (!(context & CONTEXT__ASYNC)) {
+              // invalid use, fall-through to keyword-default behavior
+              return 0;
+            }
+            // fall-through
 
           default:
-            if (td->cursor.hash & (_MASK_REL_OP | _MASK_UNARY_OP)) {
+            if (td->cursor.hash & _MASK_UNARY_OP) {
+              // can't e.g. "new 123 new"; the latter new starts a new statement
+              if (value_line) {
+                return 0;
+              }
               type = TOKEN_OP;
-            } else if (td->cursor.hash & _MASK_KEYWORD) {
+            } else if (td->cursor.hash & _MASK_REL_OP) {
+              type = TOKEN_OP;
+            } else if (td->cursor.hash & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
               // FIXME: this and below could be allowed to fall-through in more cases
               return 0;
             } else if (value_line) {
@@ -1507,7 +1517,15 @@ static int consume_statement(int context) {
     }
   }
 
-  return consume_expr_compound(context);
+  char *head = td->cursor.p;
+  _check(consume_expr_compound(context));
+
+  // catches things like "enum", "protected", which are keywords but largely unhandled
+  if (head == td->cursor.p && td->cursor.hash & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
+    debugf("got fallback TOKEN_KEYWORD\n");
+    internal_next_update(TOKEN_KEYWORD);
+  }
+  return 0;
 }
 
 token *modp_token() {

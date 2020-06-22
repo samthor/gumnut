@@ -1,4 +1,4 @@
-// Generated on Sun May 31 2020 14:04:19 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Mon Jun 22 2020 10:55:36 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -16,7 +16,7 @@
 
 #define LIT_AS           389816320
 #define LIT_ASYNC        792469504
-#define LIT_AWAIT        796663808
+#define LIT_AWAIT        796663819
 #define LIT_BREAK        791429123
 #define LIT_CASE         639393811
 #define LIT_CATCH        773612419

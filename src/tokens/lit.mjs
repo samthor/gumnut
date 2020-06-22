@@ -1,4 +1,4 @@
-// Generated on Sun May 31 2020 14:04:19 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Mon Jun 22 2020 10:55:36 GMT+1000 (Australian Eastern Standard Time)
 
 export const _KEYWORD = 1;
 export const _STRICT_KEYWORD = 2;
@@ -13,7 +13,7 @@ export const _CONTROL_BRACE = 512;
 
 export const AS = 389816320;
 export const ASYNC = 792469504;
-export const AWAIT = 796663808;
+export const AWAIT = 796663819;
 export const BREAK = 791429123;
 export const CASE = 639393811;
 export const CATCH = 773612419;

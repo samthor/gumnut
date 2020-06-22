@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
+import fs from 'fs';
 const now = new Date;
 
 const alwaysKeyword = 
@@ -8,14 +8,11 @@ const alwaysKeyword =
     " finally for function if return static switch throw try var while with ";
 
 const alwaysStrictKeyword =
-    " implements let package protected interface private public yield ";
+    " await implements let package protected interface private public yield ";
 
 // act like unary ops
 const unaryOp =
-    " delete new typeof void yield ";
-
-const optionalUnaryOp =
-    " await ";
+    " await delete new typeof void yield ";
 
 const relOp =
     " in instanceof ";
@@ -32,7 +29,7 @@ const variableLike =
 
 // these act like symbols in most cases, but hash so we can find them
 const optionalKeyword =
-    " as async await from get of set ";
+    " as async from get of set ";
 
 // keywords that start a decl
 const declKeyword =
@@ -121,7 +118,6 @@ const hashToName = new Map();
 queue(alwaysKeyword, 'keyword', 'strictKeyword');
 queue(alwaysStrictKeyword, 'strictKeyword');
 queue(unaryOp, 'keyword', 'unaryOp');
-queue(optionalUnaryOp);
 queue(relOp, 'keyword', 'relOp');
 queue(neverLabel, 'masquerade');
 queue(variableLike, 'variable');
@@ -332,7 +328,7 @@ function main() {
 int consume_known_lit(char *p, uint32_t *out) {
   char *start = p;
 #define _done(len, _out) {*out=_out;return len;}
-${renderChoice(litOnly, space='  ')}
+${renderChoice(litOnly, '  ')}
 #undef _done
 }
 `;
