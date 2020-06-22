@@ -5,7 +5,7 @@ Assumes code written in "module mode", and should support all ECMAScript languag
 
 This code is intended for rewriting tasks, and can be compiled via Web Assembly for the web (or Node).
 It's not reentrant, so you can't parse another file from within callbacks.
-It does not generate an AST as part of its work and does not use `malloc`.
+It does not generate an AST as part of its work, it does not modify the passed source code, and does not use `malloc`.
 
 ## Coverage
 
