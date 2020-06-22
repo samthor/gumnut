@@ -1,3 +1,5 @@
+[![Tests](https://github.com/samthor/prsr/workflows/Tests/badge.svg)](https://github.com/samthor/prsr/actions)
+
 A fast, permissive JavaScript tokenizer and parser in C.
 Assumes code written in "module mode", and should support all ECMAScript language features in the [draft specification](https://github.com/tc39/proposals/blob/master/finished-proposals.md) (as of May 2020).
 
