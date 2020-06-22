@@ -14,6 +14,7 @@ typedef struct _testdef {
 } testdef;
 
 static token *t;
+static int render_output = 0;
 
 struct {
   testdef *def;
@@ -33,9 +34,11 @@ void modp_callback(int special) {
   }
 
   if (actual != expected) {
-    printf("%d: actual=%d expected=%d `%.*s`\n", active.at, actual, expected, t->len, t->p);
+    if (render_output) {
+      printf("%d: actual=%d expected=%d `%.*s`\n", active.at, actual, expected, t->len, t->p);
+    }
     active.error = 1;
-  } else {
+  } else if (render_output) {
     printf("%d: ok=%d `%.*s`\n", active.at, actual, t->len, t->p);
   }
   ++active.at;
@@ -58,7 +61,9 @@ int run_testdef(testdef *def) {
     ++active.len;
   }
 
-  printf(">> %s\n", def->name);
+  if (render_output) {
+    printf(">> %s\n", def->name);
+  }
 
   int ret = modp_init((char *) def->input, 0);
   if (ret >= 0) {
@@ -68,17 +73,25 @@ int run_testdef(testdef *def) {
   }
 
   if (ret) {
-    printf("ERROR: internal error (%d)\n", ret);
+    if (render_output) {
+      printf("ERROR: internal error (%d)\n", ret);
+    }
     return ret;
   } else if (active.at != active.len) {
-    printf("ERROR: mismatched length, actual=%d expected=%d\n", active.at, active.len);
+    if (render_output) {
+      printf("ERROR: mismatched length, actual=%d expected=%d\n", active.at, active.len);
+    }
     return 1;
   } else if (active.error) {
-    printf("ERROR\n");
+    if (render_output) {
+      printf("ERROR\n");
+    }
     return active.error;
   }
 
-  printf("OK!\n");
+  if (render_output) {
+    printf("OK!\n");
+  }
   return 0;
 }
 
@@ -100,7 +113,9 @@ int run_testdef(testdef *def) {
     *last = tdef; \
     ++ecount; \
   } \
-  printf("\n"); \
+  if (render_output) { \
+    printf("\n"); \
+  } \
   ++count; \
 }
 
@@ -648,12 +663,16 @@ int main() {
   );
 
   // restate all errors
+  render_output = 1;
   testdef *p = &fail;
+  printf("passed (%d/%d)\n", count - ecount, count);
   if (ecount) {
     printf("errors (%d/%d):\n", ecount, count);
   }
   while ((p = (testdef *) p->next)) {
-    printf("-- %s\n", p->name);
+    printf("\n");
+    run_testdef(p);
   }
+  printf("\n");
   return err;
 }
