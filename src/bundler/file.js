@@ -18,6 +18,9 @@
 import {specials, types, hashes} from '../wasm/wrap.js';
 
 
+/**
+ * Helper to parse a JS file and its variable use throughout scopes.
+ */
 class Scope {
   constructor() {
     this.vars = {};

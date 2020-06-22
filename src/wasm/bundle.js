@@ -25,6 +25,8 @@ import path from 'path';
 import stream from 'stream';
 
 import {processFile} from '../bundler/file.js';
+import {Registry} from '../bundler/registry.js';
+import * as rebuild from '../bundler/rebuild.js';
 
 
 function resolve(other, importer) {
@@ -32,77 +34,6 @@ function resolve(other, importer) {
     return path.join(path.dirname(importer), other);
   }
   return other;
-}
-
-
-/**
- * Registry for managing global names across a bundle.
- */
-class Registry {
-  #map = {};
-  #globals = new Set(['', 'default', '*']);
-
-  /**
-   * Register a variable from a specific file in the global namespace. Returns the updated name, or
-   * any previously chosen name for this pair.
-   *
-   * @param {string} name
-   * @param {string} f
-   * @return {string}
-   */
-  register(name, f) {
-    const key = `${name}~${f}`;
-
-    const prev = this.#map[key];
-    if (prev !== undefined) {
-      return prev;
-    }
-    const update = this.name(name);
-    this.#map[key] = update;
-    // console.warn(`...>>> update '${key}' to '${update}'`);
-    return update;
-  }
-
-  /**
-   * Mark a variable from a specific file as actually referencing a global. It won't be renamed.
-   *
-   * @param {string} name
-   * @param {string} f
-   */
-  global(name, f) {
-    this.#globals.add(name);
-
-    // This deals with a rare and possibly invalid case. We need to record that this file's use of
-    // this global should always be renamed to itself. This hits us when a user tries to export a
-    // named global (invalid but we allow it).
-    const key = `${name}~${f}`;
-    this.#map[key] = name;
-  }
-
-  /**
-   * Mark a variable in the global namespace, possibly updating to do so.
-   *
-   * @param {string} name
-   * @return {string}
-   */
-  name(name) {
-    let base;
-    if (name === '*') {
-      base = 'all';
-    } else if (name === '') {
-      base = 'default';
-    } else {
-      base = name;
-    }
-    let update = base;
-    let count = 0;
-  
-    while (this.#globals.has(update)) {
-      update = `${base}$${++count}`;
-    }
-    this.#globals.add(update);
-    return update;
-  }
 }
 
 
@@ -170,6 +101,7 @@ function internalBundle(runner, files) {
           if (name !== '*') {
             throw new Error(`${from} does not export: ${name}`);
           }
+          // We can't use its original name, as it is "*". Use whatever it got imported as first.
           otherExports['*'] = '*';
         } else {
           name = real;
@@ -192,7 +124,7 @@ function internalBundle(runner, files) {
     // We can't include a glob-style with regular imports.
     // TODO(samthor): default also has odd rules (can go with either glob or misc).
     if ('*' in mapping) {
-      write(`${rebuildImportModuleDeclaration({'*': mapping['*']}, f)};\n`)
+      write(`${rebuild.importModuleDeclaration({'*': mapping['*']}, f)};\n`);
       delete mapping['*'];
 
       // If we import anything else, we need to reimport below.
@@ -205,7 +137,7 @@ function internalBundle(runner, files) {
         continue;
       }
     }
-    write(`${rebuildImportModuleDeclaration(mapping, f)}\n`);
+    write(`${rebuild.importModuleDeclaration(mapping, f)}\n`);
   }
 
   // Part #4: Remap exports, and rewrite/render module content.
@@ -216,9 +148,22 @@ function internalBundle(runner, files) {
         renames[real] = registry.register(real, f);
       }
     }
+
+    // Someone wants the global exports of this file.
     if ('*' in exports) {
-      readable.push(`const ${renames['*']} = ${rebuildGlobExports(exports, renames)};\n`);
+      const name = renames['*'];
+
+      // This might include further exports.
+      const extras = [];
+      for (const key in exports) {
+        if (key[0] === '*' && key.length !== 1) {
+          extras.push(renames[key]);
+        }
+      }
+
+      readable.push(`const ${name} = ${rebuild.globExports(exports, renames, extras)};\n`);
     }
+
     if (toplevel) {
       // Create a renamed export map before displaying it.
       const r = {};
@@ -264,7 +209,7 @@ function internalBundle(runner, files) {
         }
       }
 
-      any && write(`${rebuildExportMappingDeclaration(r)};\n`);
+      any && write(`${rebuild.exportMappingDeclaration(r)};\n`);
     }
 
     render(write, (name) => {
@@ -283,82 +228,6 @@ function internalBundle(runner, files) {
 }
 
 
-function rebuildGlobExports(exports, renames) {
-  const validExport = (key) => key && key[0] !== '*';
-  const inner = Object.keys(exports).filter(validExport).map((key) => {
-    const v = renames[exports[key]];
-    return `  get ${key}() { return ${v}; },\n`;
-  }).join('');
-  return `Object.freeze({\n${inner}})`;
-}
-
-
-/**
- * Builds a module export statement.
- *
- * @param {!Object<string, string>} mapping
- * @param {?string=} target re-exported from
- */
-function rebuildExportMappingDeclaration(mapping, target=null) {
-  const grouped = [];
-
-  for (const key in mapping) {
-    const v = mapping[key];
-    grouped.push(v === key ? v : `${v} as ${key}`);
-  }
-
-  const out = ['export'];
-  out.push(`{${grouped.join(', ')}}`)
-
-  if (target !== null) {
-    out.push('from');
-    out.push(JSON.stringify(target));
-  }
-
-  return out.join(' ');
-}
-
-
-/**
- * Builds a module import statement.
- *
- * @param {!Object<string, string>} mapping
- * @param {string} target imported from
- */
-function rebuildImportModuleDeclaration(mapping, target) {
-  const parts = [];
-  let defaultMapping = '';
-
-  for (const key in mapping) {
-    if (mapping[key] === 'default') {
-      parts.push(key);
-      defaultMapping = key;
-      break;
-    }
-  }
-
-  const grouped = [];
-  for (const key in mapping) {
-    if (key === defaultMapping) {
-      continue;
-    }
-    const v = mapping[key];
-    const goal = (key === '*' ? parts : grouped);
-    goal.push(v === key ? v : `${key} as ${v}`);
-  }
-
-  if (grouped.length) {
-    parts.push(`{${grouped.join(', ')}}`);
-  }
-
-  const out = ['import'];
-
-  parts.length && out.push(parts.join(', '));
-  parts.length && out.push('from');
-  out.push(JSON.stringify(target));
-
-  return out.join(' ');
-}
 
 
 /**
