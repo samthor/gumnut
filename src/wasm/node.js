@@ -29,7 +29,7 @@ export default async function wrapper() {
   const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
   const wasm = fs.readFileSync(source);
 
-  const {prepare, run: internal, token} = await build(wasm);
+  const {prepare, run: internal, token, push, pop} = await build(wasm);
 
   return (f) => {
     const fd = fs.openSync(f);
@@ -74,7 +74,7 @@ export default async function wrapper() {
       return readable;
     };
 
-    return {token, run};
+    return {token, run, push, pop};
   };
 
 }

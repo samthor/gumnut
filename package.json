@@ -1,6 +1,10 @@
 {
   "type": "module",
   "scripts": {
-    "test": "./src/test/run.sh"
+    "test": "./src/test/run.sh && mocha src/test/*.js"
+  },
+  "private": true,
+  "devDependencies": {
+    "mocha": "^8.0.1"
   }
 }
