@@ -596,9 +596,9 @@ int main() {
   );
 
   _test("control with trailing statement", "if foo\nbar",
-    TOKEN_KEYWORD,   // class
+    TOKEN_KEYWORD,   // if
     TOKEN_SYMBOL,    // foo
-    TOKEN_SYMBOL,    // foo
+    TOKEN_SYMBOL,    // bar
   );
 
   _test("attach statements", "if()try{}finally{}",
@@ -627,9 +627,12 @@ int main() {
     TOKEN_NUMBER,    // 1
   );
 
-  _test("return dict", "return {}",
+  _test("return dict", "return {foo: foo}",
     TOKEN_KEYWORD,   // return
     TOKEN_BRACE,     // {
+    TOKEN_LIT,       // foo
+    TOKEN_COLON,     // :
+    TOKEN_SYMBOL,    // foo
     TOKEN_CLOSE,     // }
   );
 
@@ -637,6 +640,11 @@ int main() {
     TOKEN_BRACE,     // {
     TOKEN_REGEXP,    // /f/
     TOKEN_CLOSE,     // }
+  );
+
+  _test("orphaned keyword", "enum foo",
+    TOKEN_KEYWORD,   // enum
+    TOKEN_SYMBOL,    // foo
   );
 
   // restate all errors
