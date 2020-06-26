@@ -37,6 +37,10 @@ function resolve(other, importer) {
 }
 
 
+const validExport = (key) => key && key[0] !== '*';
+const emptySet = Object.freeze(new Set());
+
+
 function internalBundle(runner, files) {
   const readable = new stream.Readable({emitClose: true});
   const write = readable.push.bind(readable);
@@ -48,28 +52,30 @@ function internalBundle(runner, files) {
   // Part #1: Parse every file and proceed recursively into dependencies. This matches ESM execution
   // order.
   const processed = new Set();
-  const process = (f, toplevel = false) => {
+  const process = (f, toplevel) => {
     if (processed.has(f)) {
-      return false;
+      return emptySet;
     }
     processed.add(f);
 
+    // This isn't bundled into our output, so mark it as such and return early.
     if (!fs.existsSync(f)) {
       unbundledImports.set(f, {});
-      return true;
+      return emptySet;
     }
 
     const buffer = fs.readFileSync(f);
     const {deps, externals, imports, exports, render} = processFile(runner, buffer);
 
     // Immediately resolve future dependencies.
-    deps.forEach((dep) => process(resolve(dep, f)));
-
-    // Store externals globally, and ensure they're not renamed here.
-    const renames = {};
-    externals.forEach((external) => {
-      registry.global(external, f);
-      renames[external] = external;
+    const globExports = new Set();
+    deps.forEach((globExport, dep) => {
+      const resolved = resolve(dep, f);
+      const subordinateGlobExport = process(resolved, false);
+      if (globExport) {
+        subordinateGlobExport.forEach((v) => globExports.add(v));
+        globExports.add(resolved);
+      }
     });
 
     // processFile doesn't know how to resolve external imports; resolve here.
@@ -78,7 +84,22 @@ function internalBundle(runner, files) {
       d.from = resolve(d.from, f);
     }
 
+    // Flatten any run of globExports here.
+    // TODO(samthor): This is probably in the wrong order.
+    let globExportKey = 0;
+    for (const other of globExports) {
+      imports[`*${++globExportKey}`] = {from: other, name: '*'}
+    }
+
+    // Store externals globally, and ensure they're not renamed here.
+    const renames = {};
+    externals.forEach((external) => {
+      registry.global(external, f);
+      renames[external] = external;
+    });
+
     fileData.set(f, {imports, exports, render, renames, toplevel});
+    return globExports;
   };
   for (const f of files) {
     process(path.resolve(f), true);
@@ -91,9 +112,9 @@ function internalBundle(runner, files) {
 
     for (const x in imports) {
       let {from, name} = imports[x];
+      const isBundled = fileData.has(from);
 
       // If the referenced export comes from within our bundle, then prefer its original name.
-      const isBundled = fileData.has(from);
       if (isBundled) {
         const {exports: otherExports} = fileData.get(from);
         const real = otherExports[name];
@@ -101,7 +122,7 @@ function internalBundle(runner, files) {
           if (name !== '*') {
             throw new Error(`${from} does not export: ${name}`);
           }
-          // We can't use its original name, as it is "*". Use whatever it got imported as first.
+          // There's no original name as we're asking for all its values.
           otherExports['*'] = '*';
         } else {
           name = real;
@@ -129,19 +150,19 @@ function internalBundle(runner, files) {
 
       // If we import anything else, we need to reimport below.
       let done = true;
-      for (const key in mapping) {
+      for (const _ in mapping) {
         done = false;
-        continue;
+        break;
       }
       if (done) {
         continue;
       }
     }
-    write(`${rebuild.importModuleDeclaration(mapping, f)}\n`);
+    write(`${rebuild.importModuleDeclaration(mapping, f)};\n`);
   }
 
   // Part #4: Remap exports, and rewrite/render module content.
-  for (const [f, {render, exports, renames, toplevel}] of fileData) {
+  for (const [f, {render, exports, imports, renames, toplevel}] of fileData) {
     for (const x in exports) {
       const real = exports[x];
       if (!(real in renames)) {
@@ -149,67 +170,98 @@ function internalBundle(runner, files) {
       }
     }
 
+    // TODO(samthor): These two sections are basically the same, but do two different things:
+    //   1) generate the named exports of a bundle to be used internally (names, plus merge with external re-exports)
+    //   2) generate top-level global exports (names, plus re-exports)
+
     // Someone wants the global exports of this file.
     if ('*' in exports) {
       const name = renames['*'];
+      const unbundledExtras = [];
 
-      // This might include further exports.
-      const extras = [];
+      const expandedExports = {};
       for (const key in exports) {
-        if (key[0] === '*' && key.length !== 1) {
-          extras.push(renames[key]);
+        if (validExport(key)) {
+          expandedExports[key] = renames[exports[key]];
         }
       }
 
-      readable.push(`const ${name} = ${rebuild.globExports(exports, renames, extras)};\n`);
+      for (const key in imports) {
+        if (key[0] !== '*') {
+          continue;
+        }
+        const {from} = imports[key];
+
+        const isBundled = fileData.has(from);
+        if (!isBundled) {
+          unbundledExtras.push(renames[key]);
+          continue;
+        }
+
+        const {exports: otherExports, renames: otherRenames} = fileData.get(from);
+        for (const key in otherExports) {
+          if (validExport(key)) {
+            expandedExports[key] = otherRenames[otherExports[key]];
+          }
+        }
+      }
+
+      // TODO(samthor): If the underlying value never mutates, we can dispense with the getter.
+      // This is pretty easy to determine in the parser with static analysis.
+      const inner = Object.keys(expandedExports).map((key) => {
+        return `  get ${key}() { return ${expandedExports[key]}; },\n`;
+      }).join('');
+      readable.push(`const ${name} = /* global export of \"${f}\" */ {\n${inner}};\n`);
+
+      // nb. Other bundlers just use Object.assign here, but that's not actually valid as the
+      // values of the bundled external dependency could actually _change_.
+      // TODO(samthor): This should probably be a configuration flag.
+      for (const extra of unbundledExtras) {
+        const s = `for (let x in ${extra}) {
+  Object.defineProperty(${name}, x, {enumerable: true, get() { return ${name}[x]; }})};
+}
+`;
+        readable.push(s);
+      }
+      readable.push(`Object.freeze(${name});\n`);
     }
 
     if (toplevel) {
       // Create a renamed export map before displaying it.
-      const r = {};
-      const starQueue = new Set();
+      const expandedExports = {};
 
-      let any = false;
-      for (const key in exports) {
-        console.info('work on', key, exports[key], renames[exports[key]]);
+      for (const key in imports) {
+        if (key[0] !== '*') {
+          continue;
+        }
+        const {from} = imports[key];
 
-        if (key[0] === '*') {
-          const from = resolve(exports[key].substr(1), f);
-          starQueue.add(from);
+        const isBundled = fileData.has(from);
+        if (!isBundled) {
+          write(`export * from ${JSON.stringify(from)};\n`);
           continue;
         }
 
-        r[key] = renames[exports[key]];
-        any = true;
-      }
-
-      // Traverse all found "export * from ..." imports, including recursively.
-      for (const f of starQueue) {
-        if (!fileData.has(f)) {
-          // This is an external file, so just export it blindly.
-          // TODO(samthor): Not sure what order this ends up occuring in.
-          write(`export * from ${JSON.stringify(f)};\n`);
-          continue;
-        }
-        const {exports: otherExports} = fileData.get(f);
-
+        const {exports: otherExports, renames: otherRenames} = fileData.get(from);
         for (const key in otherExports) {
-          if (key[0] === '*') {
-            if (key.length === 1) {
-              // TODO: This is just a sign that something is requesting * from this file.
-              // However it also shows up even in reexport mode.
-              continue;
-            }
-            const from = resolve(otherExports[key].substr(1), f);
-            starQueue.add(from);
-            continue;
+          if (validExport(key)) {
+            expandedExports[key] = otherRenames[otherExports[key]];
           }
-          r[key] = registry.register(otherExports[key], f);
-          any = true;
         }
       }
 
-      any && write(`${rebuild.exportMappingDeclaration(r)};\n`);
+      for (const key in exports) {
+        if (validExport(key)) {
+          expandedExports[key] = renames[exports[key]];
+        }
+      }
+
+      const grouped = [];
+      for (const key in expandedExports) {
+        const v = expandedExports[key];
+        grouped.push(v === key ? v : `${v} as ${key}`);
+      }
+      readable.push(`export {${grouped.join(', ')}};\n`);
     }
 
     render(write, (name) => {

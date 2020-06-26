@@ -19,6 +19,257 @@ import {specials, types, hashes} from '../wasm/wrap.js';
 
 
 /**
+ * Performs mechanical processing of the passed file for use in module-land. The returned buffer
+ * will contain no static import/export statements.
+ *
+ * @param {?} runner
+ * @param {!Buffer} buffer
+ * @return {!Object}
+ */
+export function processFile(runner, buffer) {
+  const {token} = runner;
+  runner.prepare(buffer.length).set(buffer);
+
+  const root = new Scope();
+  const scopes = [root];
+  const tops = [0];
+  let top = scopes[0];
+  let scope = scopes[0];
+
+  const deps = new Map();
+
+  let exportAllStarCount = 0;
+  const imports = {};
+  const exports = {};
+
+  const importCallback = (start, mapping, other) => {
+    deps.set(other, deps.get(other) || false);
+    commentRange(buffer.slice(start, token.at()));
+
+    for (const cand in mapping) {
+      imports[cand] = {from: other, name: mapping[cand]};
+    }
+  };
+
+  const exportCallback = (start, defaultExportHoist, mapping, other) => {
+    const defaultExport = defaultExportHoist || (mapping === null && token.hash() === hashes.default);
+    commentRange(buffer.slice(start, token.at()));
+
+    // This is a re-export: something like "export {a} from './other.js'".
+    if (other !== null) {
+      deps.set(other, deps.get(other) || false);
+      for (const cand in mapping) {
+        if (cand !== '*') {
+          // We import _as_ an invalid variant of the exported name, as it's guaranteed not to be a
+          // duplicate (or if it is, it's user error). Note that mapping[cand] might still be "*",
+          // e.g., "export * as foo from 'blah'".
+          imports[':' + cand] = {from: other, name: mapping[cand]};
+          exports[cand] = ':' + cand;
+          continue;
+        }
+
+        // Assertion sanity-check. This is "export * from 'blah'". (It's impossible to say,
+        // "export foo as * from 'blah'").
+        if (mapping[cand] !== '*') {
+          throw new Error(`both *:*`);
+        }
+
+        // This is special as it propogates upwards only if we ourselves are being exported as a glob.
+        // TODO: but if e.g.
+        //    c -> export * from 'external';
+        //    b -> export * from 'c';
+        //    a -> import * as foo from 'b';
+        // ... then `foo = Object.assign(c, b)`;
+        deps.set(other, true);
+      }
+      return;
+    }
+
+    // This is a normal dictionary-like export: e.g., "export {a, bar as zing}"
+    if (mapping !== null) {
+      for (const cand in mapping) {
+        exports[cand] = mapping[cand];
+      }
+      return;
+    }
+
+    // Looks like "export <class|function>". The symbol is annotated properly.
+    if (!defaultExport) {
+      return;
+    }
+
+    // This is an expression like "export default 123" or "export default 123 + 456". We insert a
+    // a fake "const" here and claim that it's a symbol. The blank name will be renamed later.
+    if (!defaultExportHoist) {
+      // "default" => "const ="
+      const update = new Uint8Array([99, 111, 110, 115, 116, 32, 61]);
+      buffer.set(update, token.at());
+      root.declareZeroAt(token.at() + 5);  // place after "const" and before " ="
+      exports['default'] = '';
+      return;
+    }
+
+    // This is "export default <class|function>", and the function/class is annotated properly.
+    // Extend the comment range to hide "export default".
+    if (defaultExport) {
+      const end = token.at() + token.length() - 1;
+      commentRange(buffer.slice(start, end));
+      buffer[end] = 59;  // insert ";" before statement for safety: prevent value?
+      return;
+    }
+
+    throw new Error(`unhandled export type`);
+  };
+
+  const callback = (special) => {
+    if (special & specials.declare) {
+      const cand = token.string();
+      const where = (special & specials.top) ? top : scope;
+      where.mark(token, true);
+
+      if (special & specials.top) {
+        if (cand in top.vars) {
+          // This is a hoisted var use, we probably don't care.
+        }
+      }
+      // nb. Treat "let" and "const" like "var" w.r.t. hoisting. Use like this is invalid (TDZ)
+      // so there's nothing we can do anyway.
+
+      // Special-case top-level declarations (these are part of import/export but report here).
+      if (special & specials.external) {
+        exports[cand] = cand;
+      } else if (special & specials.defaultHoist) {
+        exports['default'] = cand;  // can be blank string, e.g. "export default function() {}"
+      }
+
+    } else if (token.type() === types.symbol) {
+      scope.mark(token, false);
+    }
+
+    if (scope !== root || token.type() !== types.keyword) {
+      return;
+    }
+
+    const h = token.hash();
+    const start = token.at();
+    const defaultExportHoist = Boolean(special & specials.defaultHoist);
+
+    switch (h) {
+      case hashes.import:
+        importHandler(runner, importCallback.bind(null, start));
+        break;
+
+      case hashes.export:
+        exportHandler(runner, exportCallback.bind(null, start, defaultExportHoist));
+        break;
+    }
+  };
+
+  const stack = (special) => {
+    if (special) {
+      const next = new Scope();
+      if (special & specials.top) {
+        tops.unshift(scopes.length);
+        top = next;
+      }
+      scopes.unshift(next);
+      scope = next;
+      return;
+    }
+
+    const previous = scope;
+    scopes.shift();
+    scope = scopes[0];
+    scope.consume(previous);
+
+    if (tops[0] === scopes.length) {
+      tops.shift();
+      top = scopes[tops[0]];
+    }
+  };
+
+  // Parse and mark externals. We can do this immediately, and there's no race conditions about
+  // which file's globals "wins": the union of globals must be treated as global.
+  runner.run(callback, stack);
+
+  // Look for variables which we only export. Technically the only way these are allowed is if they
+  // are also imported (can't export e.g., a global or whatever).
+  for (const key in exports) {
+    root.declareSilentUse(exports[key]);
+  }
+
+  // Look for disused imports and remove them. This doesn't remove the import itself, as it might
+  // be included for its side-effects. (There's some simple checks for side-effects if we cared.)
+  for (const key in imports) {
+    if (root.declareIfExists(key)) {
+      continue;  // exists, hooray!
+    } else if (key[0] === '*') {
+      continue;
+    }
+    delete imports[key];
+  }
+
+  const {externals, locals} = root.split();
+
+  // Renders this file with its top-level, non-globals renamed. This is a non-destructive operation
+  // and doesn't modify the underlying buffer further, so it can be called many times (... not that
+  // it is).
+  const render = (write, renamer) => {
+    let writes = [];
+
+    for (const key in locals) {
+      const update = renamer(key);
+      if (update === undefined || update === key) {
+        continue;
+      }
+
+      const {at, length} = locals[key];
+      writes = writes.concat(at.map((at) => ({at, length, update})))
+    }
+
+    writes.sort(({at: a}, {at: b}) => a - b);
+
+    let progress = 0;
+    for (const next of writes) {
+      let {update, at, length} = next;
+
+      write(buffer.subarray(progress, at));
+
+      // Make sure a zero-length source has padding.
+      // TODO(samthor): The parser could emit this such that the empty node always needs a space
+      // before itself, so the right side is always safe (e.g. "class^ z", "function^()").
+      if (length === 0) {
+        if (buffer[at - 1] !== 32) {
+          update = ' ' + update;
+        }
+        if (buffer[at] !== 32 && buffer[at] !== 40) {
+          update = update + ' ';
+        }
+      }
+
+      write(update);
+      progress = at + length;
+    }
+    write(buffer.subarray(progress));  // push tail
+
+    if (buffer[buffer.length - 1] !== 10) {
+      // TODO(samthor): The parser should emit whether the tail statement is closed properly, and
+      // we can generate a semicolon, too.
+      write('\n');  // force newlines
+    }
+  };
+
+  return {
+    deps,
+    imports,
+    exports,
+    externals,
+    render,
+  };
+}
+
+
+/**
  * Helper to parse a JS file and its variable use throughout scopes.
  */
 class Scope {
@@ -127,243 +378,6 @@ class Scope {
       d.at.push(at);
     }
   }
-}
-
-
-
-/**
- * Performs mechanical processing of the passed file for use in module-land. The returned buffer
- * will contain no static import/export statements.
- *
- * @param {?} runner
- * @param {!Buffer} buffer
- */
-export function processFile(runner, buffer) {
-  const {token} = runner;
-  runner.prepare(buffer.length).set(buffer);
-
-  const root = new Scope();
-  const scopes = [root];
-  const tops = [0];
-  let top = scopes[0];
-  let scope = scopes[0];
-
-  const deps = new Set();
-
-  let exportAllStarCount = 0;
-  const imports = {};
-  const exports = {};
-
-  const importCallback = (start, mapping, other) => {
-    deps.add(other);
-    commentRange(buffer.slice(start, token.at()));
-
-    for (const cand in mapping) {
-      imports[cand] = {from: other, name: mapping[cand]};
-    }
-  };
-
-  const exportCallback = (start, defaultExportHoist, mapping, other) => {
-    const defaultExport = defaultExportHoist || (mapping === null && token.hash() === hashes.default);
-    commentRange(buffer.slice(start, token.at()));
-
-    // This is a re-export: something like "export {a} from './other.js'".
-    if (other !== null) {
-      deps.add(other);
-      for (const cand in mapping) {
-        if (cand !== '*') {
-          // We import _as_ the exported name, as it's guaranteed not to be a duplicate.
-          // Note that "mapping[cand]" might still be "*", e.g., "* as foo".
-          imports[':' + cand] = {from: other, name: mapping[cand]};
-          exports[cand] = ':' + cand;
-          continue;
-        }
-
-        // Mark unnamed glob re-exports with a number so they're ordered and don't clobber each
-        // each other, as they're (unfortunately) quite special.
-        const key = `*${++exportAllStarCount}`;
-        imports[key] = {from: other, name: '*'};
-        exports[key] = `*${other}`;
-      }
-      return;
-    }
-
-    // This is a normal dictionary-like export: e.g., "export {a, bar as zing}"
-    if (mapping !== null) {
-      for (const cand in mapping) {
-        exports[cand] = mapping[cand];
-      }
-      return;
-    }
-
-    // Looks like "export <class|function>". The symbol is annotated properly.
-    if (!defaultExport) {
-      return;
-    }
-
-    // This is an expression like "export default 123" or "export default 123 + 456". We insert a
-    // a fake "const" here and claim that it's a symbol. The blank name will be renamed later.
-    if (!defaultExportHoist) {
-      // "default" => "const ="
-      const update = new Uint8Array([99, 111, 110, 115, 116, 32, 61]);
-      buffer.set(update, token.at());
-      root.declareZeroAt(token.at() + 5);  // place after "const
-      exports['default'] = '';
-      return;
-    }
-
-    // This is "export default <class|function>", and the function/class is annotated properly.
-    // Extend the comment range to hide "export default".
-    if (defaultExport) {
-      const end = token.at() + token.length() - 1;
-      commentRange(buffer.slice(start, end));
-      buffer[end] = 59;  // insert trailing ";" for safety
-      return;
-    }
-
-    throw new Error(`unhandled export type`);
-  };
-
-  const callback = (special) => {
-    if (special & specials.declare) {
-      const cand = token.string();
-      const where = (special & specials.top) ? top : scope;
-      where.mark(token, true);
-
-      if (special & specials.top) {
-        if (cand in top.vars) {
-          // This is a hoisted var use, we probably don't care.
-        }
-      }
-      // nb. Treat "let" and "const" like "var" w.r.t. hoisting. Use like this is invalid (TDZ)
-      // so there's nothing we can do anyway.
-
-      // Special-case top-level declarations (these are part of import/export but report here).
-      if (special & specials.external) {
-        exports[cand] = cand;
-      } else if (special & specials.defaultHoist) {
-        exports['default'] = cand;  // can be blank string, e.g. "export default function() {}"
-      }
-
-    } else if (token.type() === types.symbol) {
-      scope.mark(token, false);
-    }
-
-    if (scope !== root || token.type() !== types.keyword) {
-      return;
-    }
-
-    const h = token.hash();
-    const start = token.at();
-    const defaultExportHoist = Boolean(special & specials.defaultHoist);
-
-    switch (h) {
-      case hashes.import:
-        importHandler(runner, importCallback.bind(null, start));
-        break;
-
-      case hashes.export:
-        exportHandler(runner, exportCallback.bind(null, start, defaultExportHoist));
-        break;
-    }
-  };
-
-  const stack = (special) => {
-    if (special) {
-      const next = new Scope();
-      if (special & specials.top) {
-        tops.unshift(scopes.length);
-        top = next;
-      }
-      scopes.unshift(next);
-      scope = next;
-      return;
-    }
-
-    const previous = scope;
-    scopes.shift();
-    scope = scopes[0];
-    scope.consume(previous);
-
-    if (tops[0] === scopes.length) {
-      tops.shift();
-      top = scopes[tops[0]];
-    }
-  };
-
-  // Parse and mark externals. We can do this immediately, and there's no race conditions about
-  // which file's globals "wins": the union of globals must be treated as global.
-  runner.run(callback, stack);
-
-  // Look for variables which we only export. Technically the only way these are allowed is if they
-  // are also imported (can't export e.g., a global or whatever).
-  for (const key in exports) {
-    top.declareSilentUse(exports[key]);
-  }
-
-  // Look for disused imports and remove them. This doesn't remove the import itself, as it might
-  // be included for its side-effects. (There's some simple checks for side-effects if we cared.)
-  for (const key in imports) {
-    if (top.declareIfExists(key)) {
-      continue;  // exists, hooray!
-    } else if (key[0] === '*') {
-      continue;
-    }
-    delete imports[key];
-  }
-
-  const {externals, locals} = root.split();
-
-  const render = (write, renamer) => {
-    let writes = [];
-
-    for (const key in locals) {
-      const update = renamer(key);
-      if (update === undefined || update === key) {
-        continue;
-      }
-
-      const {at, length} = locals[key];
-      writes = writes.concat(at.map((at) => ({at, length, update})))
-    }
-
-    writes.sort(({at: a}, {at: b}) => a - b);
-
-    let progress = 0;
-    for (const next of writes) {
-      let {update, at, length} = next;
-
-      write(buffer.subarray(progress, at));
-
-      // Make sure a zero-length source has padding.
-      // TODO(samthor): The parser could emit this such that the empty node always needs a space
-      // before itself, so the right side is always safe (e.g. "class^ z", "function^()").
-      if (length === 0) {
-        if (buffer[at - 1] !== 32) {
-          update = ' ' + update;
-        }
-        if (buffer[at] !== 32 && buffer[at] !== 40) {
-          update = update + ' ';
-        }
-      }
-
-      write(update);
-      progress = at + length;
-    }
-    write(buffer.subarray(progress));  // push tail
-
-    if (buffer[buffer.length - 1] !== 10) {
-      write('\n');  // force newlines
-    }
-  }
-
-  return {
-    deps,
-    imports,
-    exports,
-    externals,
-    render,
-  };
 }
 
 

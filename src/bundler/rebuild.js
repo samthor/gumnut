@@ -21,30 +21,6 @@
 
 
 /**
- * Creates a glob exports line, i.e., a variable which includes all variables
- * from a specific file.
- *
- * @param {!Object<string, string>} exports
- * @param {!Object<string, string>} renames
- * @param {!Array=} extras to include in this glob (i.e., re-export)
- */
-export function globExports(exports, renames, extras=[]) {
-  const validExport = (key) => key && key[0] !== '*';
-  const inner = Object.keys(exports).filter(validExport).map((key) => {
-    const v = renames[exports[key]];
-    return `  get ${key}() { return ${v}; },\n`;
-  }).join('');
-  const o = `{\n${inner}}`;
-
-  if (extras.length) {
-    // TODO: what is the correct order?
-    return `Object.freeze(Object.assign(${o}, ${extras.join(', ')}))`;
-  }
-  return `Object.freeze({\n${inner}})`;
-}
-
-
-/**
  * Builds a module export statement.
  *
  * @param {!Object<string, string>} mapping
