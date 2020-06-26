@@ -52,26 +52,33 @@ function internalBundle(runner, files) {
   // Part #1: Parse every file and proceed recursively into dependencies. This matches ESM execution
   // order.
   const processed = new Set();
-  const process = (f, toplevel) => {
+  const process = (f = '') => {
     if (processed.has(f)) {
       return emptySet;
     }
     processed.add(f);
 
-    // This isn't bundled into our output, so mark it as such and return early.
-    if (!fs.existsSync(f)) {
-      unbundledImports.set(f, {});
-      return emptySet;
+    let buffer;
+    if (f.length === 0) {
+      // We generate fake source for the top-level file: exports all targets together.
+      const source = files.map((f) => `export * from ${JSON.stringify(f)};\n`).join('');
+      buffer = Buffer.from(source, 'utf-8');
+    } else {
+      // This isn't bundled into our output, so mark it as such and return early.
+      if (!fs.existsSync(f)) {
+        unbundledImports.set(f, {});
+        return emptySet;
+      }
+      buffer = fs.readFileSync(f);
     }
 
-    const buffer = fs.readFileSync(f);
     const {deps, externals, imports, exports, render} = processFile(runner, buffer);
 
     // Immediately resolve future dependencies.
     const globExports = new Set();
     deps.forEach((globExport, dep) => {
       const resolved = resolve(dep, f);
-      const subordinateGlobExport = process(resolved, false);
+      const subordinateGlobExport = process(resolved);
       if (globExport) {
         subordinateGlobExport.forEach((v) => globExports.add(v));
         globExports.add(resolved);
@@ -86,9 +93,8 @@ function internalBundle(runner, files) {
 
     // Flatten any run of globExports here.
     // TODO(samthor): This is probably in the wrong order.
-    let globExportKey = 0;
     for (const other of globExports) {
-      imports[`*${++globExportKey}`] = {from: other, name: '*'}
+      exports[`*${other}`] = '*';
     }
 
     // Store externals globally, and ensure they're not renamed here.
@@ -98,12 +104,34 @@ function internalBundle(runner, files) {
       renames[external] = external;
     });
 
-    fileData.set(f, {imports, exports, render, renames, toplevel});
+    fileData.set(f, {imports, exports, render, renames});
     return globExports;
   };
-  for (const f of files) {
-    process(path.resolve(f), true);
-  }
+
+  process();
+
+  // If we want '*' from a source file, then we have to awkwardly ensure that _its_ unbundled
+  // exports are correctly identified. e.g.:
+  //   - "a.js" requires * from "b.js" which exports all of "other".
+  //   - we need to ensure that we import "* as <something>" from "other".
+  // This rarely happens in the real world.
+  const hoistExportsOf = (f) => {
+    const {exports, renames} = fileData.get(f);
+
+    for (const key in exports) {
+      if (key[0] !== '*' || key.length === 1) {
+        continue;
+      }
+      const from = key.substr(1);
+      const mapping = unbundledImports.get(from);
+      if (mapping === undefined) {
+        continue;
+      }
+
+      mapping['*'] = registry.register('*', from);
+      renames[key] = mapping['*'];
+    }
+  };
 
   // Part #2: Remap all imports. This needs to be done before exports, as we might require the
   // additional glob export from another bundled file.
@@ -122,8 +150,12 @@ function internalBundle(runner, files) {
           if (name !== '*') {
             throw new Error(`${from} does not export: ${name}`);
           }
-          // There's no original name as we're asking for all its values.
-          otherExports['*'] = '*';
+          // There's no original name as we're asking for all its values. Just use '*' and the
+          // registry will give us a sensible name later.
+          if (!('*' in otherExports)) {
+            otherExports['*'] = '*';
+            hoistExportsOf(from);
+          }
         } else {
           name = real;
         }
@@ -162,42 +194,40 @@ function internalBundle(runner, files) {
   }
 
   // Part #4: Remap exports, and rewrite/render module content.
-  for (const [f, {render, exports, imports, renames, toplevel}] of fileData) {
+  for (const [f, {render, exports, renames}] of fileData) {
     for (const x in exports) {
       const real = exports[x];
       if (!(real in renames)) {
         renames[real] = registry.register(real, f);
       }
     }
+    const toplevel = (f.length === 0);
 
-    // TODO(samthor): These two sections are basically the same, but do two different things:
-    //   1) generate the named exports of a bundle to be used internally (names, plus merge with external re-exports)
-    //   2) generate top-level global exports (names, plus re-exports)
-
-    // Someone wants the global exports of this file.
-    if ('*' in exports) {
-      const name = renames['*'];
-      const unbundledExtras = [];
-
+    // We need to calculate our exports.
+    if ('*' in exports || toplevel) {
+      const unbundled = {};
       const expandedExports = {};
+
       for (const key in exports) {
-        if (validExport(key)) {
+        if (key === '*') {
+          continue;  // this is our hint to generate in the first place
+        } else if (key[0] !== '*') {
           expandedExports[key] = renames[exports[key]];
+          continue;  // this is a boring export
         }
-      }
 
-      for (const key in imports) {
-        if (key[0] !== '*') {
-          continue;
-        }
-        const {from} = imports[key];
-
+        // Otherwise, this is a re-export of a global.
+        const from = key.substr(1);
         const isBundled = fileData.has(from);
+
+        // TODO(samthor): Technically there's probably a prescribed order here. Instead, we're just
+        // placing all unbundled keys after the bundled ones.
         if (!isBundled) {
-          unbundledExtras.push(renames[key]);
+          unbundled[from] = renames[key];
           continue;
         }
 
+        // If not, merge its keys here.
         const {exports: otherExports, renames: otherRenames} = fileData.get(from);
         for (const key in otherExports) {
           if (validExport(key)) {
@@ -206,62 +236,49 @@ function internalBundle(runner, files) {
         }
       }
 
-      // TODO(samthor): If the underlying value never mutates, we can dispense with the getter.
-      // This is pretty easy to determine in the parser with static analysis.
-      const inner = Object.keys(expandedExports).map((key) => {
-        return `  get ${key}() { return ${expandedExports[key]}; },\n`;
-      }).join('');
-      readable.push(`const ${name} = /* global export of \"${f}\" */ {\n${inner}};\n`);
+      // Someone wants the global exports of this file.
+      if ('*' in exports) {
+        const name = renames['*'];
 
-      // nb. Other bundlers just use Object.assign here, but that's not actually valid as the
-      // values of the bundled external dependency could actually _change_.
-      // TODO(samthor): This should probably be a configuration flag.
-      for (const extra of unbundledExtras) {
-        const s = `for (let x in ${extra}) {
-  Object.defineProperty(${name}, x, {enumerable: true, get() { return ${name}[x]; }})};
+        // TODO(samthor): If the underlying value never mutates, we can dispense with the getter.
+        // This is pretty easy to determine in the parser with static analysis.
+        const inner = Object.keys(expandedExports).map((key) => {
+          return `  get ${key}() { return ${expandedExports[key]}; },\n`;
+        }).join('');
+        readable.push(`const ${name} = /* global export of \"${f}\" */ {\n${inner}};\n`);
+
+        // nb. Other bundlers just use Object.assign here, but that's not actually valid as the
+        // values of the bundled external dependency could actually _change_.
+        // TODO(samthor): This should probably be a configuration flag.
+        for (const extra of Object.values(unbundled)) {
+          const s = `for (let _ in ${extra}) {
+  Object.defineProperty(${name}, _, {enumerable: true, get() { return ${extra}[_]; }})};
 }
 `;
-        readable.push(s);
+          readable.push(s);
+        }
+        readable.push(`Object.freeze(${name});\n`);
       }
-      readable.push(`Object.freeze(${name});\n`);
+
+      // This is the top-level entrypoint, so export everything we know about.
+      if (toplevel) {
+        for (const extra of Object.keys(unbundled)) {
+          write(`export * from ${JSON.stringify(extra)};\n`);
+        }
+
+        const grouped = [];
+        for (const key in expandedExports) {
+          const v = expandedExports[key];
+          grouped.push(v === key ? v : `${v} as ${key}`);
+        }
+        if (grouped.length) {
+          readable.push(`export {${grouped.join(', ')}};\n`);
+        }
+      }
     }
 
     if (toplevel) {
-      // Create a renamed export map before displaying it.
-      const expandedExports = {};
-
-      for (const key in imports) {
-        if (key[0] !== '*') {
-          continue;
-        }
-        const {from} = imports[key];
-
-        const isBundled = fileData.has(from);
-        if (!isBundled) {
-          write(`export * from ${JSON.stringify(from)};\n`);
-          continue;
-        }
-
-        const {exports: otherExports, renames: otherRenames} = fileData.get(from);
-        for (const key in otherExports) {
-          if (validExport(key)) {
-            expandedExports[key] = otherRenames[otherExports[key]];
-          }
-        }
-      }
-
-      for (const key in exports) {
-        if (validExport(key)) {
-          expandedExports[key] = renames[exports[key]];
-        }
-      }
-
-      const grouped = [];
-      for (const key in expandedExports) {
-        const v = expandedExports[key];
-        grouped.push(v === key ? v : `${v} as ${key}`);
-      }
-      readable.push(`export {${grouped.join(', ')}};\n`);
+      continue;  // nothing good here
     }
 
     render(write, (name) => {
