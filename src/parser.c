@@ -212,6 +212,7 @@ static int consume_export(int context) {
     td->peek_at = restore_resume;
     td->line_no = restore_line_no;
     td->depth = restore_depth;
+    td->flag = 0;
     td->cursor.len = 0;
     td->cursor.type = TOKEN_UNKNOWN;
 
@@ -576,6 +577,7 @@ static int maybe_consume_arrowfunc_or_reentrant_group(int context) {
     td->peek_at = restore_resume;
     td->line_no = restore_line_no;
     td->depth = restore_depth;
+    td->flag = 0;
     td->cursor.len = 0;
     td->cursor.type = TOKEN_UNKNOWN;
 
@@ -784,6 +786,50 @@ static int consume_optional_arg_group(int context) {
   return 0;
 }
 
+static int consume_single_definition(int context, int special) {
+  if (td->cursor.type == TOKEN_OP) {
+    switch (td->cursor.hash) {
+      case MISC_SPREAD:
+        internal_next();
+        break;
+    }
+  }
+
+  switch (td->cursor.type) {
+    case TOKEN_LIT:
+      // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
+      prsr_update(TOKEN_SYMBOL);
+      _modp_callback(special);
+      internal_next_comment();
+      break;
+
+    case TOKEN_BRACE:
+    case TOKEN_ARRAY:
+      _check(consume_destructuring(context, special));
+      break;
+
+    default:
+      return 0;  // unhandled/unexpected
+  }
+
+  // FIXME: This is a little gross, since we handle this in both the definition list as well as
+  // expr code. It's an argument to merge?
+  switch (td->cursor.hash) {
+    case LIT_IN:
+    case LIT_OF:
+      internal_next_update(TOKEN_OP);
+      _check(consume_optional_expr(context));
+      break;
+
+    case MISC_EQUALS:
+      internal_next();
+      _check(consume_optional_expr(context));
+      break;
+  }
+
+  return 0;
+}
+
 // consume list of definitions, i.e., on "var" etc (also allowed to be on first arg)
 static int consume_definition_list(int context, int extra_special) {
   int special = SPECIAL__DECLARE | SPECIAL__TOP;
@@ -792,55 +838,11 @@ static int consume_definition_list(int context, int extra_special) {
   }
   special |= extra_special;
   if (td->cursor.hash & _MASK_DECL) {
-    internal_next_update(TOKEN_KEYWORD);
+    internal_next_update(TOKEN_KEYWORD);  // move over "var", "let", or "const"
   }
 
   for (;;) {
-    switch (td->cursor.type) {
-      case TOKEN_LIT:
-        // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
-        prsr_update(TOKEN_SYMBOL);
-        _modp_callback(special);
-        internal_next_comment();
-        break;
-
-      case TOKEN_BRACE:
-      case TOKEN_ARRAY:
-        _check(consume_destructuring(context, special));
-        break;
-
-      case TOKEN_OP:
-        if (td->cursor.hash == MISC_COMMA) {
-          internal_next();
-          continue;
-        }
-        if (td->cursor.hash == MISC_SPREAD) {
-          // nb. this doesn't make sense in var/const/lit, but is nonsensical
-          // this basically effects the next lit or destructured thing
-          internal_next();
-          continue;
-        }
-        return 0;
-
-      default:
-        return 0;  // unhandled/unexpected
-    }
-
-    // FIXME: This is a little gross, since we handle this in both the definition list as well as
-    // expr code. It's an argument to merge?
-    switch (td->cursor.hash) {
-      case LIT_IN:
-      case LIT_OF:
-        internal_next_update(TOKEN_OP);
-        _check(consume_optional_expr(context));
-        break;
-
-      case MISC_EQUALS:
-        internal_next();
-        _check(consume_optional_expr(context));
-        break;
-    }
-
+    _check(consume_single_definition(context, special));
     if (td->cursor.hash != MISC_COMMA) {
       return 0;
     }
@@ -1407,13 +1409,15 @@ static int consume_statement(int context) {
       if (control_hash == LIT_CATCH) {
         internal_next();
 
-        if (td->cursor.type != TOKEN_LIT) {
-          debugf("could not find var inside catch()\n");
-          return ERROR__UNEXPECTED;
-        }
-        prsr_update(TOKEN_SYMBOL);
-        modp_callback(SPECIAL__DECLARE);  // not __TOP
-        internal_next_comment();
+        _check(consume_single_definition(context, SPECIAL__DECLARE));
+
+        // if (td->cursor.type != TOKEN_LIT) {
+        //   debugf("could not find var inside catch()\n");
+        //   return ERROR__UNEXPECTED;
+        // }
+        // prsr_update(TOKEN_SYMBOL);
+        // modp_callback(SPECIAL__DECLARE);  // not __TOP
+        // internal_next_comment();
 
         if (td->cursor.type != TOKEN_CLOSE) {
           debugf("could not find closer of catch()\n");

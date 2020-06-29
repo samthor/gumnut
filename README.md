@@ -9,7 +9,7 @@ It does not generate an AST as part of its work, it does not modify the passed s
 
 ## Coverage
 
-prsr correctly parses all 'pass' and 'pass-explicit' tests from [test262-parser-tests](https://github.com/tc39/test262-parser-tests), _except_ those which:
+prsr correctly parses all 'pass' tests from [test262-parser-tests](https://github.com/tc39/test262-parser-tests), _except_ those which:
 
 - rely on non-strict mode behavior (e.g., use variable names like `static` and `let`): modules run in strict mode by default
 - use the `NULL` byte inside a string.

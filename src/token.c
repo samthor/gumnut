@@ -45,6 +45,7 @@
 #define _LOOKUP__LIT      12  // could be a hash
 #define _LOOKUP__SYMBOL   13  // always symbol, never hashed
 #define _LOOKUP__NUMBER   14
+#define _LOOKUP__F_SLASH  15  // special forward-slash
 
 #define _LOOKUP__TOKEN    32
 
@@ -187,7 +188,7 @@ static char lookup_op[256] = {
   _LOOKUP__SYMBOL,  // 90, Z
 
   _LOOKUP__TOKEN | TOKEN_ARRAY,  // 91, [
-  _LOOKUP__EOF,  // 92, forward slash
+  _LOOKUP__F_SLASH,  // 92, forward slash "\"
   _LOOKUP__TOKEN | TOKEN_CLOSE,  // 93, ]
   _LOOKUP__OP_1,  // 94, ^
   _LOOKUP__SYMBOL,  // 95, _
@@ -591,6 +592,7 @@ static inline int eat_token_peek() {
 
     case _LOOKUP__LIT:
     case _LOOKUP__SYMBOL:
+    case _LOOKUP__F_SLASH:
       return TOKEN_LIT;
 
     case _LOOKUP__NUMBER:
@@ -707,11 +709,16 @@ static inline void eat_token() {
     case _LOOKUP__TEMPLATE:
       _ret(consume_template_string_inner(td->resume + 1) + 1, TOKEN_STRING);
 
+    case _LOOKUP__F_SLASH:
+      len = 0;
+      goto resume_symbol;  // sorry
+
     case _LOOKUP__LIT:
       len = consume_known_lit(td->resume, &(td->cursor.hash));
       // fall-through
 
-    case _LOOKUP__SYMBOL: {
+    case _LOOKUP__SYMBOL:
+    resume_symbol: {
       char c = td->resume[len];
       if (!lookup_symbol[c]) {
         // this checks the symbol after lit (above), or p[1]
@@ -730,9 +737,15 @@ static inline void eat_token() {
               if (td->resume[len + 1] != '{') {
                 break;
               }
-              // TODO: match \u{1234}
-              debugf("TODO: handle \\u{1234}\n");
-              _retz(ERROR__INTERNAL);
+              len += 1;
+              for (;;) {
+                char check = td->resume[++len];
+                if (check == '}') {
+                  break;
+                } else if (!isalnum(check)) {
+                  _retz(ERROR__UNEXPECTED);
+                }
+              }
           }
         }
         c = td->resume[++len];

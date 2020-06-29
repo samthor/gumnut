@@ -1,10 +1,11 @@
 {
   "type": "module",
   "scripts": {
-    "test": "./src/test/run.sh && mocha src/test/*.js"
+    "test": "./src/test/parser.sh && ./src/test/test262.sh && mocha src/test/*.js"
   },
   "private": true,
   "devDependencies": {
-    "mocha": "^8.0.1"
+    "mocha": "^8.0.1",
+    "test262-parser-tests": "^0.0.5"
   }
 }
