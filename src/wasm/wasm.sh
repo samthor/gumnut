@@ -13,6 +13,14 @@ elif [[ "${1-}" != "" ]]; then
   exit 1
 fi
 
+# With Homebrew on Mac as of 2020-06, this generates a warning like:
+#
+# > emcc: warning: the fastomp compiler is deprecated.  Please switch to the upstream llvm backend as soon as possible and open issues if you have trouble doing so [-Wfastcomp]
+#
+# This seems (unfortunately) intended for now as Homebrew doesn't yet support the "new" backend
+# (stuck on fastcomp). There may also be other changes in emcc's output for this, probably around
+# where it decides to place statics (fastcomp is at end, which is slow as we have to deref).
+
 # nb. we need SIDE_MODULE mode 2, as it limits exports.
 
 # TOTAL_MEMORY/TOTAL_STACK are set to a single page each: we put stack at the end of memory
