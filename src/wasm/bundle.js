@@ -24,7 +24,7 @@ import build from './wrap.js';
 import path from 'path';
 import stream from 'stream';
 
-import {processFile} from '../bundler/file.js';
+import {processFile, virtualProcessTopFile} from '../bundler/file.js';
 import {Registry} from '../bundler/registry.js';
 import * as rebuild from '../bundler/rebuild.js';
 
@@ -58,21 +58,20 @@ function internalBundle(runner, files) {
     }
     processed.add(f);
 
-    let buffer;
+    let ret;
     if (f.length === 0) {
       // We generate fake source for the top-level file: exports all targets together.
-      const source = files.map((f) => `export * from ${JSON.stringify(f)};\n`).join('');
-      buffer = Buffer.from(source, 'utf-8');
+      ret = virtualProcessTopFile(files);
+    } else if (fs.existsSync(f)) {
+      const buffer = fs.readFileSync(f);
+      ret = processFile(runner, buffer);
     } else {
       // This isn't bundled into our output, so mark it as such and return early.
-      if (!fs.existsSync(f)) {
-        unbundledImports.set(f, {});
-        return emptySet;
-      }
-      buffer = fs.readFileSync(f);
+      unbundledImports.set(f, {});
+      return emptySet;
     }
 
-    const {deps, externals, imports, exports, render} = processFile(runner, buffer);
+    const {deps, externals, imports, exports, render} = ret;
 
     // Immediately resolve future dependencies.
     const globExports = new Set();

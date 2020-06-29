@@ -19,12 +19,42 @@ import {specials, types, hashes} from '../wasm/wrap.js';
 
 
 /**
- * Performs mechanical processing of the passed file for use in module-land. The returned buffer
- * will contain no static import/export statements.
+ * @typedef {{
+ *   deps: !Map<string, boolean>,
+ *   imports: !Object<string, {from: string, name: string}>,
+ *   exports: !Object<string, string>,
+ *   externals: !Set<string>,
+ *   render: function(function(!Buffer): void, function(string): (string|undefined)): void,
+ * }}
+ */
+export var ProcessType;
+
+
+/**
+ * @param {!Array<string>} files
+ * @return {ProcessType}
+ */
+export function virtualProcessTopFile(files) {
+  const deps = new Map();
+  files.forEach((f) => deps.set(f, true))
+
+  return {
+    deps,
+    imports: {},
+    exports: {},
+    externals: new Set(),
+    render: () => undefined,
+  };
+}
+
+
+/**
+ * Performs mechanical processing of the passed file for use in module-land. This modifies the
+ * passed buffer, so it should not be used after return.
  *
  * @param {?} runner
  * @param {!Buffer} buffer
- * @return {!Object}
+ * @return {ProcessType}
  */
 export function processFile(runner, buffer) {
   const {token} = runner;
@@ -38,13 +68,24 @@ export function processFile(runner, buffer) {
 
   const deps = new Map();
 
-  let exportAllStarCount = 0;
   const imports = {};
   const exports = {};
 
+  const replacedRanges = [];
+  const replaceRange = (start, end, semicolon = false) => {
+    const newlines = newlinesWithin(buffer.slice(start, end));
+    const update = (semicolon ? ';' : '') + ''.padEnd(newlines, '\n');
+
+    replacedRanges.push({
+      at: start,
+      length: end - start,
+      update,
+    });
+  };
+
   const importCallback = (start, mapping, other) => {
     deps.set(other, deps.get(other) || false);
-    commentRange(buffer.slice(start, token.at()));
+    replaceRange(start, token.at());
 
     for (const cand in mapping) {
       imports[cand] = {from: other, name: mapping[cand]};
@@ -53,7 +94,7 @@ export function processFile(runner, buffer) {
 
   const exportCallback = (start, defaultExportHoist, mapping, other) => {
     const defaultExport = defaultExportHoist || (mapping === null && token.hash() === hashes.default);
-    commentRange(buffer.slice(start, token.at()));
+    replaceRange(start, token.at());
 
     // This is a re-export: something like "export {a} from './other.js'".
     if (other !== null) {
@@ -74,12 +115,8 @@ export function processFile(runner, buffer) {
           throw new Error(`both *:*`);
         }
 
-        // This is special as it propogates upwards only if we ourselves are being exported as a glob.
-        // TODO: but if e.g.
-        //    c -> export * from 'external';
-        //    b -> export * from 'c';
-        //    a -> import * as foo from 'b';
-        // ... then `foo = Object.assign(c, b)`;
+        // This is special as it propogates upwards only if we ourselves are being exported as a
+        // glob. It also adds to our own global exports.
         deps.set(other, true);
       }
       return;
@@ -112,9 +149,8 @@ export function processFile(runner, buffer) {
     // This is "export default <class|function>", and the function/class is annotated properly.
     // Extend the comment range to hide "export default".
     if (defaultExport) {
-      const end = token.at() + token.length() - 1;
-      commentRange(buffer.slice(start, end));
-      buffer[end] = 59;  // insert ";" before statement for safety: prevent value?
+      const end = token.at() + token.length();
+      replaceRange(start, end, true);
       return;
     }
 
@@ -215,7 +251,7 @@ export function processFile(runner, buffer) {
   // and doesn't modify the underlying buffer further, so it can be called many times (... not that
   // it is).
   const render = (write, renamer) => {
-    let writes = [];
+    let writes = replacedRanges;
 
     for (const key in locals) {
       const update = renamer(key);
@@ -277,6 +313,9 @@ class Scope {
     this.vars = {};
   }
 
+  /**
+   * @return {{externals: !Set<string>, locals: !Object<string, string>}}
+   */
   split() {
     const externals = new Set();
     const locals = {};
@@ -409,6 +448,17 @@ function commentRange(view) {
   while (target < view.length) {
     view[target++] = 10;
   }
+}
+
+
+function newlinesWithin(view) {
+  let newlines = 0;
+  view.forEach((c) => {
+    if (c === 10) {
+      ++newlines;
+    }
+  });
+  return newlines;
 }
 
 
