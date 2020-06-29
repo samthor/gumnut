@@ -1536,8 +1536,8 @@ token *modp_token() {
   return &(td->cursor);
 }
 
-int modp_init(char *p, int _context) {
-  prsr_init_token(p);
+int modp_init(char *p, int len, int _context) {
+  prsr_init_token(p, len);
   top_context = _context;
   skip_context = 0;
   ambig_arrowfunc_count = 0;

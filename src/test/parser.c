@@ -65,7 +65,7 @@ int run_testdef(testdef *def) {
     printf(">> %s\n", def->name);
   }
 
-  int ret = modp_init((char *) def->input, 0);
+  int ret = modp_init((char *) def->input, strlen(def->input), 0);
   if (ret >= 0) {
     do {
       ret = modp_run();

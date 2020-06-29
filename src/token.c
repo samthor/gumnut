@@ -460,7 +460,12 @@ static inline int consume_basic_string(char *p) {
     char c = p[++len];
     switch (c) {
       case '\0':
-        return len;
+        debugf("got null in string: end=%p target=%p\n", td->end, p + len);
+        if (td->end == (p + len)) {
+          return len;
+        }
+        // otherwise, nulls are valid in strings (sigh)
+        break;
 
       case '\n':
         // nb. not valid here
@@ -856,10 +861,11 @@ int prsr_next() {
   return ret;
 }
 
-void prsr_init_token(char *p) {
+void prsr_init_token(char *p, int len) {
   bzero(td, sizeof(tokendef));
   td->line_no = 1;
   td->depth = 1;
+  td->end = p + len;
 
   if (p[0] == '#' && p[1] == '!') {
     // special-case hashbang opener

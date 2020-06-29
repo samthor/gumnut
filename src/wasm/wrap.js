@@ -137,6 +137,7 @@ export default async function build(modulePromise) {
   // resized for a new run.
   let view = new Uint8Array(0);
   let tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);
+  let inputSize = 0;
 
   return {
 
@@ -183,6 +184,7 @@ export default async function build(modulePromise) {
       tokenView = new Int32Array(memory.buffer, tokenAt, 20 >> 2);  // in 32-bit
       view = new Uint8Array(memory.buffer);
       view[WRITE_AT + size] = 0;  // null-terminate
+      inputSize = size;
 
       return new Uint8Array(memory.buffer, WRITE_AT, size);
     },
@@ -214,7 +216,7 @@ export default async function build(modulePromise) {
       _stack = stack;
       shadowed.splice(0, shadowed.length);  // clear previous shadowed callbacks
 
-      let ret = exports._xx_init(WRITE_AT);
+      let ret = exports._xx_init(WRITE_AT, inputSize);
       if (ret >= 0) {
         do {
           ret = exports._xx_run();

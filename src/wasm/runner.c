@@ -18,8 +18,8 @@ void *xx_token() {
 }
 
 EMSCRIPTEN_KEEPALIVE
-int xx_init(char *p) {
-  return modp_init(p, 0);
+int xx_init(char *p, int len) {
+  return modp_init(p, len, 0);
 }
 
 EMSCRIPTEN_KEEPALIVE

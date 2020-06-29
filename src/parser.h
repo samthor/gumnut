@@ -28,7 +28,7 @@
 
 typedef void (*prsr_callback)(int special);
 token *modp_token();
-int modp_init(char *, int);
+int modp_init(char *, int, int);
 int modp_run();
 
 void modp_callback(int);

@@ -14,11 +14,8 @@ SKIPPED=0
 function fail() {
   BASE=$(basename $X)
 
-  HAS_NULL=$(grep -E '\x00' $X || true)
-  SKIP=""
-  if [ "${HAS_NULL}" != "" ]; then
-    SKIP="null byte"
-  elif [ $BASE == "5ecbbdc097bee212.js" ] || [ "$BASE" == "c8565124aee75c69.js" ]; then
+  if [ $BASE == "5ecbbdc097bee212.js" ] || [ "$BASE" == "c8565124aee75c69.js" ]; then
+    # these use "let" as a variable name
     SKIP="invalid in strict mode"
   fi
 

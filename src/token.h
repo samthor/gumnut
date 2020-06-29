@@ -25,6 +25,7 @@ typedef struct {
   char *resume;
   char *peek_at;
   int line_no;  // after resume
+  char *end;    // should point at \0 ending
 
   uint16_t depth : __STACK_SIZE_BITS;
   uint8_t stack[__STACK_SIZE];
@@ -40,7 +41,7 @@ extern tokendef _real_td;
 #endif
 
 // Prepares tokendef. Provides an initial zero token.
-void prsr_init_token(char *);
+void prsr_init_token(char *, int);
 
 // Moves the current cursor to the next token. This includes comments.
 int prsr_next();

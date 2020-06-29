@@ -20,28 +20,7 @@
 #include "../token.h"
 #include "../parser.h"
 
-// reads stdin into buf, reallocating as necessary. returns strlen(buf) or < 0 for error.
-int read_stdin(char **buf) {
-  int pos = 0;
-  int size = 1024;
-  *buf = malloc(size);
-
-  for (;;) {
-    if (pos >= size - 1) {
-      size *= 2;
-      *buf = realloc(*buf, size);
-    }
-    if (!fgets(*buf + pos, size - pos, stdin)) {
-      break;
-    }
-    pos += strlen(*buf + pos);
-  }
-  if (ferror(stdin)) {
-    return -1;
-  } 
-
-  return pos;
-}
+#include "read.c"
 
 static token *out;
 static int tokens = 0;
@@ -56,7 +35,9 @@ void modp_callback(int special) {
   } else if (special & SPECIAL__DECLARE) {
     c = 'd';
   }
-  printf("%d\t%d%c\t%4d.%02d: %.*s\n", depth, special, c, out->line_no, out->type, out->len, out->p);
+  printf("%d\t%d%c\t%4d.%02d: ", depth, special, c, out->line_no, out->type);
+  fwrite(out->p, 1, out->len, stdout);
+  printf("\n");
 #endif
 }
 
@@ -78,7 +59,7 @@ int main() {
 
   out = modp_token();
 
-  int ret = modp_init(buf, 0);
+  int ret = modp_init(buf, len, 0);
   if (ret >= 0) {
     do {
       ret = modp_run();
