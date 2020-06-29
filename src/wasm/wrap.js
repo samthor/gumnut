@@ -20,6 +20,7 @@
 
 const PAGE_SIZE = 65536;
 const WRITE_AT = PAGE_SIZE * 2;
+const ERROR_CONTEXT_MAX = 256;  // on either side
 
 const decoder = new TextDecoder('utf-8');
 
@@ -236,8 +237,8 @@ export default async function build(modulePromise) {
 
       // Otherwise, generate a sane error.
       const lineNo = tokenView[2];
-      const {line, index} = lineAround(view, at, WRITE_AT);
-      throw new TypeError(`[${lineNo}:${index}] ${ERRORS[ret] || '?'}:\n${line}\n${'^'.padStart(index + 1)}`);
+      const {line, pos, offset} = lineAround(view, at, WRITE_AT);
+      throw new TypeError(`[${lineNo}:${pos}] ${ERRORS[ret] || '?'}:\n${line}\n${'^'.padStart(offset + 1)}`);
     },
 
   };
@@ -267,22 +268,22 @@ export function stringFrom(view) {
 /**
  * @param {!Uint8Array} view
  * @param {number} at of error or character
- * @param {number} writeAt start of string
- * @return {string}
+ * @param {number} writeAt start of buffer
+ * @return {{line: string, pos: number, offset: number}}
  */
 function lineAround(view, at, writeAt) {
-  // TODO: It might be useful not to return a huge line, if we're given a ~10mb file on one line.
-
   let lineAt = at;
   while (--lineAt >= writeAt) {
     if (view[lineAt] === 10) {
       break;
     }
   }
-  ++lineAt;  // move back past '\n' or first byte
-  const indexAt = at - lineAt;
 
-  let lineView = view.subarray(lineAt);
+  // move past '\n' or first byte, but enforce content min
+  const actualLineAt = lineAt + 1;
+  lineAt = Math.max(at - ERROR_CONTEXT_MAX, actualLineAt);
+
+  let lineView = view.subarray(lineAt, lineAt + ERROR_CONTEXT_MAX * 2);
   const lineTo = lineView.findIndex((v) => v === 0 || v === 10);
   if (lineTo !== -1) {
     lineView = lineView.subarray(0, lineTo);
@@ -291,9 +292,9 @@ function lineAround(view, at, writeAt) {
   const decoder = new TextDecoder('utf-8');
   const line = decoder.decode(lineView);
 
-  const temp = decoder.decode(lineView.subarray(0, indexAt));
   return {
     line,
-    index: line.length - temp.length,
+    pos: at - actualLineAt,
+    offset: at - lineAt,
   };
 }
