@@ -30,7 +30,7 @@
 #define FLAG__PENDING_T_BRACE 1
 #define FLAG__RESUME_LIT      2
 
-#define _LOOKUP__EOF      0
+#define _LOOKUP__INVALID  0
 #define _LOOKUP__OP_1     1
 #define _LOOKUP__OP_2     2
 #define _LOOKUP__OP_3     3
@@ -91,38 +91,38 @@ static char lookup_symbol[256] = {
 };
 
 static char lookup_op[256] = {
-  _LOOKUP__EOF,  // 0, null
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
+  _LOOKUP__INVALID,  // 0, null
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
   _LOOKUP__SPACE,  // 9, \t
   _LOOKUP__NEWLINE,  // 10, \n
   _LOOKUP__SPACE,
   _LOOKUP__SPACE,
   _LOOKUP__SPACE,  // 13, \r
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,  // 16
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
-  _LOOKUP__EOF,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,  // 16
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
+  _LOOKUP__INVALID,
 
   _LOOKUP__SPACE,  // 32, space
   _LOOKUP__OP_1,  // 33, !
@@ -158,7 +158,7 @@ static char lookup_op[256] = {
   _LOOKUP__OP_1,  // 61, =
   _LOOKUP__OP_3,  // 62, >
   _LOOKUP__Q,  // 63, ?
-  _LOOKUP__EOF,  // 64, @
+  _LOOKUP__INVALID,  // 64, @
 
   _LOOKUP__SYMBOL, // 65, A
   _LOOKUP__SYMBOL,
@@ -227,7 +227,7 @@ static char lookup_op[256] = {
   _LOOKUP__TOKEN | TOKEN_CLOSE,  // 125, }
 
   _LOOKUP__OP_1,  // 126, ~
-  _LOOKUP__EOF,  // 127
+  _LOOKUP__INVALID,  // 127
 
 // 128-255
   _LOOKUP__SYMBOL,
@@ -568,7 +568,7 @@ static inline int eat_token_peek() {
     case _LOOKUP__NEWLINE:
       return ERROR__UNEXPECTED;
 
-    case _LOOKUP__EOF:
+    case _LOOKUP__INVALID:
       return TOKEN_EOF;
 
     case _LOOKUP__OP_1:
@@ -634,7 +634,7 @@ static inline void eat_token() {
       // TODO: for now, handled in consume_space
       _retz(ERROR__UNEXPECTED);
 
-    case _LOOKUP__EOF:
+    case _LOOKUP__INVALID:
       if (td->resume != td->end) {
         _retz(ERROR__UNEXPECTED);
       }
