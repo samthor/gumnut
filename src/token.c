@@ -388,6 +388,9 @@ inline static int internal_consume_multiline_comment(char *p, int *line_no) {
         break;
 
       case '\0':
+        if (td->end != p) {
+          break;  // valid
+        }
         return p - start;
     }
     ++p;
@@ -423,6 +426,12 @@ static inline int consume_slash_regexp(char *p) {
 
         // fall-through
       case '\0':
+        if (td->end != p) {
+          // nulls are valid in regexp
+          break;
+        }
+        // fall-through
+
       case '\n':
         return (p - start);
 
@@ -460,7 +469,6 @@ static inline int consume_basic_string(char *p) {
     char c = p[++len];
     switch (c) {
       case '\0':
-        debugf("got null in string: end=%p target=%p\n", td->end, p + len);
         if (td->end == (p + len)) {
           return len;
         }
@@ -501,7 +509,11 @@ static int consume_template_string_inner(char *p) {
 
     switch (c) {
       case '\0':
-        return len;
+        if (td->end == (p + len)) {
+          return len;
+        }
+        // otherwise, nulls are valid in strings
+        break;
 
       case '\n':
         ++td->line_no;
@@ -690,7 +702,7 @@ static inline void eat_token() {
     case _LOOKUP__SLASH:
       switch (td->resume[1]) {
         case '/':
-          _ret(strline(td->resume), TOKEN_COMMENT);
+          _ret(strline(td->resume, td->end), TOKEN_COMMENT);
         case '*':
           _ret(internal_consume_multiline_comment(td->resume, &(td->line_no)), TOKEN_COMMENT);
       }
@@ -871,7 +883,7 @@ void prsr_init_token(char *p, int len) {
     // special-case hashbang opener
     td->cursor.p = p;
     td->cursor.type = TOKEN_COMMENT;
-    td->cursor.len = strline(p);
+    td->cursor.len = strline(p, td->end);
     td->cursor.line_no = 1;
     p += td->cursor.len;
   } else {
@@ -942,7 +954,7 @@ int prsr_peek() {
     // consuming comments is slow, but we hope (?) that this doesn't happen often
     int len;
     if (td->peek_at[1] == '/') {
-      len = strline(td->peek_at);
+      len = strline(td->peek_at, td->end);
     } else {
       len = internal_consume_multiline_comment(td->peek_at, &line_no);
     }

@@ -17,5 +17,5 @@
 #include "tokens/lit.h"
 #include "tokens/helper.h"
 
-// finds the length to the first \n or null byte
-int strline(char *p);
+// finds the length to the first \n (allows nulls before end)
+int strline(char *p, char *end);

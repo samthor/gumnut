@@ -16,12 +16,16 @@
 
 #include <ctype.h>
 
-int strline(char *p) {
+int strline(char *p, char *end) {
   const char *start = p;
 
-  while (*p) {
+  for (;;) {
     if (p[0] == '\n') {
       break;
+    } else if (!p[0]) {
+      if (p == end) {
+        break;
+      }
     }
     ++p;
   }
