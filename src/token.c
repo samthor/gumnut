@@ -635,9 +635,10 @@ static inline void eat_token() {
       _retz(ERROR__UNEXPECTED);
 
     case _LOOKUP__EOF:
-      if (start != 0) {
+      if (td->resume != td->end) {
         _retz(ERROR__UNEXPECTED);
       }
+      // td->end[0] will always be NULL
       _retz(TOKEN_EOF);
 
     case _LOOKUP__OP_1:
