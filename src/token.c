@@ -423,8 +423,8 @@ static inline int consume_slash_regexp(char *p) {
         do {
           ++p;
         } while (isalnum(*p));
+        return (p - start);
 
-        // fall-through
       case '\0':
         if (td->end != p) {
           // nulls are valid in regexp
