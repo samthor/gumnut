@@ -616,6 +616,9 @@ int blep_token_restore() {
     return 0;
   }
 
+  // TODO: set_restore and restore currently just move the top token back
+  // but we could/should store a ring buffer of ~128 tokens for re-parsing
+
   memcpy(&(td->curr), &(td->restore__curr), sizeof(struct token));
 
   td->line_no = td->restore__line_no;
