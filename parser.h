@@ -9,9 +9,6 @@ int blep_parser_run();
 void blep_parser_callback(struct token *);
 int blep_parser_stack(int);
 
-void blep_cursor_save();
-struct token *blep_cursor_restore();
-
 #define SPECIAL__DECLARE         2    // let, const, var
 #define SPECIAL__TOP             4    // for "var" or var-like only (top-level)
 #define SPECIAL__PROPERTY        8

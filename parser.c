@@ -21,11 +21,11 @@ static int parser_skip = 0;
 
 
 // emit cursor and continue
-static inline void cursor_next() {
+static inline int cursor_next() {
   if (!parser_skip) {
     blep_parser_callback(cursor);
   }
-  blep_token_next();
+  return blep_token_next();
 }
 
 // begins an optional stack (client can ignore it)
@@ -39,41 +39,22 @@ static inline void cursor_next() {
   parser_skip = prev_parser_skip; \
 }
 
-static char *restore__p;
-static int restore__depth;
-static int restore__line_no;
-
-
-static inline int set_restore() {
-  if (parser_skip) {
-    return 0;
-  }
-#ifdef DEBUG
-  if (td->peek.p) {
-    debugf("!! cannot set_restore after peek()");
-    return 0;
-  }
-#endif
-
-  restore__p = td->at;
-  restore__depth = td->depth;
-  restore__line_no = td->line_no;
-
-  ++parser_skip;
-  return 1;
-}
-
-static inline void resume_restore() {
-  --parser_skip;
-}
-
-#define _SET_RESTORE() ;
-#define _RESUME_RESTORE() ;
-
-// FIXME: should only consume if on same line as prev
+// ends an optional stack _and_ consumes an upcoming semicolon on same line
 #define _STACK_END_SEMICOLON() \
-    if (cursor->type == TOKEN_SEMICOLON) { cursor_next(); } \
+    if (cursor->type == TOKEN_SEMICOLON && cursor->hash == SPECIAL__SAMELINE) { \
+      cursor_next(); /* only if on same line */ \
+    } \
     _STACK_END();
+
+#define _SET_RESTORE() \
+  if (!parser_skip) { \
+    ++parser_skip; \
+    blep_token_set_restore();
+
+#define _RESUME_RESTORE() \
+    --parser_skip; \
+    blep_token_restore(); \
+  }
 
 #define _check(v) { int _ret = v; if (_ret) { return _ret; }};
 
@@ -332,18 +313,81 @@ static int consume_function(int special) {
   return 0;
 }
 
+static int consume_class(int special) {
+  return ERROR__UNEXPECTED;
+}
+
+static int consume_control() {
+#ifdef DEBUG
+  if (!(cursor->hash & _MASK_CONTROL)) {
+    debugf("expected _MASK_CONTROL for consume_control");
+    return ERROR__INTERNAL;
+  }
+#endif
+
+  int control_hash = cursor->hash;
+
+  _STACK_BEGIN(STACK__CONTROL);
+  cursor->type = TOKEN_KEYWORD;
+  cursor_next();
+
+  // match "for" and "for await"
+  if (control_hash == LIT_FOR) {
+    if (cursor->hash == LIT_AWAIT) {
+      cursor->type = TOKEN_KEYWORD;
+      cursor_next();
+    }
+  }
+
+  if (cursor->type == TOKEN_PAREN) {
+    // special-case catch, which creates a local scoped var
+    if (control_hash == LIT_CATCH) {
+      cursor_next();
+
+      return ERROR__INTERNAL;  // TODO
+//      _check(consume_single_definition(context, SPECIAL__DECLARE));
+
+      if (cursor->type != TOKEN_CLOSE) {
+        debugf("could not find closer of catch()\n");
+        return ERROR__UNEXPECTED;
+      }
+      cursor_next();
+    } else {
+      return ERROR__INTERNAL;  // TODO
+//      _check(consume_expr_group(context));
+    }
+  }
+
+  _check(consume_statement());
+
+  // special-case trailing "while(...)" for a 'do-while'
+  if (control_hash == LIT_DO) {
+
+    return ERROR__INTERNAL;
+
+  }
+
+  _STACK_END();
+  return 0;
+}
+
 static int consume_statement() {
   debugf("consume_statement: %d (%.*s %d)\n", cursor->type, cursor->len, cursor->p, cursor->hash);
 
   switch (cursor->type) {
     case TOKEN_EOF:
+    case TOKEN_COLON:
       return ERROR__UNEXPECTED;
+
+    case TOKEN_CLOSE:
+      return 0;
 
     case TOKEN_BRACE:
       _STACK_BEGIN(STACK__BLOCK);
       cursor_next();
 
       do {
+        printf("consuming block statement\n");
         _check(consume_statement());
       } while (cursor->type != TOKEN_CLOSE);
 
@@ -380,9 +424,37 @@ static int consume_statement() {
   }
 
   switch (cursor->hash) {
-    // case LIT_DEFAULT:
+    case LIT_DEFAULT:
+      _STACK_BEGIN(STACK__LABEL);
 
-    // case LIT_CASE:
+      cursor->type = TOKEN_KEYWORD;
+      cursor_next();
+
+      if (cursor->type != TOKEN_COLON) {
+        debugf("no : after default\n");
+        return ERROR__UNEXPECTED;
+      }
+      cursor_next();
+
+      _STACK_END();
+      break;
+
+    case LIT_CASE:
+      _STACK_BEGIN(STACK__LABEL);
+
+      cursor->type = TOKEN_KEYWORD;
+      cursor_next();
+
+      _check(consume_expr());
+
+      if (cursor->type != TOKEN_COLON) {
+        debugf("no : after case\n");
+        return ERROR__UNEXPECTED;
+      }
+      cursor_next();
+
+      _STACK_END();
+      break;
 
     case LIT_ASYNC:
       blep_token_peek();
@@ -393,6 +465,9 @@ static int consume_statement() {
 
     case LIT_FUNCTION:
       return consume_function(SPECIAL__DECLARE | SPECIAL__TOP);
+
+    case LIT_CLASS:
+      return consume_class(SPECIAL__DECLARE);
 
     case LIT_RETURN:
     case LIT_THROW:
@@ -435,6 +510,10 @@ static int consume_statement() {
 
       _STACK_END_SEMICOLON();
       return 0;
+
+    case LIT_IMPORT:
+    case LIT_EXPORT:
+      return ERROR__UNEXPECTED;
   }
 
   if (!(cursor->hash & _MASK_MASQUERADE)) {
@@ -444,9 +523,25 @@ static int consume_statement() {
       cursor->type = TOKEN_LABEL;
       return consume_statement();
     }
+  } else if (!cursor->hash) {
+    return consume_expr();
   }
 
-  return ERROR__UNEXPECTED;
+  if (cursor->hash & _MASK_CONTROL) {
+    return consume_control();
+  }
+
+  // catches things like "enum", "protected", which are keywords but largely unhandled
+  if (cursor->hash & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
+    debugf("got fallback TOKEN_KEYWORD\n");
+    _STACK_BEGIN(STACK__MISC);
+    cursor->type = TOKEN_KEYWORD;
+    cursor_next();
+    _STACK_END_SEMICOLON();
+    return 0;
+  }
+
+  return consume_expr();
 }
 
 void blep_parser_init() {

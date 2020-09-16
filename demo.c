@@ -1,18 +1,10 @@
-static const char *test = "{ \
-  ; \
-  foo: async function * foo (x, ...y) {break \n;break\n;}\n\
-  123; \n\
-  return\n\
-  ; \n\
-  async function bar() {} \n\
-  // hello \n\
-} 999";
-
 #include "token.h"
 #include "parser.h"
 #include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "../prsr/src/demo/read.c"
 
 static int depth = 0;
 
@@ -35,116 +27,15 @@ int blep_parser_stack(int type) {
   return 0;
 }
 
-
-#define BUFFER_SIZE  16
-#define BUFFER_PEEK  8  // must have this many, must be <BUFFER_SIZE
-
-
-struct buffer {
-  int save;
-  int restore_line_no;
-  char *restore_at;
-  int restore_depth;
-
-  struct token pending[BUFFER_SIZE];
-  int lookahead_length;
-
-  struct token a, b;
-  struct token *curr, *alt;
-};
-
-struct buffer _real_buffer;
-struct buffer *buffer = &_real_buffer;
-
-
-void blep_cursor_save() {
-  if (++buffer->save == 1) {
-    buffer->restore_line_no = td->line_no;
-    buffer->restore_at = td->at;
-    buffer->restore_depth = td->depth;
-    buffer->lookahead_length = 0;
-  }
-}
-
-struct token *blep_cursor_restore() {
-  if (!buffer->save) {
-    // TODO: should actually explode
-    return buffer->curr;
-  }
-
-  if (--buffer->save) {
-    if (buffer->lookahead_length) {
-      return buffer->pending + buffer->lookahead_length - 1;
-    }
-    return buffer->curr;
-  }
-
-  // otherwise we restore at top position.
-
-  td->line_no = buffer->restore_line_no;
-  td->at = buffer->restore_at;
-  td->depth = buffer->restore_depth;
-  return buffer->curr;
-}
-
-struct token *blep_cursor_next() {
-  if (buffer->alt->p) {
-    struct token *tmp = buffer->alt;
-    buffer->alt = buffer->curr;
-    buffer->curr = tmp;
-    buffer->alt->p = NULL;
-    return tmp;
-  }
-
-  if (buffer->save) {
-    struct token *prev = buffer->curr;
-    struct token *curr = buffer->pending + buffer->lookahead_length;
-    if (buffer->lookahead_length) {
-      if (buffer->lookahead_length == BUFFER_SIZE) {
-        // welp, out of space
-        exit(1);
-      }
-      prev = buffer->pending + buffer->lookahead_length - 1;
-    }
-
-    blep_token_next(prev, curr);
-    ++buffer->lookahead_length;
-
-    if (td->depth < buffer->restore_depth) {
-      // TODO: we should explode (could restore state, but...)
-      exit(2);
-    }
-
-    return curr;
-  }
-
-  struct token *tmp = buffer->alt;
-  buffer->alt = buffer->curr;
-  buffer->curr = tmp;
-
-  blep_token_next(buffer->alt, buffer->curr);
-  buffer->alt->p = NULL;  // clear for potential peek
-
-  return buffer->curr;
-}
-
-struct token *blep_cursor_peek() {
-  // store in alt
-  if (!buffer->alt->p) {
-    blep_token_next(buffer->curr, buffer->alt);
-  }
-  return buffer->alt;
-}
-
-
-
 int main() {
-  bzero(buffer, sizeof(struct buffer));
+  char *buf;
+  int len = read_stdin(&buf);
+  if (len < 0) {
+    return -1;
+  }
+  fprintf(stderr, "!! read %d bytes\n", len);
 
-  buffer->curr = &(buffer->a);
-  buffer->alt = &(buffer->b);
-
-  int ret = blep_token_init((char *) test, strlen(test));
+  int ret = blep_token_init(buf, len);
   if (ret) {
     return ret;
   }
@@ -153,6 +44,7 @@ int main() {
   for (;;) {
     int ret = blep_parser_run();
     if (ret <= 0) {
+      fprintf(stderr, "!! err=%d\n", ret);
       return ret;
     }
   }

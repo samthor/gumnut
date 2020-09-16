@@ -472,8 +472,8 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
     }
 
     case _LOOKUP__SEMICOLON:
-      if (prev->line_no != *line_no) {
-        _reth(1, TOKEN_SEMICOLON, SPECIAL__NEWLINE);
+      if (prev->line_no == *line_no) {
+        _reth(1, TOKEN_SEMICOLON, SPECIAL__SAMELINE);
       }
       _ret(1, TOKEN_SEMICOLON);
 
@@ -596,6 +596,36 @@ int blep_token_peek() {
   td->at += td->peek.len;
 
   return td->peek.type;
+}
+
+int blep_token_set_restore() {
+  if (td->restore__at) {
+    return 0;
+  }
+
+  memcpy(&(td->restore__curr), &(td->curr), sizeof(struct token));
+
+  td->restore__line_no = td->line_no;
+  td->restore__at = td->at;
+  td->restore__depth = td->depth;
+  return td->depth;
+}
+
+int blep_token_restore() {
+  if (!td->restore__at) {
+    return 0;
+  }
+
+  memcpy(&(td->curr), &(td->restore__curr), sizeof(struct token));
+
+  td->line_no = td->restore__line_no;
+  td->at = td->restore__at;
+  td->depth = td->restore__depth;
+
+  td->restore__at = NULL;
+  td->peek.p = NULL;
+
+  return td->depth;
 }
 
 inline int blep_token_is_symbol_part(char c) {

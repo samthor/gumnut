@@ -24,7 +24,6 @@
 #define TOKEN_CLOSE     9   // '}', ']', ')', or ternary ':'
 
 // variable: could be anything
-#define TOKEN_COMMENT   10
 #define TOKEN_STRING    11
 #define TOKEN_REGEXP    12  // literal "/foo/g", not "new RegExp('foo')"
 #define TOKEN_NUMBER    13
@@ -36,7 +35,7 @@
 #define _TOKEN_MAX      16
 
 
-#define SPECIAL__NEWLINE 1
+#define SPECIAL__SAMELINE 1
 
 struct token {
   char *vp;  // void-pointer (before token)
@@ -53,6 +52,10 @@ int blep_token_init(char *, int);
 int blep_token_update(int);
 int blep_token_next();
 int blep_token_peek();
+
+int blep_token_set_restore();
+int blep_token_restore();
+
 inline int blep_token_is_symbol_part(char);
 
 
@@ -71,6 +74,11 @@ typedef struct {
   // depth/stack at head (just used for balancing)
   int depth;
   int stack[STACK_SIZE];
+
+  struct token restore__curr;
+  int restore__line_no;
+  char *restore__at;
+  int restore__depth;
 } tokendef;
 
 // global
