@@ -8,21 +8,61 @@
 
 static int depth = 0;
 
+static const char *stack_names[] = {
+  "null",
+  "expr",
+  "declare",
+  "control",
+  "block",
+  "module",
+  "function",
+  "class",
+  "misc",
+  "label",
+};
+
+static const char *token_names[] = {
+  "eof",
+  "lit",
+  "semicolon",
+  "op",
+  "colon",
+  "brace",
+  "array",
+  "paren",
+  "ternary",
+  "close",
+  "string",
+  "regexp",
+  "number",
+  "symbol",
+  "keyword",
+  "label",
+};
+
 void blep_parser_callback(struct token *t) {
+  if (t->type < 0 || t->type > _TOKEN_MAX) {
+    exit(1);
+  }
+  printf("%-11s| ", token_names[t->type]);
+
   for (int i = 0; i < depth; ++i) {
     printf("  ");
   }
 
-  printf("%.*s (%d)\n", t->len, t->p, t->type);
+  printf("%.*s\n", t->len, t->p);
 }
 
 int blep_parser_stack(int type) {
   if (type) {
     ++depth;
-    printf(">> %d\n", type);
+    if (type < 0 || type > _STACK_MAX) {
+      exit(1);
+    }
+    printf("%-11s>\n", stack_names[type]);
   } else {
     --depth;
-    printf("<<\n");
+    printf("           <\n");
   }
   return 0;
 }
@@ -33,7 +73,6 @@ int main() {
   if (len < 0) {
     return -1;
   }
-  fprintf(stderr, "!! read %d bytes\n", len);
 
   int ret = blep_token_init(buf, len);
   if (ret) {
@@ -43,8 +82,10 @@ int main() {
   blep_parser_init();
   for (;;) {
     int ret = blep_parser_run();
-    if (ret <= 0) {
+    if (ret < 0) {
       fprintf(stderr, "!! err=%d\n", ret);
+      return ret;
+    } else if (ret == 0) {
       return ret;
     }
   }

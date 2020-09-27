@@ -387,7 +387,7 @@ static int consume_statement() {
       cursor_next();
 
       do {
-        printf("consuming block statement\n");
+        debugf("consuming block statement\n");
         _check(consume_statement());
       } while (cursor->type != TOKEN_CLOSE);
 
@@ -550,5 +550,14 @@ void blep_parser_init() {
 }
 
 int blep_parser_run() {
-  return consume_statement();
+  char *head = td->curr.p;
+
+  _check(consume_statement());
+
+  int len = td->curr.p - head;
+  if (len == 0 && td->curr.type != TOKEN_EOF) {
+    debugf("blep_parser_run consumed nothing, token=%d\n", td->curr.type);
+    return ERROR__UNEXPECTED;
+  }
+  return len;
 }

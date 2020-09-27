@@ -16,7 +16,7 @@ int blep_parser_stack(int);
 
 #define SPECIAL__BASE            32768
 
-#define STACK__EXPRESSION 1
+#define STACK__EXPR       1
 #define STACK__DECLARE    2  // var, let, const
 #define STACK__CONTROL    3  // control start (if, for,... etc)
 #define STACK__BLOCK      4  // {}'s
@@ -25,3 +25,6 @@ int blep_parser_stack(int);
 #define STACK__CLASS      7
 #define STACK__MISC       8  // continue, break, return, throw, debugger
 #define STACK__LABEL      9  // label "foo":
+
+
+#define _STACK_MAX        9

@@ -24,15 +24,15 @@
 #define TOKEN_CLOSE     9   // '}', ']', ')', or ternary ':'
 
 // variable: could be anything
-#define TOKEN_STRING    11
-#define TOKEN_REGEXP    12  // literal "/foo/g", not "new RegExp('foo')"
-#define TOKEN_NUMBER    13
-#define TOKEN_SYMBOL    14  // this and above must be literal types
-#define TOKEN_KEYWORD   15
-#define TOKEN_LABEL     16  // to the left of a ':', e.g. 'foo:'
+#define TOKEN_STRING    10
+#define TOKEN_REGEXP    11  // literal "/foo/g", not "new RegExp('foo')"
+#define TOKEN_NUMBER    12
+#define TOKEN_SYMBOL    13  // this and above must be literal types
+#define TOKEN_KEYWORD   14
+#define TOKEN_LABEL     15  // to the left of a ':', e.g. 'foo:'
 
 
-#define _TOKEN_MAX      16
+#define _TOKEN_MAX      15
 
 
 #define SPECIAL__SAMELINE 1
