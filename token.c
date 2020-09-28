@@ -16,7 +16,7 @@ static int hint_type;
 
 #ifdef DEBUG
 #include <stdio.h>
-#define debugf(...) fprintf(stderr, __VA_ARGS__)
+#define debugf(...) fprintf(stderr, "!!! " __VA_ARGS__); fprintf(stderr, "\n")
 #else
 #define debugf (void)sizeof
 #endif
@@ -386,13 +386,16 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
       _ret(blepi_consume_slash_regexp(p), TOKEN_REGEXP);
 
     case _LOOKUP__LIT: {
+      // don't hash if this is a property
       if (prev->special != MISC_DOT && prev->special != MISC_CHAIN) {
-        // don't hash if this is a property
+        t->special = 0;
         len = consume_known_lit(p, &(t->special));
 
         char c = p[len];
         if (!lookup_symbol[c]) {
-          _reth(len, TOKEN_LIT, t->special);  // TODO: could skip reassignment of hash
+          t->type = TOKEN_LIT;
+          t->len = len;
+          return;
         }
       }
       // fall-through
@@ -511,7 +514,7 @@ int blep_token_update(int type) {
   if (type == TOKEN_REGEXP) {
 #ifdef DEBUG
     if (!(td->curr.type == TOKEN_OP && td->curr.p[0] == '/')) {
-      debugf("can't update non-slash to regexp");
+      debugf("can't update non-slash to regexp: %d", td->curr.type);
       return ERROR__INTERNAL;
     }
 #endif

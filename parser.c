@@ -16,6 +16,9 @@ static int consume_statement();
 static int consume_expr();
 static int consume_expr_group();
 static int consume_definition_group();
+static int consume_function(int);
+static int consume_class(int);
+static int consume_optional_expr();
 
 
 static int parser_skip = 0;
@@ -71,8 +74,8 @@ inline static int consume_defn_name(int special) {
       return ERROR__UNEXPECTED;
     }
 #endif
-    // emit empty symbol (move cursor => peek temporarily)
-    if (!parser_skip) {
+    // emit empty symbol if a decl (move cursor => peek temporarily)
+    if (special && !parser_skip) {
       memcpy(peek, cursor, sizeof(struct token));
       peek->vlen = 0;
       cursor->len = 0;
@@ -280,39 +283,151 @@ static int consume_expr_group() {
 #endif
   cursor_next();
 
-  _check(consume_expr_compound());
+  for (;;) {
+    _check(consume_optional_expr());
 
-  if (cursor->type != TOKEN_CLOSE) {
-    debugf("expected close after expr group");
-    return ERROR__UNEXPECTED;
+    if (cursor->type == TOKEN_CLOSE) {
+      break;
+    }
+    if (cursor->special != MISC_COMMA) {
+      debugf("expected comma/close for expr group");
+      return ERROR__UNEXPECTED;
+    }
+
+    cursor_next();
   }
-  return cursor_next();
+
+  cursor_next();  // consuming close
+  return 0;
 }
 
+static int consume_template_string() {
+#ifdef DEBUG
+  if (cursor->type != TOKEN_STRING || cursor->p[0] != '`') {
+    debugf("bad templated string");
+    return ERROR__UNEXPECTED;
+  }
+#endif
+
+  for (;;) {
+    char end = cursor->p[cursor->len - 1];
+    int has_more = (end == '{' && cursor->p[cursor->len - 2] == '$');  // excessive but happens at end of file
+
+    cursor_next();
+
+    if (end == '`') {
+      return 0;
+    }
+
+    if (!has_more) {
+      debugf("templated string didn't end with ` or ${");
+      return ERROR__UNEXPECTED;
+    }
+
+    _check(consume_expr());
+
+    if (cursor->type != TOKEN_STRING || cursor->p[0] != '}') {
+      debugf("templated string didn't restart with }, was %d", cursor->type);
+      return ERROR__UNEXPECTED;
+    }
+  }
+}
+
+// consumes expr if found (cursor will idle if not)
 static int consume_optional_expr() {
-  int value_line = 0;
+restart_expr:
+  (void)sizeof(0);
+  char *start = cursor->p;
+  int value_line = 0;  // line_no of last value
+
 
   // TODO: check for arrowfunc
 
 #define _transition_to_value() { if (value_line) { return 0; } value_line = cursor->line_no; }
+#define _seen_any (start != cursor->p)
 
   for (;;) {
     switch (cursor->type) {
-      // case TOKEN_OP:
-      //   if (value_line) {
-      //     value_line = 0;
-      //     continue;
-      //     // we got it wrong, reparse as REGEXP
-      //   }
-      //   continue;
+      case TOKEN_OP:
+        if (!value_line && cursor->p[0] == '/') {
+          blep_token_update(TOKEN_REGEXP);
+          continue;  // we got it wrong
+        }
+
+        // TODO: include MISC... in _MASK_UNARY_OP
+        if (cursor->special & _MASK_UNARY_OP || (cursor->special == MISC_NOT || cursor->special == MISC_BITNOT)) {
+          if (_seen_any && value_line) {
+            // e.g., "var x = 123 new foo", "a ~ 2", "b ! c" is invalid
+            return 0;
+          }
+        }
+
+        switch (cursor->special) {
+          case MISC_EQUALS:
+            // nb. special-case for = as we allow arrowfunc after it
+            cursor_next();
+            goto restart_expr;
+
+          case MISC_COMMA:
+            return 0;
+
+          case MISC_CHAIN:
+          case MISC_DOT:
+            if (!value_line) {
+              return 0;
+            }
+            cursor_next();
+
+            // technically chain only allows e.g, ?.foo, ?.['foo'], or ?.(arg)
+            // but broadly means "value but only continue if non-null"
+            if (cursor->type == TOKEN_PAREN || cursor->type == TOKEN_ARRAY) {
+              cursor_next();
+              value_line = cursor->line_no;
+              continue;
+            } else if (cursor->type != TOKEN_LIT) {
+              debugf("got dot/chain with unknown after: %d", cursor->type);
+              return ERROR__UNEXPECTED;
+            }
+            cursor->special = SPECIAL__BASE;
+            cursor_next();
+            continue;
+
+          case MISC_INCDEC:
+            if (!value_line) {
+              // ok, attaches to upcoming
+            } else if (cursor->line_no != value_line) {
+              // on new line, not attached to previous, don't consume
+              return 0;
+            }
+            break;
+
+          default:
+            value_line = 0;
+        }
+
+        cursor_next();
+        continue;
 
       case TOKEN_REGEXP:
-        if (!value_line) {
-          value_line = 1;
-          continue;
+        if (value_line) {
+          blep_token_update(TOKEN_OP);
+          continue;  // we got it wrong
         }
-        // we got it wrong, reparse as OP
-        return ERROR__TODO;
+        _transition_to_value();
+        cursor_next();
+        continue;
+
+     case TOKEN_TERNARY:
+        // nb. needs value on left (and contents!), but nonsensical otherwise
+        _check(consume_expr_group());
+        value_line = 0;
+        continue;
+
+      case TOKEN_PAREN:
+      case TOKEN_ARRAY:
+        _check(consume_expr_group());
+        value_line = cursor->line_no;
+        continue;
 
       case TOKEN_SYMBOL:  // reentry
       case TOKEN_NUMBER:
@@ -320,10 +435,73 @@ static int consume_optional_expr() {
         cursor_next();
         continue;
 
+      case TOKEN_STRING:
+        if (cursor->p[0] == '`') {
+          _check(consume_template_string())
+          value_line = cursor->line_no;
+        } else {
+          _transition_to_value();
+          cursor_next();
+        }
+        break;
+
       case TOKEN_BRACE:
+        if (_seen_any && value_line) {
+          // e.g. "(foo {})" is invalid, but "(foo + {})" is ok
+          // we need this as "foo\n{}" must break out of this
+          return 0;
+        }
         _transition_to_value();
         _check(consume_dict());
         continue;
+
+      case TOKEN_LIT: {
+        int type = TOKEN_SYMBOL;
+
+        switch (cursor->special) {
+          case LIT_ASYNC:
+            // we check for arrowfunc at head, so this must be symbol or "async function"
+            blep_token_peek();
+            if (peek->special != LIT_FUNCTION) {
+              // we check for "async (" at top of function
+              break;  // not "async function", treat as value
+            }
+            // fall-through
+
+          case LIT_FUNCTION:
+            _transition_to_value();
+            _check(consume_function(0));
+            continue;
+
+          case LIT_CLASS:
+            _transition_to_value();
+            _check(consume_class(0));
+            continue;
+
+          default:
+            if (cursor->special & _MASK_UNARY_OP) {
+              // can't e.g. "new 123 new"; the latter new starts a new statement
+              if (value_line) {
+                return 0;
+              }
+              type = TOKEN_OP;
+            } else if (cursor->special & _MASK_REL_OP) {
+              type = TOKEN_OP;
+            } else if (cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
+              // FIXME: this and below could be allowed to fall-through in more cases
+              return 0;
+            } else if (value_line) {
+              return 0;  // value after value
+            }
+
+            // regular symbol
+            // FIXME: if _seen_any=0, could be lvalue
+        }
+
+        cursor->type = type;
+        cursor_next();
+        continue;
+      }
 
       default:
         return 0;
@@ -331,6 +509,9 @@ static int consume_optional_expr() {
   }
 
   return ERROR__INTERNAL;
+
+#undef _transition_to_value
+#undef _seen_any
 }
 
 static inline int consume_expr() {
@@ -338,13 +519,13 @@ static inline int consume_expr() {
   _check(consume_optional_expr());
 
   if (start == cursor->p) {
+    debugf("could not consume expr, was: %d", cursor->type);
     return ERROR__UNEXPECTED;
   }
   return 0;
 }
 
 // consume destructuring declaration
-// TODO(samthor): this is basically a dictionary
 static int consume_definition_destructuring(int special) {
 #ifdef DEBUG
   if (cursor->type != TOKEN_BRACE && cursor->type != TOKEN_ARRAY) {
@@ -690,6 +871,13 @@ static int consume_control() {
   return 0;
 }
 
+static int consume_expr_statement() {
+  _STACK_BEGIN(STACK__EXPR);
+  _check(consume_expr_compound());
+  _STACK_END_SEMICOLON();
+  return 0;
+}
+
 static int consume_statement() {
   debugf("consume_statement: %d (%.*s %d)", cursor->type, cursor->len, cursor->p, cursor->special);
 
@@ -740,7 +928,7 @@ static int consume_statement() {
       break;
 
     default:
-      return consume_expr();
+      return consume_expr_statement();
   }
 
   switch (cursor->special) {
@@ -843,12 +1031,20 @@ static int consume_statement() {
       cursor->type = TOKEN_LABEL;
       return consume_statement();
     }
-  } else if (!cursor->special) {
-    return consume_expr();
   }
 
   if (cursor->special & _MASK_CONTROL) {
     return consume_control();
+  } else if (cursor->special & _MASK_DECL) {
+    _STACK_BEGIN(STACK__DECLARE);
+    int special = cursor->special == LIT_VAR ? SPECIAL__TOP : 0;
+    cursor->type = TOKEN_KEYWORD;
+    cursor_next();
+    _check(consume_definition_list(special));
+    _STACK_END_SEMICOLON();
+    return 0;
+  } else if (cursor->special & _MASK_UNARY_OP || !cursor->special) {
+    return consume_expr_statement();
   }
 
   // catches things like "enum", "protected", which are keywords but largely unhandled
@@ -861,7 +1057,7 @@ static int consume_statement() {
     return 0;
   }
 
-  return consume_expr();
+  return consume_expr_statement();
 }
 
 void blep_parser_init() {
