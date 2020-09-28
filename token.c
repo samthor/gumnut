@@ -258,8 +258,8 @@ static inline int blepi_consume_number(char *p) {
 }
 
 static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
-#define _ret(_len, _type) {t->hash = 0; t->type = _type; t->len = _len; return;};
-#define _reth(_len, _type, _hash) {t->hash = _hash; t->type = _type; t->len = _len; return;};
+#define _ret(_len, _type) {t->special = 0; t->type = _type; t->len = _len; return;};
+#define _reth(_len, _type, _hash) {t->special = _hash; t->type = _type; t->len = _len; return;};
 #define _inc_stack(_type) { \
       td->stack[td->depth] = _type; \
       if (++td->depth == STACK_SIZE) { \
@@ -359,7 +359,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
       switch (prev->type) {
         case TOKEN_KEYWORD:  // only seen if modified by parser
         case TOKEN_LIT:
-          if (prev->hash & (_MASK_KEYWORD | _MASK_REL_OP | _MASK_UNARY_OP)) {
+          if (prev->special & (_MASK_KEYWORD | _MASK_REL_OP | _MASK_UNARY_OP)) {
             break;
           }
           _ret(1, TOKEN_OP);
@@ -386,13 +386,13 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
       _ret(blepi_consume_slash_regexp(p), TOKEN_REGEXP);
 
     case _LOOKUP__LIT: {
-      if (prev->hash != MISC_DOT && prev->hash != MISC_CHAIN) {
+      if (prev->special != MISC_DOT && prev->special != MISC_CHAIN) {
         // don't hash if this is a property
-        len = consume_known_lit(p, &(t->hash));
+        len = consume_known_lit(p, &(t->special));
 
         char c = p[len];
         if (!lookup_symbol[c]) {
-          _reth(len, TOKEN_LIT, t->hash);  // TODO: could skip reassignment of hash
+          _reth(len, TOKEN_LIT, t->special);  // TODO: could skip reassignment of hash
         }
       }
       // fall-through

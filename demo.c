@@ -50,7 +50,7 @@ void blep_parser_callback(struct token *t) {
     printf("  ");
   }
 
-  printf("%.*s\n", t->len, t->p);
+  printf("%.*s %d\n", t->len, t->p, t->special);
 }
 
 int blep_parser_stack(int type) {

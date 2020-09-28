@@ -6,6 +6,7 @@
 #define ERROR__UNEXPECTED -1
 #define ERROR__STACK      -2  // stack didn't balance
 #define ERROR__INTERNAL   -3  // internal error
+#define ERROR__TODO       -4
 
 // empty: will not contain text
 #define TOKEN_EOF       0
@@ -44,7 +45,7 @@ struct token {
   int len;
   int line_no;
   int type;
-  uint32_t hash;
+  uint32_t special;
 };
 
 
