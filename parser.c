@@ -301,6 +301,53 @@ static int consume_expr_group() {
   return 0;
 }
 
+// consume arrowfunc from and including "=>"
+static int consume_arrowfunc_from_arrow() {
+  if (cursor->special != MISC_ARROW) {
+    debugf("arrowfunc missing =>\n");
+    return ERROR__UNEXPECTED;
+  }
+  cursor_next();  // consume =>
+
+  if (cursor->type == TOKEN_BRACE) {
+    return consume_statement();
+  } else {
+    return consume_optional_expr();
+  }
+}
+
+// we assume that we're pointing at one (is_arrowfunc has returned true)
+static int consume_arrowfunc() {
+  _STACK_BEGIN(STACK__FUNCTION);
+
+  // "async" prefix without immediate =>
+  if (cursor->special == LIT_ASYNC && !(prsr_peek() == TOKEN_OP && peek->special == MISC_ARROW)) {
+    cursor->type = TOKEN_KEYWORD;
+    cursor_next();
+  }
+
+  switch (cursor->type) {
+    case TOKEN_LIT:
+      cursor->type = TOKEN_SYMBOL;
+      cursor->special = SPECIAL__BASE | SPECIAL__DECLARE;
+      cursor_next();
+      break;
+
+    case TOKEN_PAREN:
+      internal_next();
+      _check(consume_definition_group());
+      break;
+
+    default:
+      debugf("got unknown part of arrowfunc: %d\n", cursor->type);
+      return ERROR__UNEXPECTED;
+  }
+
+  _check(consume_arrowfunc_from_arrow());
+  _STACK_END();
+  return 0;
+}
+
 static int consume_template_string() {
 #ifdef DEBUG
   if (cursor->type != TOKEN_STRING || cursor->p[0] != '`') {
@@ -311,15 +358,14 @@ static int consume_template_string() {
 
   for (;;) {
     char end = cursor->p[cursor->len - 1];
-    int has_more = (end == '{' && cursor->p[cursor->len - 2] == '$');  // excessive but happens at end of file
-
     cursor_next();
 
     if (end == '`') {
       return 0;
-    }
-
-    if (!has_more) {
+    } else if (end != '{') {
+      // we don't have to check for "${", the only case where it won't exist if the file ends with:
+      //   `foo{
+      // ... in which case consume_expr() below fails
       debugf("templated string didn't end with ` or ${");
       return ERROR__UNEXPECTED;
     }
