@@ -466,6 +466,11 @@ restart_expr:
         }
         continue;
 
+      case TOKEN_BRACE:
+        _transition_to_value();
+        _check(consume_dict());
+        continue;
+
       case TOKEN_TERNARY:
         // nb. needs value on left (and contents!), but nonsensical otherwise
         _check(consume_expr_group());
