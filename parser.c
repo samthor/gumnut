@@ -13,7 +13,7 @@
 #endif
 
 static int consume_statement();
-static int consume_expr();
+static int consume_expr(int);
 static int consume_expr_group();
 static int consume_definition_group();
 static int consume_function(int);
@@ -110,7 +110,7 @@ static inline int consume_dict() {
   for (;;) {
     if (cursor->special == MISC_SPREAD) {
       cursor_next();
-      _check(consume_expr());
+      _check(consume_expr(0));
       continue;
     }
 
@@ -218,7 +218,7 @@ static inline int consume_dict() {
       case TOKEN_COLON:
         // nb. this allows "async * foo:" or "async foo =" which is nonsensical
         cursor_next();
-        _check(consume_expr());
+        _check(consume_expr(0));
         break;
     }
 
@@ -253,18 +253,7 @@ static inline int consume_dict() {
 
     debugf("unknown left-side dict part: %d\n", cursor->type);
     return ERROR__UNEXPECTED;
-  }}
-
-// consumes a compound expr separated by ,'s
-static int consume_expr_compound() {
-  for (;;) {
-    _check(consume_expr());
-    if (cursor->special != MISC_COMMA) {
-      break;
-    }
-    cursor_next();
   }
-  return 0;
 }
 
 // consumes a boring grouped expr (paren, array, ternary)
@@ -284,7 +273,7 @@ static int consume_expr_group() {
   cursor_next();
 
   for (;;) {
-    _check(consume_optional_expr());
+    _check(consume_optional_expr(0));
 
     if (cursor->type == TOKEN_CLOSE) {
       break;
@@ -312,7 +301,7 @@ static int consume_arrowfunc_from_arrow() {
   if (cursor->type == TOKEN_BRACE) {
     return consume_statement();
   } else {
-    return consume_optional_expr();
+    return consume_optional_expr(0);  // TODO: if statement we might want to pass this through
   }
 }
 
@@ -321,7 +310,7 @@ static int consume_arrowfunc() {
   _STACK_BEGIN(STACK__FUNCTION);
 
   // "async" prefix without immediate =>
-  if (cursor->special == LIT_ASYNC && !(prsr_peek() == TOKEN_OP && peek->special == MISC_ARROW)) {
+  if (cursor->special == LIT_ASYNC && !(blep_token_peek() == TOKEN_OP && peek->special == MISC_ARROW)) {
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
   }
@@ -334,7 +323,7 @@ static int consume_arrowfunc() {
       break;
 
     case TOKEN_PAREN:
-      internal_next();
+      cursor_next();
       _check(consume_definition_group());
       break;
 
@@ -370,7 +359,7 @@ static int consume_template_string() {
       return ERROR__UNEXPECTED;
     }
 
-    _check(consume_expr());
+    _check(consume_expr(0));
 
     if (cursor->type != TOKEN_STRING || cursor->p[0] != '}') {
       debugf("templated string didn't restart with }, was %d", cursor->type);
@@ -379,107 +368,123 @@ static int consume_template_string() {
   }
 }
 
-// consumes expr if found (cursor will idle if not)
-static int consume_optional_expr() {
+static int is_token_assign_like(struct token *t) {
+  if (t->special == MISC_EQUALS) {
+    return 1;
+  }
+  int len = t->len;
+  return len >= 2 && t->p[len - 1] == '=' && t->p[len - 2] != '=';
+}
+
+// like the other, but counts ()'s
+static int consume_optional_expr(int is_statement) {
+  int paren_count = 0;
+
 restart_expr:
   (void)sizeof(0);
+  int value_line = 0;
   char *start = cursor->p;
-  int value_line = 0;  // line_no of last value
 
+  // TODO: at this point we look for () => {} or destructuring, only valid here
 
-  // TODO: check for arrowfunc
-
-#define _transition_to_value() { if (value_line) { return 0; } value_line = cursor->line_no; }
-#define _seen_any (start != cursor->p)
+#define _maybe_abandon() { if (is_statement && !paren_count) { return 0; } }
+#define _transition_to_value() { if (value_line) { _maybe_abandon(); } value_line = cursor->line_no; }
 
   for (;;) {
+    // 1st step: replace stuff with their intended types and continue
     switch (cursor->type) {
       case TOKEN_OP:
         if (!value_line && cursor->p[0] == '/') {
-          blep_token_update(TOKEN_REGEXP);
-          continue;  // we got it wrong
+          blep_token_update(TOKEN_REGEXP);  // we got it wrong
+        } else if (cursor->special == MISC_NOT || cursor->special == MISC_BITNOT) {
+          // TODO: just fixes a failure in the tokenizer's hashes
+          cursor->special = _MASK_UNARY_OP;
         }
-
-        // TODO: include MISC... in _MASK_UNARY_OP
-        if (cursor->special & _MASK_UNARY_OP || (cursor->special == MISC_NOT || cursor->special == MISC_BITNOT)) {
-          if (_seen_any && value_line) {
-            // e.g., "var x = 123 new foo", "a ~ 2", "b ! c" is invalid
-            return 0;
-          }
-        }
-
-        switch (cursor->special) {
-          case MISC_EQUALS:
-            // nb. special-case for = as we allow arrowfunc after it
-            cursor_next();
-            goto restart_expr;
-
-          case MISC_COMMA:
-            return 0;
-
-          case MISC_CHAIN:
-          case MISC_DOT:
-            if (!value_line) {
-              return 0;
-            }
-            cursor_next();
-
-            // technically chain only allows e.g, ?.foo, ?.['foo'], or ?.(arg)
-            // but broadly means "value but only continue if non-null"
-            if (cursor->type == TOKEN_PAREN || cursor->type == TOKEN_ARRAY) {
-              cursor_next();
-              value_line = cursor->line_no;
-              continue;
-            } else if (cursor->type != TOKEN_LIT) {
-              debugf("got dot/chain with unknown after: %d", cursor->type);
-              return ERROR__UNEXPECTED;
-            }
-            cursor->special = SPECIAL__BASE;
-            cursor_next();
-            continue;
-
-          case MISC_INCDEC:
-            if (!value_line) {
-              // ok, attaches to upcoming
-            } else if (cursor->line_no != value_line) {
-              // on new line, not attached to previous, don't consume
-              return 0;
-            }
-            break;
-
-          default:
-            value_line = 0;
-        }
-
-        cursor_next();
-        continue;
+        break;
 
       case TOKEN_REGEXP:
         if (value_line) {
-          blep_token_update(TOKEN_OP);
-          continue;  // we got it wrong
+          blep_token_update(TOKEN_OP);  // we got it wrong
         }
-        _transition_to_value();
-        cursor_next();
-        continue;
+        break;
 
-     case TOKEN_TERNARY:
+      case TOKEN_LIT:
+        cursor->type = TOKEN_SYMBOL;  // this is a symbol _unless_...
+
+        if (cursor->special == LIT_ASYNC) {
+          // we check for arrowfunc at head, so this must be symbol or "async function"
+          blep_token_peek();
+          if (peek->special == LIT_FUNCTION) {
+            cursor->type = TOKEN_KEYWORD;
+            // TODO: where do we look for "async (" or "async name"
+          }
+        } else if (cursor->special == LIT_FUNCTION) {
+          cursor->type = TOKEN_KEYWORD;
+        } else if (cursor->special & (_MASK_UNARY_OP | _MASK_REL_OP)) {
+          cursor->type = TOKEN_OP;
+        } else if (cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
+          _maybe_abandon();
+          cursor->type = TOKEN_KEYWORD;
+        }
+        break;
+    }
+
+    // 2nd step: process normal stuff
+    switch (cursor->type) {
+      case TOKEN_TERNARY:
         // nb. needs value on left (and contents!), but nonsensical otherwise
         _check(consume_expr_group());
         value_line = 0;
         continue;
 
       case TOKEN_PAREN:
+        if (value_line) {
+          // this is a function call
+          _check(consume_expr_group());
+          value_line = cursor->line_no;
+          continue;
+        }
+        ++paren_count;
+        cursor_next();
+
+        // if we see a TOKEN_LIT immediately after us, see if it's actually a paren'ed lvalue
+        // (this is incredibly uncommon, don't do this, e.g.: `(x)++`)
+        if (cursor->type != TOKEN_LIT || cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD) || blep_token_peek() != TOKEN_CLOSE) {
+          continue;
+        }
+
+        int is_lvalue = 0;
+        _SET_RESTORE();
+
+        int paren_remain = paren_count;
+        do {
+          cursor_next();
+          blep_token_peek();
+          --paren_remain;
+        } while (peek->type == TOKEN_CLOSE && paren_remain);
+
+        blep_token_peek();
+        is_lvalue = is_token_assign_like(peek) || peek->special == MISC_INCDEC;
+        _RESUME_RESTORE();
+
+        cursor->type = TOKEN_SYMBOL;
+        cursor->special = is_lvalue ? SPECIAL__BASE | SPECIAL__CHANGE : 0;
+        cursor_next();
+        // parens will be caught next loop
+        continue;
+
       case TOKEN_ARRAY:
         _check(consume_expr_group());
         value_line = cursor->line_no;
         continue;
 
-      case TOKEN_SYMBOL:  // reentry
-      case TOKEN_NUMBER:
-        _transition_to_value();
-        cursor_next();
-        continue;
+      case TOKEN_CLOSE:
+        if (paren_count) {
+          --paren_count;
+          cursor_next();
+          continue;
+        }
+        return 0;
 
       case TOKEN_STRING:
         if (cursor->p[0] == '`') {
@@ -491,78 +496,129 @@ restart_expr:
         }
         break;
 
-      case TOKEN_BRACE:
-        if (_seen_any && value_line) {
-          // e.g. "(foo {})" is invalid, but "(foo + {})" is ok
-          // we need this as "foo\n{}" must break out of this
-          return 0;
-        }
+      case TOKEN_SYMBOL:
         _transition_to_value();
-        _check(consume_dict());
-        continue;
+        cursor->special = 0;  // nothing special about symbols
 
-      case TOKEN_LIT: {
-        int type = TOKEN_SYMBOL;
-
-        switch (cursor->special) {
-          case LIT_ASYNC:
-            // we check for arrowfunc at head, so this must be symbol or "async function"
-            blep_token_peek();
-            if (peek->special != LIT_FUNCTION) {
-              // we check for "async (" at top of function
-              break;  // not "async function", treat as value
-            }
-            // fall-through
-
-          case LIT_FUNCTION:
-            _transition_to_value();
-            _check(consume_function(0));
-            continue;
-
-          case LIT_CLASS:
-            _transition_to_value();
-            _check(consume_class(0));
-            continue;
-
-          default:
-            if (cursor->special & _MASK_UNARY_OP) {
-              // can't e.g. "new 123 new"; the latter new starts a new statement
-              if (value_line) {
-                return 0;
-              }
-              type = TOKEN_OP;
-            } else if (cursor->special & _MASK_REL_OP) {
-              type = TOKEN_OP;
-            } else if (cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
-              // FIXME: this and below could be allowed to fall-through in more cases
-              return 0;
-            } else if (value_line) {
-              return 0;  // value after value
-            }
-
-            // regular symbol
-            // FIXME: if _seen_any=0, could be lvalue
+        blep_token_peek();
+        if (is_token_assign_like(peek) || peek->special == MISC_INCDEC) {
+          cursor->special = SPECIAL__BASE | SPECIAL__CHANGE;
         }
 
-        cursor->type = type;
         cursor_next();
         continue;
-      }
+
+      case TOKEN_NUMBER:
+      case TOKEN_REGEXP:
+        _transition_to_value();
+        cursor_next();
+        continue;
+
+      case TOKEN_OP:
+        break;  // below
 
       default:
         return 0;
     }
+
+    // 3rd step: handle TOKEN_OP
+
+    if (cursor->special & _MASK_UNARY_OP) {
+      if (start != cursor->p && value_line) {
+        // e.g., "var x = 123 new foo", "a ~ 2", "b ! c" is invalid
+        _maybe_abandon();
+      }
+      cursor_next();
+      value_line = 0;
+      continue;
+    } else if (is_token_assign_like(cursor)) {
+      // nb. special-case for = as we allow arrowfunc after it
+      cursor_next();
+      goto restart_expr;
+    }
+
+    switch (cursor->special) {
+      case MISC_COMMA:
+        if (paren_count) {
+          cursor_next();
+          goto restart_expr;
+        }
+        return 0;
+
+      case MISC_CHAIN:
+      case MISC_DOT:
+        if (!value_line) {
+          _maybe_abandon();
+        }
+        cursor_next();
+
+        // technically chain only allows e.g, ?.foo, ?.['foo'], or ?.(arg)
+        // but broadly means "value but only continue if non-null"
+        if (cursor->type == TOKEN_PAREN || cursor->type == TOKEN_ARRAY) {
+          cursor_next();
+          value_line = cursor->line_no;
+          continue;
+        } else if (cursor->type != TOKEN_LIT) {
+          debugf("got dot/chain with unknown after: %d", cursor->type);
+          return ERROR__UNEXPECTED;
+        }
+        cursor->special = 0;
+        cursor_next();
+        continue;
+
+      case MISC_INCDEC:
+        if (value_line) {
+          if (cursor->line_no != value_line) {
+            _maybe_abandon();  // not attached to previous, avoid consuming
+          }
+          cursor_next();  // this is not attached to a simple lvalue
+          continue;
+        }
+
+        int paren_count_here = 0;
+
+        // otherwise, look for upcoming lvalue
+        cursor_next();
+        while (cursor->type == TOKEN_PAREN) {
+          ++paren_count_here;
+          cursor_next();
+        }
+        paren_count += paren_count_here;
+        if (cursor->type != TOKEN_LIT) {
+          continue;  // e.g. `++((1`, ignore
+        }
+
+        blep_token_peek();
+        if (peek->type == TOKEN_CLOSE) {
+          // easy, e.g. `++(((x)` or `++x)`, we don't care if we're missing further )'s, invalid anyway
+        } else if (paren_count_here) {
+          // do nothing: either invalid or long, e.g. `++(x + 1)` or `++(x.y)` or ++(x().y)
+          continue;
+        } else if (peek->special == MISC_DOT || peek->special == MISC_CHAIN || peek->type == TOKEN_PAREN || peek->type == TOKEN_ARRAY) {
+          // do nothing: run-on to something else, e.g. ++foo().bar
+          // nb. MISC_CHAIN isn't supported technically
+          continue;
+        }
+
+        cursor->special = SPECIAL__BASE | SPECIAL__CHANGE;
+        value_line = cursor->line_no;
+        cursor_next();
+        continue;
+
+      default:
+        // all other ops are fine
+        value_line = 0;
+        cursor_next();
+    }
   }
 
-  return ERROR__INTERNAL;
-
+#undef _maybe_abandon
 #undef _transition_to_value
-#undef _seen_any
 }
 
-static inline int consume_expr() {
+static inline int consume_expr(int is_statement) {
   char *start = cursor->p;
-  _check(consume_optional_expr());
+  _check(consume_optional_expr(is_statement));
 
   if (start == cursor->p) {
     debugf("could not consume expr, was: %d", cursor->type);
@@ -571,9 +627,15 @@ static inline int consume_expr() {
   return 0;
 }
 
-// consume destructuring declaration
-static int consume_definition_destructuring(int special) {
+// consume destructuring: this is not always __DECLARE, because it could be in an expr
+// special will contain SPECIAL__TOP or SPECIAL__DECLARE
+static int consume_destructuring(int special) {
 #ifdef DEBUG
+  int special_mask = (SPECIAL__TOP | SPECIAL__DECLARE);
+  if ((special | special_mask) != special_mask) {
+    debugf("destrucuring special should only be TOP | DECLARE, was %d", special);
+    return ERROR__INTERNAL;
+  }
   if (cursor->type != TOKEN_BRACE && cursor->type != TOKEN_ARRAY) {
     debugf("destructuring did not start with { or [");
     return ERROR__UNEXPECTED;
@@ -597,7 +659,7 @@ static int consume_definition_destructuring(int special) {
         } else {
           // e.g. "const {x} = ...", x is a symbol, decl and property
           cursor->type = TOKEN_SYMBOL;
-          cursor->special = SPECIAL__BASE | SPECIAL__PROPERTY | SPECIAL__DECLARE | special;
+          cursor->special = SPECIAL__BASE | SPECIAL__PROPERTY | SPECIAL__CHANGE | special;
         }
         cursor_next();
         break;
@@ -606,15 +668,15 @@ static int consume_definition_destructuring(int special) {
       case TOKEN_ARRAY:
         if (start == TOKEN_BRACE) {
           // this is a computed property name
-          _check(consume_expr());
+          _check(consume_expr(0));
           break;
         }
-        _check(consume_definition_destructuring(special));
+        _check(consume_destructuring(special));
         break;
 
       case TOKEN_BRACE:
         // nb. doesn't make sense in object context, but harmless
-        _check(consume_definition_destructuring(special));
+        _check(consume_destructuring(special));
         break;
 
       case TOKEN_OP:
@@ -642,13 +704,13 @@ static int consume_definition_destructuring(int special) {
       switch (cursor->type) {
         case TOKEN_ARRAY:
         case TOKEN_BRACE:
-          _check(consume_definition_destructuring(special));
+          _check(consume_destructuring(special));
           break;
 
         case TOKEN_SYMBOL:  // reentry
         case TOKEN_LIT:
           cursor->type = TOKEN_SYMBOL;
-          cursor->special = SPECIAL__BASE | SPECIAL__DECLARE | special;
+          cursor->special = SPECIAL__BASE | SPECIAL__CHANGE | special;
           cursor_next();
           break;
       }
@@ -657,14 +719,26 @@ static int consume_definition_destructuring(int special) {
     // consume default
     if (cursor->special == MISC_EQUALS) {
       cursor_next();
-      _check(consume_expr());
+      _check(consume_expr(0));
     }
   }
 }
 
+static inline int is_definition_assign_hash(int hash) {
+  // nb. this allows "in" and "of", but technically only valid inside for()
+  switch (hash) {
+    case LIT_IN:
+    case LIT_OF:
+    case MISC_EQUALS:
+      return 1;
+  }
+  return 0;
+}
+
 // consumes a single definition (e.g. `catch (x)` or x in `function(x, y) {}`
-static int consume_definition(int special) {
+static int consume_definition(int special, int is_statement) {
   int is_spread = 0;
+  int is_assign = 0;
 
   // this only applies to functions
   if (cursor->special == MISC_SPREAD) {
@@ -678,12 +752,18 @@ static int consume_definition(int special) {
       // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
       cursor->type = TOKEN_SYMBOL;
       cursor->special = SPECIAL__BASE | SPECIAL__DECLARE | special;
+
+      // look for assignment, incredibly likely, but check anyway
+      blep_token_peek();
+      if (is_definition_assign_hash(peek->special)) {
+        cursor->special |= SPECIAL__CHANGE;
+      }
       cursor_next();
       break;
 
     case TOKEN_BRACE:
     case TOKEN_ARRAY:
-      _check(consume_definition_destructuring(special));
+      _check(consume_destructuring(special | SPECIAL__DECLARE));
       break;
 
     default:
@@ -694,25 +774,19 @@ static int consume_definition(int special) {
       return 0;  // can't consume this
   }
 
-  switch (cursor->special) {
-    case LIT_IN:
-    case LIT_OF:
-      cursor->type = TOKEN_OP;
-      // fall-through
-
-    case MISC_EQUALS:
-      cursor_next();
-      _check(consume_expr());
-      break;
+  if (is_definition_assign_hash(cursor->special)) {
+    cursor->type = TOKEN_OP;
+    cursor_next();
+    _check(consume_expr(is_statement));
   }
 
   return 0;
 }
 
 // consumes a number of comma-separated definitions
-static int consume_definition_list(int special) {
+static int consume_definition_list(int special, int is_statement) {
   for (;;) {
-    _check(consume_definition(special));
+    _check(consume_definition(special, is_statement));
     if (cursor->special != MISC_COMMA) {
       return 0;
     }
@@ -729,7 +803,7 @@ static int consume_definition_group() {
   }
   cursor_next();
 
-  _check(consume_definition_list(0));
+  _check(consume_definition_list(SPECIAL__TOP, 0));
   if (cursor->type != TOKEN_CLOSE) {
     debugf("arg_group did not finish with close");
     return ERROR__UNEXPECTED;
@@ -791,7 +865,7 @@ static int consume_class(int special) {
 
     // nb. something must be here (but if it's not, that's an error, as we expect a '{' following)
     _STACK_BEGIN(STACK__EXPR);
-    _check(consume_expr());
+    _check(consume_expr(0));
     _STACK_END();
   }
 
@@ -804,13 +878,13 @@ static inline int consume_control_group_inner(int control_hash) {
   switch (control_hash) {
     case LIT_CATCH:
       // special-case catch, which creates a local scoped var
-      return consume_definition(0);
+      return consume_definition(0, 0);
 
     case LIT_FOR:
       break;
 
     default:
-      return consume_expr();
+      return consume_expr(0);
   }
 
   if (cursor->type == TOKEN_SEMICOLON) {
@@ -821,16 +895,16 @@ static inline int consume_control_group_inner(int control_hash) {
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
 
-    _check(consume_definition_list(special));
+    _check(consume_definition_list(special, 0));
   } else {
     // TODO: this can consume "x in y", which means we can get "x in y of z", disallowed
-    _check(consume_expr());
+    _check(consume_expr(0));
 
     // "x of y" or "x in y"
     if (cursor->special == LIT_OF || cursor->special == LIT_IN) {
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
-      return consume_expr();
+      return consume_expr(0);
     }
   }
 
@@ -842,9 +916,7 @@ static inline int consume_control_group_inner(int control_hash) {
   cursor_next();
 
   // consume middle block (skip if semicolon)
-  if (cursor->type != TOKEN_SEMICOLON) {
-    _check(consume_expr());
-  }
+  _check(consume_optional_expr(0));
   if (cursor->type != TOKEN_SEMICOLON) {
     debugf("expected 2nd semicolon");
     return ERROR__UNEXPECTED;
@@ -855,7 +927,7 @@ static inline int consume_control_group_inner(int control_hash) {
   if (cursor->type == TOKEN_CLOSE) {
     return 0;
   }
-  return consume_expr();
+  return consume_expr(0);
 }
 
 static int consume_control() {
@@ -919,7 +991,15 @@ static int consume_control() {
 
 static int consume_expr_statement() {
   _STACK_BEGIN(STACK__EXPR);
-  _check(consume_expr_compound());
+
+  for (;;) {
+    _check(consume_expr(1));
+    if (cursor->special != MISC_COMMA) {
+      break;
+    }
+    cursor_next();
+  }
+
   _STACK_END_SEMICOLON();
   return 0;
 }
@@ -999,7 +1079,7 @@ static int consume_statement() {
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
 
-      _check(consume_expr());
+      _check(consume_expr(0));
 
       if (cursor->type != TOKEN_COLON) {
         debugf("no : after case");
@@ -1032,7 +1112,7 @@ static int consume_statement() {
       cursor_next();
 
       if (line_no == cursor->line_no) {
-        _check(consume_expr());
+        _check(consume_expr(1));
       }
 
       _STACK_END_SEMICOLON();
@@ -1086,7 +1166,7 @@ static int consume_statement() {
     int special = cursor->special == LIT_VAR ? SPECIAL__TOP : 0;
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
-    _check(consume_definition_list(special));
+    _check(consume_definition_list(special, 1));
     _STACK_END_SEMICOLON();
     return 0;
   } else if (cursor->special & _MASK_UNARY_OP || !cursor->special) {
