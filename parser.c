@@ -18,7 +18,8 @@ static int consume_expr_group();
 static int consume_definition_group();
 static int consume_function(int);
 static int consume_class(int);
-static int consume_optional_expr();
+static int consume_expr_zero_many(int);
+static int consume_expr_internal(int);
 
 
 static int parser_skip = 0;
@@ -256,8 +257,23 @@ static inline int consume_dict() {
   }
 }
 
+// consume zero or many expressions (which can also be blank), separated by commas
+// may consume literally nothing
+static int consume_expr_zero_many(int is_statement) {
+  for (;;) {
+    _check(consume_expr_internal(is_statement));
+    if (cursor->special != MISC_COMMA) {
+      break;
+    }
+    cursor_next();
+  }
+
+  return 0;
+}
+
 // consumes a boring grouped expr (paren, array, ternary)
 static int consume_expr_group() {
+  int open = cursor->type;
 #ifdef DEBUG
   switch (cursor->type) {
     case TOKEN_PAREN:
@@ -271,21 +287,12 @@ static int consume_expr_group() {
   }
 #endif
   cursor_next();
+  _check(consume_expr_zero_many(0));
 
-  for (;;) {
-    _check(consume_optional_expr(0));
-
-    if (cursor->type == TOKEN_CLOSE) {
-      break;
-    }
-    if (cursor->special != MISC_COMMA) {
-      debugf("expected comma/close for expr group");
-      return ERROR__UNEXPECTED;
-    }
-
-    cursor_next();
+  if (cursor->type != TOKEN_CLOSE) {
+    debugf("expected close for expr group (got %d), open was: %d", cursor->type, open);
+    return ERROR__UNEXPECTED;
   }
-
   cursor_next();  // consuming close
   return 0;
 }
@@ -301,7 +308,7 @@ static int consume_arrowfunc_from_arrow() {
   if (cursor->type == TOKEN_BRACE) {
     return consume_statement();
   } else {
-    return consume_optional_expr(0);  // TODO: if statement we might want to pass this through
+    return consume_expr(0);  // TODO: if statement we might want to pass this through
   }
 }
 
@@ -377,7 +384,7 @@ static int is_token_assign_like(struct token *t) {
 }
 
 // like the other, but counts ()'s
-static int consume_optional_expr(int is_statement) {
+static int consume_expr_internal(int is_statement) {
   int paren_count = 0;
 
 restart_expr:
@@ -411,22 +418,34 @@ restart_expr:
       case TOKEN_LIT:
         cursor->type = TOKEN_SYMBOL;  // this is a symbol _unless_...
 
-        if (cursor->special == LIT_ASYNC) {
-          // we check for arrowfunc at head, so this must be symbol or "async function"
-          blep_token_peek();
-          if (peek->special == LIT_FUNCTION) {
+        switch (cursor->special) {
+          case LIT_ASYNC:
+            // we check for arrowfunc at head, so this must be symbol or "async function"
+            blep_token_peek();
+            if (peek->special == LIT_FUNCTION) {
+              cursor->type = TOKEN_KEYWORD;
+            }
+            break;
+
+          case LIT_FUNCTION:
             cursor->type = TOKEN_KEYWORD;
-            // TODO: where do we look for "async (" or "async name"
-          }
-        } else if (cursor->special == LIT_FUNCTION) {
-          cursor->type = TOKEN_KEYWORD;
-        } else if (cursor->special & (_MASK_UNARY_OP | _MASK_REL_OP)) {
-          cursor->type = TOKEN_OP;
-        } else if (cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
-          _maybe_abandon();
-          cursor->type = TOKEN_KEYWORD;
+            break;
+
+          case LIT_OF:
+            if (value_line && !is_statement) {
+              // this isn't really valid in most exprs
+              cursor->type = TOKEN_OP;
+            }
+            break;
+
+          default:
+            if (cursor->special & (_MASK_UNARY_OP | _MASK_REL_OP)) {
+              cursor->type = TOKEN_OP;
+            } else if (cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
+              _maybe_abandon();
+              cursor->type = TOKEN_KEYWORD;
+            }
         }
-        break;
     }
 
     // 2nd step: process normal stuff
@@ -494,7 +513,7 @@ restart_expr:
           _transition_to_value();
           cursor_next();
         }
-        break;
+        continue;
 
       case TOKEN_SYMBOL:
         _transition_to_value();
@@ -520,6 +539,13 @@ restart_expr:
       default:
         return 0;
     }
+#ifdef DEBUG
+    if (cursor->type != TOKEN_OP) {
+      debugf("non-op fell through");
+      return ERROR__INTERNAL;
+    }
+#endif
+
 
     // 3rd step: handle TOKEN_OP
 
@@ -618,7 +644,7 @@ restart_expr:
 
 static inline int consume_expr(int is_statement) {
   char *start = cursor->p;
-  _check(consume_optional_expr(is_statement));
+  _check(consume_expr_internal(is_statement));
 
   if (start == cursor->p) {
     debugf("could not consume expr, was: %d", cursor->type);
@@ -724,19 +750,8 @@ static int consume_destructuring(int special) {
   }
 }
 
-static inline int is_definition_assign_hash(int hash) {
-  // nb. this allows "in" and "of", but technically only valid inside for()
-  switch (hash) {
-    case LIT_IN:
-    case LIT_OF:
-    case MISC_EQUALS:
-      return 1;
-  }
-  return 0;
-}
-
 // consumes a single definition (e.g. `catch (x)` or x in `function(x, y) {}`
-static int consume_definition(int special, int is_statement) {
+static int consume_optional_definition(int special, int is_statement) {
   int is_spread = 0;
   int is_assign = 0;
 
@@ -755,8 +770,11 @@ static int consume_definition(int special, int is_statement) {
 
       // look for assignment, incredibly likely, but check anyway
       blep_token_peek();
-      if (is_definition_assign_hash(peek->special)) {
-        cursor->special |= SPECIAL__CHANGE;
+      switch (peek->special) {
+        case LIT_IN:
+        case LIT_OF:
+        case MISC_EQUALS:
+          cursor->special |= SPECIAL__CHANGE;
       }
       cursor_next();
       break;
@@ -774,19 +792,23 @@ static int consume_definition(int special, int is_statement) {
       return 0;  // can't consume this
   }
 
-  if (is_definition_assign_hash(cursor->special)) {
-    cursor->type = TOKEN_OP;
+  return 0;
+}
+
+// consumes an optional "= <expr>"
+static int consume_optional_assign_suffix(int is_statement) {
+  if (cursor->special == MISC_EQUALS) {
     cursor_next();
     _check(consume_expr(is_statement));
   }
-
   return 0;
 }
 
 // consumes a number of comma-separated definitions
 static int consume_definition_list(int special, int is_statement) {
   for (;;) {
-    _check(consume_definition(special, is_statement));
+    _check(consume_optional_definition(special, is_statement));
+    _check(consume_optional_assign_suffix(is_statement));
     if (cursor->special != MISC_COMMA) {
       return 0;
     }
@@ -878,45 +900,60 @@ static inline int consume_control_group_inner(int control_hash) {
   switch (control_hash) {
     case LIT_CATCH:
       // special-case catch, which creates a local scoped var
-      return consume_definition(0, 0);
+      return consume_optional_definition(0, 0);
 
     case LIT_FOR:
       break;
 
     default:
-      return consume_expr(0);
+      return consume_expr_zero_many(0);
   }
 
   if (cursor->type == TOKEN_SEMICOLON) {
     // fine, ignore left block
-  } else if (cursor->special & _MASK_DECL) {
-    // started with "var" etc
-    int special = cursor->special == LIT_VAR ? SPECIAL__TOP : 0;
-    cursor->type = TOKEN_KEYWORD;
-    cursor_next();
-
-    _check(consume_definition_list(special, 0));
   } else {
-    // TODO: this can consume "x in y", which means we can get "x in y of z", disallowed
-    _check(consume_expr(0));
-
-    // "x of y" or "x in y"
-    if (cursor->special == LIT_OF || cursor->special == LIT_IN) {
+    if (cursor->special & _MASK_DECL) {
+      // started with "var" etc
+      int special = cursor->special == LIT_VAR ? SPECIAL__TOP : 0;
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
-      return consume_expr(0);
+
+      char *start = cursor->p;
+      _check(consume_optional_definition(special, 0));
+      if (start == cursor->p) {
+        debugf("expected var def after decl");
+        return ERROR__UNEXPECTED;
+      }
+
+      // `for (var x of y)` or `for (var {x,y} of z)`
+      if (cursor->special == LIT_OF || cursor->special == LIT_IN) {
+        cursor->type = TOKEN_KEYWORD;
+        cursor_next();
+        return consume_expr(0);
+      }
+
+      // otherwise, this is a ;; loop and can be a normal decl
+      // step past optional "= 1" and "," then continue more definitions
+      _check(consume_optional_assign_suffix(0));
+      if (cursor->special == MISC_COMMA) {
+        cursor_next();
+        _check(consume_definition_list(special, 0));
+      }
+    } else {
+      // otherwise, this is an expr
+      // ... it allows "is" and "of" to be mapped to keywords
+      _check(consume_expr_zero_many(0));
     }
   }
 
   // after left block, check for semicolon
   if (cursor->type != TOKEN_SEMICOLON) {
-    debugf("expected 1st semicolon");
-    return ERROR__UNEXPECTED;
+    return 0;  // not always valid, but just allow it anyway
   }
   cursor_next();
 
   // consume middle block (skip if semicolon)
-  _check(consume_optional_expr(0));
+  _check(consume_expr_zero_many(0));
   if (cursor->type != TOKEN_SEMICOLON) {
     debugf("expected 2nd semicolon");
     return ERROR__UNEXPECTED;
@@ -927,7 +964,7 @@ static inline int consume_control_group_inner(int control_hash) {
   if (cursor->type == TOKEN_CLOSE) {
     return 0;
   }
-  return consume_expr(0);
+  return consume_expr_zero_many(0);
 }
 
 static int consume_control() {
