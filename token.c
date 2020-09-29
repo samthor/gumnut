@@ -568,7 +568,7 @@ int blep_token_next() {
       debugf("stack err: %c (depth=%d)\n", td->at[0], td->depth);
       return ERROR__STACK;
     }
-    debugf("could not consume: %c (void=%d)\n", td->at[0], td->curr.vp - td->curr.p);
+    debugf("could not consume: %c (void=%ld)\n", td->at[0], td->curr.vp - td->curr.p);
     return ERROR__UNEXPECTED;
   }
 
