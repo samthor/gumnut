@@ -450,6 +450,21 @@ restart_expr:
 
     // 2nd step: process normal stuff
     switch (cursor->type) {
+      case TOKEN_KEYWORD:
+        _transition_to_value();
+
+        switch (cursor->special) {
+          case LIT_ASYNC:
+          case LIT_FUNCTION:
+            _check(consume_function(0));
+            break;
+
+          case LIT_CLASS:
+            _check(consume_class(0));
+            break;
+        }
+        continue;
+
       case TOKEN_TERNARY:
         // nb. needs value on left (and contents!), but nonsensical otherwise
         _check(consume_expr_group());
