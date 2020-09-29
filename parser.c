@@ -77,7 +77,7 @@ inline static int consume_defn_name(int special) {
     // emit empty symbol if a decl (move cursor => peek temporarily)
     if (special && !parser_skip) {
       memcpy(peek, cursor, sizeof(struct token));
-      peek->vlen = 0;
+      peek->vp = peek->p;  // no more void pointer for next token
       cursor->len = 0;
       cursor->special = SPECIAL__BASE | special;
       cursor->type = TOKEN_SYMBOL;

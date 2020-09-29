@@ -40,7 +40,6 @@
 
 struct token {
   char *vp;  // void-pointer (before token)
-  int vlen;  // void-len
   char *p;
   int len;
   int line_no;

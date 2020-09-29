@@ -546,7 +546,6 @@ int blep_token_next() {
     td->peek.p = 0;
   } else {
     int void_len = blepi_consume_void(td->at, &(td->line_no));
-    td->curr.vlen = void_len;
     td->curr.vp = td->at;
     td->at += void_len;
 
@@ -569,7 +568,7 @@ int blep_token_next() {
       debugf("stack err: %c (depth=%d)\n", td->at[0], td->depth);
       return ERROR__STACK;
     }
-    debugf("could not consume: %c (void=%d)\n", td->at[0], td->curr.vlen);
+    debugf("could not consume: %c (void=%d)\n", td->at[0], td->curr.vp - td->curr.p);
     return ERROR__UNEXPECTED;
   }
 
@@ -584,12 +583,12 @@ int blep_token_next() {
 int blep_token_peek() {
 #ifdef DEBUG
   if (td->peek.p) {
-    debugf("can't peek twice: %d", td->peek.type);
-    return ERROR__INTERNAL;
+    // we need to allow this for a few cases
+    debugf("peeked again: %d", td->peek.type);
+    return td->peek.type;
   }
 #endif
   int void_len = blepi_consume_void(td->at, &(td->line_no));
-  td->peek.vlen = void_len;
   td->peek.vp = td->at;
   td->at += void_len;
 
@@ -604,6 +603,25 @@ int blep_token_peek() {
 int blep_token_set_restore() {
   if (td->restore__at) {
     return 0;
+  }
+
+  // clear peek and reset its contribution
+  if (td->peek.p) {
+    switch (td->peek.type) {
+      case TOKEN_CLOSE:
+        ++td->depth;
+        break;
+
+      case TOKEN_BRACE:
+      case TOKEN_ARRAY:
+      case TOKEN_PAREN:
+      case TOKEN_TERNARY:
+        --td->depth;
+        break;
+    }
+
+    td->at = td->peek.vp;  // the cursor has been moved forward
+    td->peek.p = 0;
   }
 
   memcpy(&(td->restore__curr), &(td->curr), sizeof(struct token));
