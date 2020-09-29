@@ -427,6 +427,7 @@ restart_expr:
             }
             break;
 
+          case LIT_CLASS:
           case LIT_FUNCTION:
             cursor->type = TOKEN_KEYWORD;
             break;

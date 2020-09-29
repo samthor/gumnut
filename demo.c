@@ -44,13 +44,40 @@ void blep_parser_callback(struct token *t) {
   if (t->type < 0 || t->type > _TOKEN_MAX) {
     exit(1);
   }
-  printf("%-11s| ", token_names[t->type]);
+
+  char hint = ' ';
+  if (t->special && !(t->special & SPECIAL__BASE)) {
+    hint = '#';
+  }
+
+  printf("%-10s%c| ", token_names[t->type], hint);
 
   for (int i = 0; i < depth; ++i) {
     printf("  ");
   }
 
-  printf("%.*s %d\n", t->len, t->p, t->special);
+  printf("%.*s", t->len, t->p);
+
+  if (t->special) {
+    printf(" ~%d", t->special);
+    if (t->special & SPECIAL__DECLARE) {
+      printf(" declare");
+    }
+    if (t->special & SPECIAL__TOP) {
+      printf(" top");
+    }
+    if (t->special & SPECIAL__PROPERTY) {
+      printf(" property");
+    }
+    if (t->special & SPECIAL__EXTERNAL) {
+      printf(" external");
+    }
+    if (t->special & SPECIAL__EXTERNAL) {
+      printf(" change");
+    }
+  }
+
+  printf("\n");
 }
 
 int blep_parser_stack(int type) {
