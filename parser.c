@@ -1611,9 +1611,10 @@ static int consume_statement() {
   return consume_expr_statement();
 }
 
-void blep_parser_init() {
+int blep_parser_init(char *p, int len) {
+  _check(blep_token_init(p, len));
   blep_token_next();
-  debugf("zero cursor: type=%d", cursor->type);
+  return 0;
 }
 
 int blep_parser_run() {
@@ -1630,4 +1631,8 @@ int blep_parser_run() {
     return ERROR__UNEXPECTED;
   }
   return len;
+}
+
+struct token *blep_parser_cursor() {
+  return cursor;
 }

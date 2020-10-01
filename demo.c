@@ -7,6 +7,7 @@
 #include "../prsr/src/demo/read.c"
 
 static int depth = 0;
+static struct token *t;
 
 static const char *stack_names[] = {
   "null",
@@ -40,7 +41,7 @@ static const char *token_names[] = {
   "label",
 };
 
-void blep_parser_callback(struct token *t) {
+void blep_parser_callback() {
   if (t->type < 0 || t->type > _TOKEN_MAX) {
     exit(1);
   }
@@ -101,12 +102,12 @@ int main() {
     return -1;
   }
 
-  int ret = blep_token_init(buf, len);
+  int ret = blep_parser_init(buf, len);
   if (ret) {
     return ret;
   }
+  t = blep_parser_cursor();
 
-  blep_parser_init();
   for (;;) {
     int ret = blep_parser_run();
     if (ret < 0) {

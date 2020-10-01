@@ -1,12 +1,13 @@
 
 #include "token.h"
 
-void blep_parser_init();
+int blep_parser_init(char *, int);
 int blep_parser_run();
+struct token *blep_parser_cursor();
 
 // below must be provided
 
-void blep_parser_callback(struct token *);
+void blep_parser_callback();
 int blep_parser_stack(int);
 
 #define SPECIAL__DECLARE         2    // let, const, var
