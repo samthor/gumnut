@@ -20,6 +20,8 @@ static int consume_function(int);
 static int consume_class(int);
 static int consume_expr_zero_many(int);
 static int consume_expr_internal(int);
+static int consume_definition_list(int, int);
+static int consume_destructuring(int);
 
 
 static int parser_skip = 0;
@@ -307,9 +309,9 @@ static int consume_arrowfunc_from_arrow() {
 
   if (cursor->type == TOKEN_BRACE) {
     return consume_statement();
-  } else {
-    return consume_expr(0);  // TODO: if statement we might want to pass this through
   }
+  _check(consume_expr(0));  // TODO: if statement we might want to pass this through
+  return 0;
 }
 
 // we assume that we're pointing at one (is_arrowfunc has returned true)
@@ -330,7 +332,6 @@ static int consume_arrowfunc() {
       break;
 
     case TOKEN_PAREN:
-      cursor_next();
       _check(consume_definition_group());
       break;
 
@@ -375,6 +376,100 @@ static int consume_template_string() {
   }
 }
 
+static int maybe_consume_destructuring() {
+  switch (cursor->type) {
+    case TOKEN_ARRAY:
+    case TOKEN_BRACE:
+      break;
+
+    default:
+      return 0;
+  }
+
+  int is_destructuring;
+
+  _SET_RESTORE();
+  // thankfully, destructuring isn't allowed inside parens (e.g. `({x}) = {x}` is invalid), so just
+  // check for equals here.
+  is_destructuring = (consume_destructuring(0) == 0) && cursor->special == MISC_EQUALS;
+  _RESUME_RESTORE();
+
+  debugf("lookahead got destructuring: %d", is_destructuring);
+  if (is_destructuring) {
+    return consume_destructuring(0);
+  }
+  return 0;
+}
+
+// does lookahead to check for `async () =>` or `() =>`
+static int lookahead_is_paren_arrowfunc() {
+  if (cursor->special == LIT_ASYNC) {
+    cursor_next();
+  }
+
+#ifdef DEBUG
+  if (cursor->type != TOKEN_PAREN) {
+    debugf("internal error, lookahead_is_arrowfunc_paren was not paren: %d\n", cursor->type);
+    return ERROR__UNEXPECTED;
+  }
+#endif
+  cursor_next();
+
+  if (consume_definition_list(0, 0)) {
+    return 0;  // error is not arrowfunc
+  }
+
+  if (cursor->type == TOKEN_CLOSE) {
+    cursor_next();
+    if (cursor->special == MISC_ARROW) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int maybe_consume_arrowfunc() {
+  // short-circuits
+  if (cursor->type == TOKEN_LIT) {
+    blep_token_peek();
+    if (peek->special == MISC_ARROW) {
+      return consume_arrowfunc();  // "blah =>" or even "async =>"
+    } else if (cursor->special != LIT_ASYNC) {
+      return 0;
+    } else if (peek->type == TOKEN_LIT) {
+      // if "async function", this is not an arrowfunc: anything else _is_
+      if (peek->special == LIT_FUNCTION) {
+        return 0;
+      }
+      return consume_arrowfunc();  // "async foo"
+    } else if (peek->type != TOKEN_PAREN) {
+      return 0;  // "async ???" ignored, not group OR arrowfunc
+    }
+  } else if (cursor->type != TOKEN_PAREN) {
+    return 0;
+  }
+  // nb. We could look for "()" here, as it's invalid in expr position and is probably followed by
+  // a `=>`. But we allow it anyway and the lookahead in this case is not much.
+
+  if (parser_skip) {
+    return 0;  // treat as group, we don't care about this
+    // TODO: reentry in lookahead might need to
+  }
+
+  int is_arrowfunc = 0;
+
+  _SET_RESTORE();
+  is_arrowfunc = lookahead_is_paren_arrowfunc();
+  _RESUME_RESTORE();
+
+  debugf("lookahead found arrowfunc=%d", is_arrowfunc);
+  if (is_arrowfunc) {
+    return consume_arrowfunc();
+  }
+
+  return 0;
+}
+
 static int is_token_assign_like(struct token *t) {
   if (t->special == MISC_EQUALS) {
     return 1;
@@ -392,7 +487,31 @@ restart_expr:
   int value_line = 0;
   char *start = cursor->p;
 
-  // TODO: at this point we look for () => {} or destructuring, only valid here
+  // lookahead #1: check for arrowfunc at this position
+  _check(maybe_consume_arrowfunc());
+  if (start != cursor->p) {
+    if (paren_count == 0) {
+      // arrowfunc is expr on its own
+      return 0;
+    }
+    if (cursor->type != TOKEN_CLOSE && cursor->special != MISC_COMMA) {
+      debugf("got bad end after wrapped arrowfunc, type=%d special=%d", cursor->type, cursor->special);
+      return ERROR__UNEXPECTED;
+    }
+  } else {
+    // lookahead #2: check for destructuring at this position
+    _check(maybe_consume_destructuring());
+    if (start != cursor->p) {
+      value_line = cursor->line_no;
+    }
+  }
+
+  // TODO: two things are only valid here (at start, after = or ,) but require lookaheads to check
+  //  1. arrow functions are usually unclear, `(a, b, c) => foo` is ambiguous
+  //     ... we start stack and vars need to come into scope
+  //  2. destructuring that starts with [ or {
+  //     ... these vars need to be marked as SPECIAL__CHANGE
+  // TODO: do we check for both? one?
 
 #define _maybe_abandon() { if (is_statement && !paren_count) { return 0; } }
 #define _transition_to_value() { if (value_line) { _maybe_abandon(); } value_line = cursor->line_no; }
@@ -466,6 +585,11 @@ restart_expr:
         }
         continue;
 
+      case TOKEN_ARRAY:
+        value_line = cursor->line_no;  // nb. don't transition, might be array index
+        _check(consume_expr_group());
+        continue;
+
       case TOKEN_BRACE:
         _transition_to_value();
         _check(consume_dict());
@@ -490,7 +614,7 @@ restart_expr:
         // if we see a TOKEN_LIT immediately after us, see if it's actually a paren'ed lvalue
         // (this is incredibly uncommon, don't do this, e.g.: `(x)++`)
         if (cursor->type != TOKEN_LIT || cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD) || blep_token_peek() != TOKEN_CLOSE) {
-          continue;
+          goto restart_expr;
         }
 
         int is_lvalue = 0;
@@ -511,11 +635,6 @@ restart_expr:
         cursor->special = is_lvalue ? SPECIAL__BASE | SPECIAL__CHANGE : 0;
         cursor_next();
         // parens will be caught next loop
-        continue;
-
-      case TOKEN_ARRAY:
-        _check(consume_expr_group());
-        value_line = cursor->line_no;
         continue;
 
       case TOKEN_CLOSE:
@@ -566,7 +685,6 @@ restart_expr:
       return ERROR__INTERNAL;
     }
 #endif
-
 
     // 3rd step: handle TOKEN_OP
 
@@ -712,10 +830,23 @@ static int consume_destructuring(int special) {
         break;
       }
 
+      case TOKEN_STRING:
+        if (cursor->p[0] == '`' && cursor->p[cursor->len - 1] != '`') {
+          // can't have templated string here at all, but allow single
+          return ERROR__UNEXPECTED;
+        }
+        cursor_next();
+
+        if (cursor->type != TOKEN_COLON) {
+          debugf("destructuring had string with no trailing colon");
+          return ERROR__UNEXPECTED;
+        }
+        break;
+
       case TOKEN_ARRAY:
         if (start == TOKEN_BRACE) {
           // this is a computed property name
-          _check(consume_expr(0));
+          _check(consume_expr_group());
           break;
         }
         _check(consume_destructuring(special));
@@ -740,7 +871,7 @@ static int consume_destructuring(int special) {
         // fall-through
 
       default:
-        debugf("got unexpected inside object destructuring");
+        debugf("got unexpected inside object destructuring: type=%d, special=%d", cursor->type, cursor->special);
         return ERROR__UNEXPECTED;
     }
 
@@ -841,7 +972,7 @@ static int consume_definition_list(int special, int is_statement) {
 // used in functions (normal, class, arrow)
 static int consume_definition_group() {
   if (cursor->type != TOKEN_PAREN) {
-    debugf("arg_group didn't start with paren");
+    debugf("definition didn't start with paren, was type=%d special=%d", cursor->type, cursor->special);
     return ERROR__UNEXPECTED;
   }
   cursor_next();
