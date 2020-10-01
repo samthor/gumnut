@@ -12,6 +12,12 @@
 #define debugf (void)sizeof
 #endif
 
+
+#define MODULE_LIST__EXPORT   1
+#define MODULE_LIST__REEXPORT 2
+#define MODULE_LIST__DEEP     4
+
+
 static int consume_statement();
 static int consume_expr(int);
 static int consume_expr_group();
@@ -67,6 +73,17 @@ static inline int cursor_next() {
   }
 
 #define _check(v) { int _ret = v; if (_ret) { return _ret; }};
+
+// consume a single string (permissively allow ``)
+inline static int consume_basic_key_string_special(int special) {
+  if (cursor->p[0] == '`' && cursor->len > 1 && cursor->p[cursor->len - 1] != '`') {
+    // can't have templated string here at all, but allow single
+    return ERROR__UNEXPECTED;
+  }
+  cursor->special = special ? SPECIAL__BASE | special : 0;
+  cursor_next();
+  return 0;
+}
 
 // consume a name of a function/class etc, needed as sometimes it's _just_ a name, not a decl
 inline static int consume_defn_name(int special) {
@@ -186,11 +203,7 @@ static inline int consume_dict() {
         break;
 
       case TOKEN_STRING:
-        if (cursor->p[0] == '`' && cursor->p[cursor->len - 1] != '`') {
-          // can't have templated string here at all, but allow single
-          return ERROR__UNEXPECTED;
-        }
-        cursor_next();
+        _check(consume_basic_key_string_special(0));
         break;
 
       case TOKEN_ARRAY:
@@ -453,7 +466,6 @@ static int maybe_consume_arrowfunc() {
 
   if (parser_skip) {
     return 0;  // treat as group, we don't care about this
-    // TODO: reentry in lookahead might need to
   }
 
   int is_arrowfunc = 0;
@@ -505,13 +517,6 @@ restart_expr:
       value_line = cursor->line_no;
     }
   }
-
-  // TODO: two things are only valid here (at start, after = or ,) but require lookaheads to check
-  //  1. arrow functions are usually unclear, `(a, b, c) => foo` is ambiguous
-  //     ... we start stack and vars need to come into scope
-  //  2. destructuring that starts with [ or {
-  //     ... these vars need to be marked as SPECIAL__CHANGE
-  // TODO: do we check for both? one?
 
 #define _maybe_abandon() { if (is_statement && !paren_count) { return 0; } }
 #define _transition_to_value() { if (value_line) { _maybe_abandon(); } value_line = cursor->line_no; }
@@ -831,11 +836,7 @@ static int consume_destructuring(int special) {
       }
 
       case TOKEN_STRING:
-        if (cursor->p[0] == '`' && cursor->p[cursor->len - 1] != '`') {
-          // can't have templated string here at all, but allow single
-          return ERROR__UNEXPECTED;
-        }
-        cursor_next();
+        _check(consume_basic_key_string_special(0));
 
         if (cursor->type != TOKEN_COLON) {
           debugf("destructuring had string with no trailing colon");
@@ -1046,6 +1047,228 @@ static int consume_class(int special) {
   _check(consume_dict());
   _STACK_END();
   return 0;
+}
+
+static int consume_module_list(int flags) {
+  for (;;) {
+    // check for inner brace
+    if (cursor->type == TOKEN_BRACE) {
+      if (flags & MODULE_LIST__DEEP) {
+        debugf("only one layer of braces allowed in module list\n");
+        return ERROR__UNEXPECTED;
+      }
+      cursor_next();
+      _check(consume_module_list(flags | MODULE_LIST__DEEP));
+      if (cursor->type != TOKEN_CLOSE) {
+        debugf("missing close after module list\n");
+        return ERROR__UNEXPECTED;
+      }
+      cursor_next();
+
+      if (cursor->special != MISC_COMMA) {
+        return 0;
+      }
+      cursor_next();
+      continue;
+    }
+
+    switch (cursor->type) {
+      case TOKEN_OP:
+        if (flags & MODULE_LIST__DEEP) {
+          debugf("can't have * inside {}'s of module");
+          return ERROR__UNEXPECTED;
+        }
+
+        // check for "*" start
+        if (cursor->special != MISC_STAR) {
+          return 0;
+        }
+        cursor_next();
+        // nb. we MUST be followed by "as x", but don't bother checking here
+        break;
+
+      case TOKEN_SYMBOL:  // reentry
+      case TOKEN_LIT:
+        // check for random lit followed by "as x"
+        // nb. this can be "as" or "from", this is gross
+        blep_token_peek();
+        if (peek->special == LIT_AS) {
+          // this isn't a definition, but it's a property of the thing being imported
+
+          if ((flags & (MODULE_LIST__EXPORT | MODULE_LIST__REEXPORT)) == MODULE_LIST__EXPORT) {
+            // foo=symbol, bar=external
+            cursor->special = 0;
+            cursor->type = TOKEN_SYMBOL;
+          } else {
+            // foo=external, bar=?
+            cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL;
+            cursor->type = TOKEN_LIT;  // reset in case
+          }
+          cursor_next();
+
+        } else {
+          // we found "foo" on its own
+          if (flags & MODULE_LIST__REEXPORT) {
+            // reexport, not a symbol here
+            cursor->type = TOKEN_LIT;
+            cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL;
+          } else if (flags & MODULE_LIST__EXPORT) {
+            // symbol (not decl) being exported
+            // nb. technically modules can't export globals, but eh
+            cursor->type = TOKEN_SYMBOL;
+            cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL;
+          } else {
+            // declares new value being imported from elsewhere
+            cursor->type = TOKEN_SYMBOL;
+            if (flags & MODULE_LIST__DEEP) {
+              // inside e.g. "{foo}", so foo is the var from elsewhere
+              cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL | SPECIAL__DECLARE | SPECIAL__TOP;
+            } else {
+              // this _isn't_ external as it fundamentally points to "default"
+              cursor->special = SPECIAL__BASE | SPECIAL__DECLARE | SPECIAL__TOP;
+            }
+          }
+          cursor_next();
+        }
+        break;
+
+      default:
+        return 0;
+    }
+
+    // catch optional "as x" (this is here as we can be "* as x" or "foo as x")
+    if (cursor->special == LIT_AS) {
+      cursor->type = TOKEN_KEYWORD;
+      cursor_next();
+
+      if (cursor->type != TOKEN_LIT && cursor->type != TOKEN_SYMBOL) {
+        debugf("missing literal after 'as'\n");
+        return ERROR__UNEXPECTED;
+      }
+
+      if (flags & MODULE_LIST__EXPORT) {
+        cursor->type = TOKEN_LIT;
+        cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL;
+      } else {
+        cursor->type = TOKEN_SYMBOL;
+        cursor->special = SPECIAL__BASE | SPECIAL__DECLARE | SPECIAL__TOP;
+      }
+      cursor_next();
+    }
+
+    if (cursor->special != MISC_COMMA) {
+      return 0;
+    }
+    cursor_next();
+  }
+}
+
+static int consume_import() {
+#ifdef DEBUG
+  if (cursor->special != LIT_IMPORT) {
+    debugf("missing import keyword\n");
+    return ERROR__UNEXPECTED;
+  }
+#endif
+  cursor->type = TOKEN_KEYWORD;
+  cursor_next();
+
+  if (cursor->type != TOKEN_STRING) {
+    _check(consume_module_list(0));
+
+    // consume "from"
+    if (cursor->special != LIT_FROM) {
+      debugf("missing from keyword\n");
+      return ERROR__UNEXPECTED;
+    }
+    cursor->type = TOKEN_KEYWORD;
+    cursor_next();
+  }
+
+  // match string (but not if `${}`).
+  return consume_basic_key_string_special(SPECIAL__EXTERNAL);
+}
+
+static int consume_export() {
+#ifdef DEBUG
+  if (cursor->special != LIT_EXPORT) {
+    debugf("missing export keyword\n");
+    return ERROR__UNEXPECTED;
+  }
+#endif
+  cursor->type = TOKEN_KEYWORD;
+
+  blep_token_peek();
+  int is_default = (peek->special == LIT_DEFAULT);
+  if (is_default) {
+    cursor_next();  // move over "export"
+    cursor->type = TOKEN_KEYWORD;
+    blep_token_peek();
+  }
+
+  switch (peek->special) {
+    case LIT_ASYNC:
+      if (is_default) {
+        cursor_next();  // move over "default"
+        blep_token_peek();
+        if (peek->special != LIT_FUNCTION) {
+          return consume_expr(1);  // e.g. "async("
+        }
+        return consume_statement();  // "async function" as statement
+      }
+      // fall-through
+    case LIT_FUNCTION:
+    case LIT_CLASS:
+      cursor_next();  // move to statement start
+
+      if (cursor->special == LIT_ASYNC) {
+        blep_token_peek();
+        if (peek->special != LIT_FUNCTION) {
+          debugf("can't consume arrowfunc expr as non-default export");
+          return ERROR__UNEXPECTED;
+        }
+      }
+
+      return consume_statement();
+  }
+
+  if (is_default) {
+    cursor_next();  // move over "default"
+    return consume_expr(1);  // MUST be expr
+  } else if (peek->special & _MASK_DECL) {
+    cursor_next();  // move to statement start
+    return consume_statement();
+  }
+
+  // otherwise, we expect a * or {, and need to check for reexport
+  if (peek->special != MISC_STAR && peek->type != TOKEN_BRACE) {
+    debugf("expected `export` followed by star, brace or others");
+    return ERROR__UNEXPECTED;
+  }
+
+  int is_reexport = 0;
+
+  _SET_RESTORE();
+  cursor_next();  // move to star/brace
+  _check(consume_module_list(MODULE_LIST__EXPORT));
+  is_reexport = (cursor->special == LIT_FROM);
+  _RESUME_RESTORE();
+
+  // TODO: special is now overloaded hash/special, can't apply is_rexport?
+  cursor_next();  // move to star/brace
+  int flags = MODULE_LIST__EXPORT | (is_reexport ? MODULE_LIST__REEXPORT : 0);
+  _check(consume_module_list(flags));
+
+  if (!is_reexport) {
+    return 0;
+  }
+  if (cursor->special != LIT_FROM) {
+    debugf("could not find FROM again");
+    return ERROR__INTERNAL;
+  }
+  cursor->type = TOKEN_KEYWORD;
+  cursor_next();
+  return consume_basic_key_string_special(SPECIAL__EXTERNAL);
 }
 
 static inline int consume_control_group_inner(int control_hash) {
@@ -1335,8 +1558,21 @@ static int consume_statement() {
       return 0;
 
     case LIT_IMPORT:
+      // if this is "import(" or "import.", treat as expr
+      blep_token_peek();
+      if (peek->type == TOKEN_PAREN || peek->special == MISC_DOT) {
+        return consume_expr_statement();
+      }
+      _STACK_BEGIN(STACK__MODULE);
+      _check(consume_import());
+      _STACK_END_SEMICOLON();
+      return 0;
+
     case LIT_EXPORT:
-      return ERROR__TODO;
+      _STACK_BEGIN(STACK__MODULE);
+      _check(consume_export());
+      _STACK_END_SEMICOLON();
+      return 0;
   }
 
   if (!(cursor->special & _MASK_MASQUERADE)) {
