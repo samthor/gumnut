@@ -32,6 +32,7 @@ int blep_token_init(char *p, int len) {
 
   // sanity-check td->end is NULL
   if (len < 0 || td->end[0]) {
+    debugf("got bad td->end");
     return ERROR__UNEXPECTED;
   }
 
@@ -44,6 +45,7 @@ int blep_token_init(char *p, int len) {
 static inline int blepi_consume_slash_regexp(char *p) {
 #ifdef DEBUG
   if (p[0] != '/') {
+    debugf("failed to consume slash_regexp, no slash");
     return 0;
   }
 #endif
@@ -107,6 +109,7 @@ static inline int blepi_maybe_consume_alnum_group(char *p) {
 static inline int blepi_consume_basic_string(char *p, int *line_no) {
 #ifdef DEBUG
   if (p[0] != '\'' && p[0] != '"') {
+    debugf("got bad string starter");
     return 0;
   }
 #endif
@@ -147,6 +150,7 @@ static inline int blepi_consume_template(char *p, int *line_no) {
   // p[0] will be ` or }
 #ifdef DEBUG
   if (p[0] != '`' && p[0] != '}') {
+    debugf("consume_template got bad starter");
     return 0;
   }
 #endif
@@ -243,6 +247,7 @@ static inline int blepi_consume_void(char *p, int *line_no) {
 static inline int blepi_consume_number(char *p) {
 #ifdef DEBUG
   if (!(isdigit(p[0]) || (p[0] == '.' && isdigit(p[1])))) {
+    debugf("consume_number got bad digit");
     return 0;
   }
 #endif
@@ -488,6 +493,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
     default:
 #ifdef DEBUG
       if (op <= 0 || op > _TOKEN_MAX) {
+        debugf("got invalid OP, returning EOF");
         _ret(0, TOKEN_EOF);
       }
 #endif
@@ -537,6 +543,7 @@ int blep_token_update(int type) {
     return 0;
   }
 
+  debugf("got bad blep_token_update");
   return ERROR__INTERNAL;
 }
 
@@ -581,13 +588,11 @@ int blep_token_next() {
 }
 
 int blep_token_peek() {
-#ifdef DEBUG
   if (td->peek.p) {
-    // we need to allow this for a few cases
-    debugf("peeked again: %d", td->peek.type);
+    // we need to allow duplicate peeks for a few cases
     return td->peek.type;
   }
-#endif
+
   int void_len = blepi_consume_void(td->at, &(td->line_no));
   td->peek.vp = td->at;
   td->at += void_len;
