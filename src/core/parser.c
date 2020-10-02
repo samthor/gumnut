@@ -1614,13 +1614,13 @@ static int consume_statement() {
 
     case LIT_FUNCTION:
       _STACK_BEGIN(STACK__DECLARE);
-      _check(consume_function(SPECIAL__DECLARE | SPECIAL__TOP));
+      _check(consume_function(SPECIAL__DECLARE | SPECIAL__TOP | SPECIAL__CHANGE));
       _STACK_END();
       return 0;
 
     case LIT_CLASS:
       _STACK_BEGIN(STACK__DECLARE);
-      _check(consume_class(SPECIAL__DECLARE));
+      _check(consume_class(SPECIAL__DECLARE | SPECIAL__CHANGE));
       _STACK_END();
       return 0;
 
