@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script type="module">
+
+import build, * as harness from './harness.js';
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function reverseDict(dict) {
+  const m = new Map();
+  Object.keys(dict).forEach((key) => {
+    m.set(dict[key], key.toLowerCase());
+  });
+  return (number) => m.get(number) || null;
+};
+
+const runnerPromise = build(WebAssembly.compileStreaming(window.fetch('runner.wasm')));
+
+const TOKEN_LOOKUP = reverseDict(harness.types);
+const SPECIAL_LOOKUP = reverseDict(harness.specials);
+
+
+window.addEventListener('load', (ev) => {
+  const append = (text, type='') => {
+    const node = document.createElement('span');
+    node.textContent = String(text).replace(/\n*$/, '');
+    if (type[0] !== '_') {
+      node.title = type.toLowerCase();
+    }
+    node.className = type.toLowerCase();
+    node.title = type;
+
+    if (output.lastChild && output.lastChild.localName !== 'aside') {
+      output.appendChild(document.createTextNode(' '));
+    }
+    output.appendChild(node);
+    return node;
+  };
+  const appendLine = () => {
+    if (output.childNodes.length && output.lastChild.textContent !=='\n') {
+      output.appendChild(document.createTextNode('\n'));
+    }
+  };
+
+  const render = (tokens, view) => {
+    let lineNo = 0;
+    output.textContent = '';
+    tokens.forEach((token) => {
+      while (token.lineNo > lineNo) {
+        const node = document.createElement('aside');
+        node.dataset.line = ++lineNo;
+        if (token.lineNo !== lineNo) {
+          node.classList.add('__skip');
+        }
+        output.append('\n', node);
+      }
+
+      const node = append(token.s, TOKEN_LOOKUP(token.type));
+
+      let special = token.special;
+      for (let check = 1; special; check <<= 1) {
+        if (special & check) {
+          const mark = SPECIAL_LOOKUP(check);
+          if (mark) {
+            node.classList.add('_' + mark);
+          }
+          special &= ~(check);
+        }
+      }
+
+      node.tabIndex = 0;
+    });
+
+    // take largest lineNo length and set as var
+    const len = `${lineNo}`.length;
+    if (output.style.setProperty) {
+      output.style.setProperty('--line-no-width', `${len}ch`);
+    }
+  };
+
+  runnerPromise.then(({prepare, run, token}) => {
+    const update = () => {
+      const bytes = encoder.encode(input.value);
+      const tokens = [];
+
+      const start = performance.now();
+
+      let err = null;
+      try {
+        const buffer = prepare(bytes.length);
+        buffer.set(bytes);
+        run((special) => {
+          const t = {
+            lineNo: token.lineNo(),
+            type: token.type(),
+            s: token.string(),
+            special,
+          };
+          tokens.push(t);
+        });
+      } catch (e) {
+        err = e;
+      }
+
+      const took = performance.now() - start;
+      stats.textContent = `${took.toLocaleString({minimumSignificantDigits: 8})}ms`;
+
+      const renderStart = performance.now();
+      render(tokens, bytes);
+      const renderTook = performance.now() - start;
+      stats.append(`\n${renderTook.toLocaleString({minimumSignificantDigits: 8})}ms render`);
+
+      if (err) {
+        stats.append(`\n${err}`);
+      }
+    };
+
+    let rAF;
+    const dedup = () => {
+      window.cancelAnimationFrame(rAF);
+      rAF = window.requestAnimationFrame(() => {
+        let v = null;
+        if (input.value.length <= 4096) {
+          // just give up if it's too large
+          v = window.encodeURIComponent(input.value);
+        }
+        if (v) {
+          window.history.replaceState(null, null, '#' + v);
+        } else {
+          window.history.replaceState(null, null, window.location.pathname);
+        }
+        update();
+      });
+    };
+    input.oninput = dedup;
+    dedup();
+  });
+});
+
+document.addEventListener('dragover', (ev) => {
+  ev.preventDefault();
+});
+document.addEventListener('drop', (ev) => {
+  ev.preventDefault();
+  const file = ev.dataTransfer.files[0];
+
+  if (!file) { return; }
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    input.value = ev.target.result;
+    input.dispatchEvent(new CustomEvent('input'));
+  };
+  reader.readAsText(file);
+});
+
+</script>
+<style>
+  textarea {
+    font-family: monospace;
+    resize: none;
+  }
+  pre {
+    cursor: pointer;
+  }
+  pre aside {
+    /* used as line numbers */
+    display: inline;
+    background: purple;
+    color: white;
+    margin-right: 1ch;
+  }
+  pre aside.__skip {
+    background: #777;
+    color: transparent;
+  }
+  pre aside::before {
+    content: attr(data-line);
+    display: inline-block;
+    min-width: var(--line-no-width, 1ch);
+    text-align: right;
+  }
+  pre span._virt {
+    background: green;
+    color: white;
+  }
+  pre span.comment {
+    color: green;
+  }
+  pre span.keyword {
+    color: purple;
+    font-weight: bold;
+  }
+  pre span.number,
+  pre span.string,
+  pre span.regexp {
+    color: red;
+  }
+  pre span.op {
+    color: purple;
+  }
+  pre span.label {
+    color: brown;
+  }
+  pre span.symbol {
+    color: blue;
+  }
+  pre span._property {
+    font-style: italic;
+  }
+  pre span._external {
+    background: #ccc !important;
+    font-style: italic;
+  }
+  pre span._declare {
+    text-decoration: underline;
+    text-decoration-skip-ink: none;
+    text-decoration-color: black;
+  }
+  pre span._top {
+    text-decoration-color: red;
+  }
+  pre span._default_hoist {
+    background: pink;
+  }
+  pre span._module_path {
+    background: blue;
+    color: white;
+  }
+  #stats {
+    white-space: pre;
+  }
+</style>
+</head>
+<body>
+
+<div>
+  <a href="https://github.com/samthor/blep">GitHub</a>
+</div>
+
+<textarea id="input" rows="20" cols="100"></textarea>
+<script>
+window.addEventListener('hashchange', (ev) => {
+  input.value = window.decodeURIComponent(window.location.hash.substr(1));
+});
+window.dispatchEvent(new CustomEvent('hashchange'));
+</script>
+
+<pre id="stats"></pre>
+<pre id="output"></pre>
+
+</body>
+</html>
