@@ -1049,8 +1049,10 @@ static int consume_function(int special) {
   _check(consume_defn_name(special));
   debugf("function, generator=%d async=%d", is_generator, is_async);
 
+  _STACK_BEGIN(STACK__INNER);
   _check(consume_definition_group());
   _check(consume_statement());
+  _STACK_END();
 
   _STACK_END();
   return 0;
@@ -1080,7 +1082,10 @@ static int consume_class(int special) {
     _STACK_END();
   }
 
+  _STACK_BEGIN(STACK__INNER);
   _check(consume_dict());
+  _STACK_END();
+
   _STACK_END();
   return 0;
 }

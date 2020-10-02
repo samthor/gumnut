@@ -23,6 +23,7 @@ static const char *stack_names[] = {
   "label",
   "module",
   "external",
+  "inner",
 };
 
 static const char *token_names[] = {
