@@ -587,11 +587,6 @@ int blep_token_next() {
   }
 
   return td->curr.type;
-
-  // TODO:
-  // - resolve / ambig by using most likely sane choice, allow later slow-case fix
-  // - for lookahead cases, we hope to answer in BUFFER_SIZE tokens; otherwise, we have to bump
-  //   a specific token into the future (even though we can't use its result as part of the cache)
 }
 
 int blep_token_peek() {
