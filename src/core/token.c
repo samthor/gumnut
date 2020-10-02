@@ -1,4 +1,5 @@
 
+#include <string.h>
 #include <strings.h>
 #include <ctype.h>
 #include "token.h"
@@ -11,6 +12,9 @@
 tokendef _td;
 #endif
 
+#ifndef NULL
+#define NULL 0
+#endif
 
 #ifdef DEBUG
 #include <stdio.h>
@@ -33,8 +37,6 @@ int blep_token_init(char *p, int len) {
     debugf("got bad td->end");
     return ERROR__UNEXPECTED;
   }
-
-  // TODO: consume initial #! comment?
 
   return 0;
 }
@@ -76,7 +78,7 @@ static inline int blepi_consume_slash_regexp(char *p) {
         continue;
 
       case '\\':
-        if (p[1] == '/' || p[1] == '[') {
+        if (p[1] == '/' || p[1] == '[' || p[1] == '\\') {
           ++p;  // we can only escape these
         }
         continue;
@@ -217,7 +219,8 @@ static inline int blepi_consume_void(char *p, int *line_no) {
           break;
         }
 
-        // consuming multline
+        // consuming multiline
+        // nb. this can't use memchr because it's looking for both * and \n
         p += 2;
         do {
           char c = *p;
@@ -564,7 +567,7 @@ int blep_token_next() {
 
     // save as we can't yet write p/line_no to `td->curr`
     char *p = td->at;
-    char line_no = td->line_no;
+    int line_no = td->line_no;
 
     blepi_consume_token(&(td->curr), td->at, &(td->line_no));
     td->at += td->curr.len;

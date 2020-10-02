@@ -4,6 +4,13 @@
 #include "token.h"
 #include <string.h>
 
+#ifdef EMSCRIPTEN
+#include <emscripten.h>
+#else
+#define EMSCRIPTEN_KEEPALIVE
+#endif
+
+
 
 #ifdef DEBUG
 #include <stdio.h>
@@ -401,7 +408,7 @@ static int maybe_consume_destructuring() {
       return 0;
   }
 
-  int is_destructuring;
+  int is_destructuring = 0;
 
   _SET_RESTORE();
   // thankfully, destructuring isn't allowed inside parens (e.g. `({x}) = {x}` is invalid), so just
@@ -720,6 +727,14 @@ restart_expr:
     }
 
     switch (cursor->special) {
+      case MISC_ARROW:
+        // this only happens for badly attached arrows or in skip mode
+        cursor_next();
+        if (cursor->type == TOKEN_BRACE) {
+          _check(consume_statement());
+        }
+        goto restart_expr;
+
       case MISC_COMMA:
         if (paren_count) {
           cursor_next();
@@ -1496,7 +1511,7 @@ static int consume_expr_statement() {
   char *start = cursor->p;
   _check(consume_expr_zero_many(1));
   if (start == cursor->p) {
-    debugf("could not consume any expr statement");
+    debugf("could not consume any expr statement, token=%d %.*s", cursor->type, cursor->len, cursor->p);
     return ERROR__UNEXPECTED;
   }
 
@@ -1706,11 +1721,12 @@ static int consume_statement() {
   return consume_expr_statement();
 }
 
+EMSCRIPTEN_KEEPALIVE
 int blep_parser_init(char *p, int len) {
   _check(blep_token_init(p, len));
 
   if (p[0] == '#' && p[1] == '!') {
-    td->at = strchr(p, '\n');
+    td->at = memchr(p, '\n', td->end - p);
     if (td->at == NULL) {
       td->at = p + len;
     }
@@ -1722,6 +1738,7 @@ int blep_parser_init(char *p, int len) {
   return 0;
 }
 
+EMSCRIPTEN_KEEPALIVE
 int blep_parser_run() {
   if (cursor->type == TOKEN_EOF) {
     return 0;
@@ -1738,6 +1755,7 @@ int blep_parser_run() {
   return len;
 }
 
+EMSCRIPTEN_KEEPALIVE
 struct token *blep_parser_cursor() {
   return cursor;
 }

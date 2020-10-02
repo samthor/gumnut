@@ -32,8 +32,8 @@
 #define SPECIAL__DECLARE         2    // let, const, var
 #define SPECIAL__TOP             4    // for "var" or var-like only (top-level)
 #define SPECIAL__PROPERTY        8
-#define SPECIAL__EXTERNAL        16   // is an external reference (import/export)
-#define SPECIAL__CHANGE          32   // underlying symbol is being changed
+#define SPECIAL__CHANGE          16   // underlying symbol is being changed
+#define SPECIAL__EXTERNAL        32   // is an external reference (import/export)
 #define SPECIAL__LIT             (1 << 30)
 
 
