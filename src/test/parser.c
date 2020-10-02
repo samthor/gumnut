@@ -132,6 +132,11 @@ int main() {
     TOKEN_SYMBOL,    // foo
   );
 
+  _test("single comment", "blah // HELLO\n1",
+    TOKEN_SYMBOL,    // x
+    TOKEN_NUMBER,    // 1
+  );
+
   _test("simple", "var x = 1;",
     TOKEN_KEYWORD,    // var
     TOKEN_SYMBOL,    // x
