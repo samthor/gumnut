@@ -94,7 +94,7 @@ static char lookup_op[256] = {
   _LOOKUP__SYMBOL,  // 35, #
   _LOOKUP__SYMBOL,  // 36, $
   _LOOKUP__OP_1,  // 37, %
-  _LOOKUP__OP_1,  // 38, &
+  _LOOKUP__OP_2,  // 38, &
   _LOOKUP__STRING,  // 39, '
   TOKEN_PAREN,  // 40, (
   TOKEN_CLOSE,  // 41, )
@@ -187,7 +187,7 @@ static char lookup_op[256] = {
   _LOOKUP__SYMBOL,  // 122, z
 
   TOKEN_BRACE,  // 123, {
-  _LOOKUP__OP_1,  // 124, |
+  _LOOKUP__OP_2,  // 124, |
   TOKEN_CLOSE,  // 125, }
 
   _LOOKUP__OP_1,  // 126, ~

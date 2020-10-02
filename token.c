@@ -344,6 +344,9 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
         case '.':
           _reth(2, TOKEN_OP, MISC_CHAIN);  // "?." operator
         case '?':
+          if (p[2] == '=') {
+            _ret(3, TOKEN_OP);
+          }
           _ret(2, TOKEN_OP);
       }
       _inc_stack(TOKEN_TERNARY);
@@ -651,6 +654,7 @@ int blep_token_restore() {
   td->at = td->restore__at;
   td->depth = td->restore__depth;
 
+  td->restore__depth = 0;
   td->restore__at = NULL;
   td->peek.p = NULL;
 
