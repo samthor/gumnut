@@ -3,7 +3,7 @@
 #include <ctype.h>
 #include "token.h"
 
-#include "../prsr/src/tokens/helper.c"
+#include "../tokens/helper.c"
 
 #include "token-tables.h"
 

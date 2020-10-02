@@ -1,6 +1,6 @@
 
 #include "parser.h"
-#include "lit.h"
+#include "../tokens/lit.h"
 #include "token.h"
 #include <string.h>
 

@@ -1,10 +1,10 @@
-#include "token.h"
-#include "parser.h"
+#include "../core/token.h"
+#include "../core/parser.h"
 #include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../prsr/src/demo/read.c"
+#include "read.c"
 
 static int depth = 0;
 static struct token *t;
