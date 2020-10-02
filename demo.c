@@ -97,8 +97,6 @@ int blep_parser_stack(int type) {
 }
 
 int main() {
-  fprintf(stderr, "sizeof(tokendef)=%lu\n", sizeof(tokendef));
-
   char *buf;
   int len = read_stdin(&buf);
   if (len < 0) {
@@ -110,6 +108,7 @@ int main() {
     return ret;
   }
   t = blep_parser_cursor();
+  fprintf(stderr, "sizeof(tokendef)=%lu sizeof(struct token)=%lu (%p)\n", sizeof(tokendef), sizeof(struct token), t);
 
   for (;;) {
     int ret = blep_parser_run();
