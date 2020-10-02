@@ -1,82 +1,79 @@
-// Generated on Fri Oct 02 2020 13:06:09 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Fri Oct 02 2020 13:24:40 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
 
 #define _MASK_KEYWORD          1
-#define _MASK_STRICT_KEYWORD   2
-#define _MASK_REL_OP           4
-#define _MASK_UNARY_OP         8
-#define _MASK_MASQUERADE       16
-#define _MASK_VARIABLE         32
-#define _MASK_DECL             64
-#define _MASK_CONTROL          128
-#define _MASK_CONTROL_PAREN    256
-#define _MASK_CONTROL_BRACE    512
+#define _MASK_REL_OP           2
+#define _MASK_UNARY_OP         4
+#define _MASK_MASQUERADE       8
+#define _MASK_VARIABLE         16
+#define _MASK_DECL             32
+#define _MASK_CONTROL          64
 
-#define LIT_AS           389816320
-#define LIT_ASYNC        792469504
-#define LIT_AWAIT        796663819
-#define LIT_BREAK        791429123
-#define LIT_CASE         639393811
-#define LIT_CATCH        773612419
-#define LIT_CLASS        785145859
-#define LIT_CONST        788291651
-#define LIT_CONTINUE     1190944771
-#define LIT_DEBUGGER     1180467203
-#define LIT_DEFAULT      1046249491
-#define LIT_DELETE       912031753
-#define LIT_DO           385646723
-#define LIT_ELSE         650944643
-#define LIT_ENUM         653041667
-#define LIT_EXPORT       931962883
-#define LIT_EXTENDS      1066180611
-#define LIT_FALSE        773636144
-#define LIT_FINALLY      1050460803
-#define LIT_FOR          519881091
-#define LIT_FROM         657244160
-#define LIT_FUNCTION     1197260803
-#define LIT_GET          509403136
-#define LIT_IF           376250755
-#define LIT_IMPLEMENTS   1457332226
-#define LIT_IMPORT       920461360
-#define LIT_IN           384638981
-#define LIT_INSTANCEOF   1458380805
-#define LIT_INTERFACE    1324163074
-#define LIT_LET          509444162
-#define LIT_NEW          509460489
-#define LIT_NULL         660455472
-#define LIT_OF           376299520
-#define LIT_PACKAGE      1042153474
-#define LIT_PRIVATE      1059979266
-#define LIT_PROTECTED    1328414722
-#define LIT_PUBLIC       928907266
-#define LIT_RETURN       912146435
-#define LIT_SET          509501440
-#define LIT_STATIC       927883267
-#define LIT_SUPER        794714160
-#define LIT_SWITCH       931029891
-#define LIT_THIS         646873136
-#define LIT_THROW        781090819
-#define LIT_TRUE         657358896
-#define LIT_TRY          523141763
-#define LIT_TYPEOF       933134345
-#define LIT_UNDEFINED    1324261408
-#define LIT_VAR          505331779
-#define LIT_VOID         654229513
-#define LIT_WHILE        781115779
-#define LIT_WITH         647946627
-#define LIT_YIELD        782180363
+#define LIT_AS           1085506560
+#define LIT_ASYNC        1098089472
+#define LIT_AWAIT        1098351621
+#define LIT_BREAK        1098024961
+#define LIT_CASE         1092717577
+#define LIT_CATCH        1096911937
+#define LIT_CLASS        1097632769
+#define LIT_CONST        1097829409
+#define LIT_CONTINUE     1110412289
+#define LIT_DEBUGGER     1109757953
+#define LIT_DEFAULT      1105563657
+#define LIT_DELETE       1101369349
+#define LIT_DO           1085247553
+#define LIT_ELSE         1093440577
+#define LIT_ENUM         1093571585
+#define LIT_EXPORT       1102615553
+#define LIT_EXTENDS      1106809857
+#define LIT_FALSE        1096914968
+#define LIT_FINALLY      1105827905
+#define LIT_FOR          1089443905
+#define LIT_FROM         1093834752
+#define LIT_FUNCTION     1110808577
+#define LIT_GET          1088789504
+#define LIT_IF           1084662849
+#define LIT_IMPLEMENTS   1118675969
+#define LIT_IMPORT       1101898776
+#define LIT_IN           1085187075
+#define LIT_INSTANCEOF   1118741507
+#define LIT_INTERFACE    1114547201
+#define LIT_LET          1088794657
+#define LIT_NEW          1088796677
+#define LIT_NULL         1094039576
+#define LIT_OF           1084668928
+#define LIT_PACKAGE      1105313793
+#define LIT_PRIVATE      1106427905
+#define LIT_PROTECTED    1114816513
+#define LIT_PUBLIC       1102430209
+#define LIT_RETURN       1101383681
+#define LIT_SET          1088801792
+#define LIT_STATIC       1102367745
+#define LIT_SUPER        1098239000
+#define LIT_SWITCH       1102564417
+#define LIT_THIS         1093193752
+#define LIT_THROW        1097388033
+#define LIT_TRUE         1093849112
+#define LIT_TRY          1089654849
+#define LIT_TYPEOF       1102696453
+#define LIT_UNDEFINED    1114559504
+#define LIT_VAR          1088542753
+#define LIT_VOID         1093654533
+#define LIT_WHILE        1097391169
+#define LIT_WITH         1093262401
+#define LIT_YIELD        1097458693
 
-#define MISC_ARROW       333946880  // =>
-#define MISC_BITNOT      135249920  // ~
-#define MISC_CHAIN       317186048  // ?.
-#define MISC_COMMA       134578176  // ,
-#define MISC_DOT         134594560  // .
-#define MISC_EQUALS      134717440  // =
-#define MISC_INCDEC      315973632  // +-
-#define MISC_NOT         134488064  // !
-#define MISC_SPREAD      451264512  // ...
-#define MISC_STAR        134561792  // *
+#define MISC_ARROW       1084126208 // =>
+#define MISC_BITNOT      1077999620 // ~
+#define MISC_CHAIN       1083079680 // ?.
+#define MISC_COMMA       1077948416 // ,
+#define MISC_DOT         1077950464 // .
+#define MISC_EQUALS      1077965824 // =
+#define MISC_INCDEC      1082993664 // +-
+#define MISC_NOT         1077937156 // !
+#define MISC_SPREAD      1087256576 // ...
+#define MISC_STAR        1077946368 // *
 
 #endif//_LIT_H

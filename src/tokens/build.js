@@ -2,6 +2,8 @@
 
 import fs from 'fs';
 const now = new Date;
+const litMaxBits = 10;
+const lengthBits = 4;
 
 const alwaysKeyword = 
     " break case catch class const continue debugger default do else enum export extends" +
@@ -65,19 +67,23 @@ const extraDefines = {
   BITNOT: '~',
   EQUALS: '=',
 };
+const extraDefinesUnary = {
+  NOT: '!',
+  BITNOT: '~',
+};
 
 // ways of marking up hashes
 const specials = [
   'keyword',
-  'strictKeyword',
+  // 'strictKeyword',
   'relOp',
   'unaryOp',
   'masquerade',
   'variable',
   'decl',
   'control',
-  'controlParen',
-  'controlBrace',
+  // 'controlParen',
+  // 'controlBrace',
   // 'es3Reserved',
 ];
 
@@ -115,8 +121,8 @@ const queue = (all, ...names) => {
 const nameToHash = new Map();
 const hashToName = new Map();
 
-queue(alwaysKeyword, 'keyword', 'strictKeyword');
-queue(alwaysStrictKeyword, 'strictKeyword');
+queue(alwaysKeyword, 'keyword');
+queue(alwaysStrictKeyword, 'keyword');
 queue(unaryOp, 'keyword', 'unaryOp');
 queue(relOp, 'keyword', 'relOp');
 queue(neverLabel, 'masquerade');
@@ -124,13 +130,14 @@ queue(variableLike, 'variable');
 queue(optionalKeyword);
 queue(declKeyword, 'decl');
 queue(controlKeyword, 'control');
-queue(controlParenKeyword, 'controlParen');
-queue(controlBraceKeyword, 'controlBrace');
+// queue(controlParenKeyword, 'controlParen');
+// queue(controlBraceKeyword, 'controlBrace');
 // queue(oldKeyword, 'es3Reserved');
 const litOnly = Array.from(pendingNames.keys()).sort();
 
 // add other random punctuators _after_ saving litOnly
 queue(Object.values(extraDefines));
+queue(Object.values(extraDefinesUnary), 'unaryOp');
 
 
 // now actually generate hashes
@@ -145,24 +152,34 @@ pendingNames.forEach((bits, name) => {
 
 
 function generateHash(s, bits=0) {
-  if (bits >= (1 << 13)) {
-    throw new Error('using more than 13 bits');
+  if (bits >= (1 << litMaxBits)) {
+    throw new Error(`using more than ${litMaxBits} bits`);
   } else if (!s.length) {
     throw new Error('empty string for hash');
   }
 
-  const ordZero = s.charCodeAt(0) || 0;
-  const ordOne = s.charCodeAt(1) || 0;
-  if (ordZero >= 128 || ordOne >= 128) {
-    throw new Error('ord for char out of range');
-  }
-  const length = Math.min(s.length, 15);
+  const ordAt = (index) => {
+    let raw = s.charCodeAt(index) || 0;
+    raw = (raw & ~32);
+    if (raw >= 64) {
+      raw -= 32;
+    }
+    if (raw < 0 || raw >= 64) {
+      throw new Error(`ord for char out of range: ${raw} (was=${s})`);
+    }
+    return raw;
+  };
 
-  let out = bits;        // 0-13
-  out += ordZero << 13;  // 13-20
-  out += ordOne << 20;   // 20-27
-  out += length << 27;   // 27-31
-  // we don't use bit 32, avoid being interpreted as signed int
+  const ordZero = ordAt(0);
+  const ordOne = ordAt(1);
+  const length = Math.min(s.length, (1 << lengthBits) - 1);
+
+  let out = bits;                       //  0-10
+  out += ordZero << (litMaxBits + 0);   // 10-16
+  out += ordOne  << (litMaxBits + 6);   // 16-22
+  out += length  << (litMaxBits + 12);  // 22-26
+  out += (1 << 30);                     // bit 30 = yes this is a lit
+  // we don't use bit 31, avoid being interpreted as signed int
 
   // can't use << as JS wraps to unsigned here
   if (out >= (2 ** 31)) {

@@ -76,11 +76,11 @@ static inline int cursor_next() {
 
 // consume a single string (permissively allow ``)
 inline static int consume_basic_key_string_special(int special) {
-  if (cursor->p[0] == '`' && cursor->len > 1 && cursor->p[cursor->len - 1] != '`') {
+  if (cursor->type != TOKEN_STRING || (cursor->p[0] == '`' && cursor->len > 1 && cursor->p[cursor->len - 1] != '`')) {
     // can't have templated string here at all, but allow single
     return ERROR__UNEXPECTED;
   }
-  cursor->special = special ? SPECIAL__BASE | special : 0;
+  cursor->special = special;
   cursor_next();
   return 0;
 }
@@ -99,7 +99,7 @@ inline static int consume_defn_name(int special) {
       memcpy(peek, cursor, sizeof(struct token));
       peek->vp = peek->p;  // no more void pointer for next token
       cursor->len = 0;
-      cursor->special = SPECIAL__BASE | special;
+      cursor->special = special;
       cursor->type = TOKEN_SYMBOL;
       cursor_next();
     }
@@ -109,10 +109,12 @@ inline static int consume_defn_name(int special) {
   if (special) {
     // this is a decl so the name is important
     cursor->type = TOKEN_SYMBOL;  // nb. should really ban reserved words
-    cursor->special = SPECIAL__BASE | special;
+    cursor->special = special;
     cursor_next();
   } else {
     // otherwise, it's actually just a lit
+    cursor->type = TOKEN_LIT;
+    cursor->special = 0;
     cursor_next();
   }
   return 0;
@@ -193,7 +195,7 @@ static inline int consume_dict() {
         if (is_symbol) {
           cursor->type = TOKEN_SYMBOL;
         }
-        cursor->special = SPECIAL__BASE | SPECIAL__PROPERTY;
+        cursor->special = SPECIAL__PROPERTY;
         cursor_next();
         break;
       }
@@ -340,7 +342,7 @@ static int consume_arrowfunc(int is_statement) {
   switch (cursor->type) {
     case TOKEN_LIT:
       cursor->type = TOKEN_SYMBOL;
-      cursor->special = SPECIAL__BASE | SPECIAL__DECLARE;
+      cursor->special = SPECIAL__DECLARE;
       cursor_next();
       break;
 
@@ -527,9 +529,6 @@ restart_expr:
       case TOKEN_OP:
         if (!value_line && cursor->p[0] == '/') {
           blep_token_update(TOKEN_REGEXP);  // we got it wrong
-        } else if (cursor->special == MISC_NOT || cursor->special == MISC_BITNOT) {
-          // TODO: just fixes a failure in the tokenizer's hashes
-          cursor->special = _MASK_UNARY_OP;
         }
         break;
 
@@ -566,7 +565,7 @@ restart_expr:
           default:
             if (cursor->special & (_MASK_UNARY_OP | _MASK_REL_OP)) {
               cursor->type = TOKEN_OP;
-            } else if (cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
+            } else if (cursor->special & _MASK_KEYWORD) {
               _maybe_abandon();
               cursor->type = TOKEN_KEYWORD;
             }
@@ -618,7 +617,7 @@ restart_expr:
 
         // if we see a TOKEN_LIT immediately after us, see if it's actually a paren'ed lvalue
         // (this is incredibly uncommon, don't do this, e.g.: `(x)++`)
-        if (cursor->type != TOKEN_LIT || cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD) || blep_token_peek() != TOKEN_CLOSE) {
+        if (cursor->type != TOKEN_LIT || cursor->special & _MASK_KEYWORD || blep_token_peek() != TOKEN_CLOSE) {
           goto restart_expr;
         }
 
@@ -637,7 +636,7 @@ restart_expr:
         _RESUME_RESTORE();
 
         cursor->type = TOKEN_SYMBOL;
-        cursor->special = is_lvalue ? SPECIAL__BASE | SPECIAL__CHANGE : 0;
+        cursor->special = is_lvalue ? SPECIAL__CHANGE : 0;
         cursor_next();
         // parens will be caught next loop
         continue;
@@ -666,7 +665,7 @@ restart_expr:
 
         blep_token_peek();
         if (is_token_assign_like(peek) || peek->special == MISC_INCDEC) {
-          cursor->special = SPECIAL__BASE | SPECIAL__CHANGE;
+          cursor->special = SPECIAL__CHANGE;
         }
 
         cursor_next();
@@ -770,7 +769,7 @@ restart_expr:
           continue;
         }
 
-        cursor->special = SPECIAL__BASE | SPECIAL__CHANGE;
+        cursor->special = SPECIAL__CHANGE;
         value_line = cursor->line_no;
         cursor_next();
         continue;
@@ -825,11 +824,11 @@ static int consume_destructuring(int special) {
         // if this [foo] or {foo} without colon, announce now
         if (blep_token_peek() == TOKEN_COLON) {
           // variable name after colon
-          cursor->special = SPECIAL__BASE | SPECIAL__PROPERTY;
+          cursor->special = SPECIAL__PROPERTY;
         } else {
           // e.g. "const {x} = ...", x is a symbol, decl and property
           cursor->type = TOKEN_SYMBOL;
-          cursor->special = SPECIAL__BASE | SPECIAL__PROPERTY | SPECIAL__CHANGE | special;
+          cursor->special = SPECIAL__PROPERTY | SPECIAL__CHANGE | special;
         }
         cursor_next();
         break;
@@ -889,7 +888,7 @@ static int consume_destructuring(int special) {
         case TOKEN_SYMBOL:  // reentry
         case TOKEN_LIT:
           cursor->type = TOKEN_SYMBOL;
-          cursor->special = SPECIAL__BASE | SPECIAL__CHANGE | special;
+          cursor->special = SPECIAL__CHANGE | special;
           cursor_next();
           break;
       }
@@ -919,7 +918,7 @@ static int consume_optional_definition(int special, int is_statement) {
     case TOKEN_LIT:
       // nb. might be unsupported (e.g. "this" or "import"), but invalid in this case
       cursor->type = TOKEN_SYMBOL;
-      cursor->special = SPECIAL__BASE | SPECIAL__DECLARE | special;
+      cursor->special = SPECIAL__DECLARE | special;
 
       // look for assignment, incredibly likely, but check anyway
       blep_token_peek();
@@ -1103,7 +1102,7 @@ static int consume_module_list(int flags) {
             cursor->type = TOKEN_SYMBOL;
           } else {
             // foo=external, bar=?
-            cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL;
+            cursor->special = SPECIAL__EXTERNAL;
             cursor->type = TOKEN_LIT;  // reset in case
           }
           cursor_next();
@@ -1113,21 +1112,21 @@ static int consume_module_list(int flags) {
           if (flags & MODULE_LIST__REEXPORT) {
             // reexport, not a symbol here
             cursor->type = TOKEN_LIT;
-            cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL;
+            cursor->special = SPECIAL__EXTERNAL;
           } else if (flags & MODULE_LIST__EXPORT) {
             // symbol (not decl) being exported
             // nb. technically modules can't export globals, but eh
             cursor->type = TOKEN_SYMBOL;
-            cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL;
+            cursor->special = SPECIAL__EXTERNAL;
           } else {
             // declares new value being imported from elsewhere
             cursor->type = TOKEN_SYMBOL;
             if (flags & MODULE_LIST__DEEP) {
               // inside e.g. "{foo}", so foo is the var from elsewhere
-              cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL | SPECIAL__DECLARE | SPECIAL__TOP;
+              cursor->special = SPECIAL__EXTERNAL | SPECIAL__DECLARE | SPECIAL__TOP;
             } else {
               // this _isn't_ external as it fundamentally points to "default"
-              cursor->special = SPECIAL__BASE | SPECIAL__DECLARE | SPECIAL__TOP;
+              cursor->special = SPECIAL__DECLARE | SPECIAL__TOP;
             }
           }
           cursor_next();
@@ -1150,10 +1149,10 @@ static int consume_module_list(int flags) {
 
       if (flags & MODULE_LIST__EXPORT) {
         cursor->type = TOKEN_LIT;
-        cursor->special = SPECIAL__BASE | SPECIAL__EXTERNAL;
+        cursor->special = SPECIAL__EXTERNAL;
       } else {
         cursor->type = TOKEN_SYMBOL;
-        cursor->special = SPECIAL__BASE | SPECIAL__DECLARE | SPECIAL__TOP;
+        cursor->special = SPECIAL__DECLARE | SPECIAL__TOP;
       }
       cursor_next();
     }
@@ -1590,6 +1589,7 @@ static int consume_statement() {
 
       if (line_no == cursor->line_no) {
         if (cursor->type == TOKEN_LIT) {
+          cursor->special = 0;
           cursor->type = TOKEN_LABEL;
           cursor_next();
         }
@@ -1617,6 +1617,7 @@ static int consume_statement() {
     if (blep_token_peek() == TOKEN_COLON) {
       // nb. "await:" is invalid in async functions, but it's nonsensical anyway
       // we restart this function to parse as label
+      cursor->special = 0;
       cursor->type = TOKEN_LABEL;
       return consume_statement();
     }
@@ -1638,7 +1639,7 @@ static int consume_statement() {
 
   // catches things like "enum", "protected", which are keywords but largely unhandled
   // we catch these inside expr too, but only inside expr (or parens)
-  if (cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
+  if (cursor->special & _MASK_KEYWORD) {
     _STACK_BEGIN(STACK__MISC);
     cursor->type = TOKEN_KEYWORD;
     cursor_next();

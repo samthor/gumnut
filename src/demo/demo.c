@@ -50,7 +50,7 @@ void blep_parser_callback() {
   }
 
   char hint = ' ';
-  if (t->special && t->special >= 65536) {
+  if (t->special & SPECIAL__LIT) {
     hint = '#';
   }
 
@@ -62,8 +62,11 @@ void blep_parser_callback() {
 
   printf("%.*s", t->len, t->p);
 
-  if (t->special && t->special < 65536) {
-    printf(" ~%d", t->special);
+  if (t->special && !(t->special & SPECIAL__LIT)) {
+    printf(" ~");
+    if (t->special & SPECIAL__SAMELINE) {
+      printf(" sameline");
+    }
     if (t->special & SPECIAL__DECLARE) {
       printf(" declare");
     }
