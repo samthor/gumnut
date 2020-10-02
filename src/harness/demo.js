@@ -24,6 +24,8 @@ import rewriter from './node-rewriter.js';
 import * as lit from '../tokens/lit.mjs';
 import {performance} from 'perf_hooks';
 
+const allowAllStack = false;
+
 let prepTime = 0.0;
 const runTimes = [];
 
@@ -52,13 +54,16 @@ async function moduleImportRewriter(resolve) {
       }
     };
     const stack = (type) => {
+      if (allowAllStack) {
+        return true;
+      }
       if (type === harness.stacks.external) {
-        return 0;
+        return true;
       }
       if (type === harness.stacks.module && token.special() === lit.IMPORT) {
-        return 0;
+        return true;
       }
-      return 1;
+      return false;
     };
 
     try {
@@ -70,18 +75,11 @@ async function moduleImportRewriter(resolve) {
 }
 
 
-const alreadyResolved = /^(\w+:\/\/|\.{0,2}\/)/;
 
 
 
 const run = await moduleImportRewriter((importee, importer) => {
-  return 'LOL: ' + importee;
-
-  // importee is from import/export, importer is the current file
-  // TODO: this is a terrible resolver, don't do this
-  if (!alreadyResolved.exec(importee)) {
-    return `/node_modules/${importee}/index.js`;
-  }
+  return 'update://' + importee;
 });
 
 const targets = process.argv.slice(2);
