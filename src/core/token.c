@@ -473,7 +473,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
         _ret(len, TOKEN_STRING);
       }
       td->depth = update;
-      _reth(len, TOKEN_STRING, TOKEN_STRING);
+      _ret(len, TOKEN_STRING);
     }
 
     case _LOOKUP__TEMPLATE: {

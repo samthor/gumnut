@@ -382,9 +382,9 @@ static int consume_template_string() {
       return ERROR__UNEXPECTED;
     }
 
-    _check(consume_expr(0));
+    _check(consume_expr_zero_many(0));
 
-    if (cursor->type != TOKEN_STRING || cursor->p[0] != '}') {
+    if (!(cursor->type == TOKEN_STRING && cursor->p[0] == '}')) {
       debugf("templated string didn't restart with }, was %d", cursor->type);
       return ERROR__UNEXPECTED;
     }
@@ -587,6 +587,8 @@ restart_expr:
             _check(consume_class(0));
             break;
         }
+
+        cursor_next();  // invalid but allow anyway
         continue;
 
       case TOKEN_ARRAY:
@@ -650,7 +652,9 @@ restart_expr:
         return 0;
 
       case TOKEN_STRING:
-        if (cursor->p[0] == '`') {
+        if (cursor->p[0] == '}') {
+          return 0;  // tokenizer tells us we're finished `${}`
+        } else if (cursor->p[0] == '`') {
           _check(consume_template_string())
           value_line = cursor->line_no;
         } else {
@@ -1041,7 +1045,7 @@ static int consume_class(int special) {
 
     // nb. something must be here (but if it's not, that's an error, as we expect a '{' following)
     _STACK_BEGIN(STACK__EXPR);
-    _check(consume_expr(0));
+    _check(consume_expr(1));  // use "is_statement=1" because we want to fail early
     _STACK_END();
   }
 
@@ -1515,7 +1519,7 @@ static int consume_statement() {
       cursor_next();
 
       _STACK_END();
-      break;
+      return 0;
 
     case LIT_CASE:
       _STACK_BEGIN(STACK__LABEL);
@@ -1534,7 +1538,7 @@ static int consume_statement() {
       cursor_next();
 
       _STACK_END();
-      break;
+      return 0;
 
     case LIT_ASYNC:
       blep_token_peek();
@@ -1563,8 +1567,10 @@ static int consume_statement() {
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
 
-      if (line_no == cursor->line_no) {
-        _check(consume_expr(1));
+      if (line_no == cursor->line_no && cursor->type != TOKEN_SEMICOLON) {
+        _STACK_BEGIN(STACK__EXPR);
+        _check(consume_expr_zero_many(1));
+        _STACK_END();
       }
 
       _STACK_END_SEMICOLON();
