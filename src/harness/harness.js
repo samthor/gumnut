@@ -100,8 +100,8 @@ async function initialize(modulePromise, callback) {
 }
 
 /**
- * @param {!Promise<BufferSource} modulePromise
- * @return {blep.Token}
+ * @param {!Promise<BufferSource>} modulePromise
+ * @return {!Promise<blep.Harness>}
  */
 export default async function build(modulePromise) {
   const shadowed = [];  // shadowed callbacks
@@ -133,7 +133,7 @@ export default async function build(modulePromise) {
       },
 
       _blep_parser_stack(special) {
-        return _stack(special) ? 0 : 1;
+        return _stack(special) === false ? 1 : 0;
       },
     };
   });
