@@ -99,6 +99,10 @@ async function initialize(modulePromise, callback) {
   return {instance, memory};
 }
 
+/**
+ * @param {!Promise<BufferSource} modulePromise
+ * @return {blep.Token}
+ */
 export default async function build(modulePromise) {
   const shadowed = [];  // shadowed callbacks
   let _callback = null;
@@ -129,7 +133,7 @@ export default async function build(modulePromise) {
       },
 
       _blep_parser_stack(special) {
-        return _stack(special) || 0;
+        return _stack(special) ? 0 : 1;
       },
     };
   });
@@ -198,7 +202,7 @@ export default async function build(modulePromise) {
     },
 
     /**
-     * @param {!function(number): void} callback to push
+     * @param {!function(): void} callback to push
      */
     push(callback) {
       shadowed.push(_callback);
@@ -216,8 +220,8 @@ export default async function build(modulePromise) {
     },
 
     /**
-     * @param {!function(number): void} callback
-     * @param {(!function(number): void)=} stack
+     * @param {function(): void} callback
+     * @param {(function(number): boolean)=} stack
      */
     run(callback, stack=() => {}) {
       _callback = callback;

@@ -25,6 +25,9 @@ import stream from 'stream';
 
 const PENDING_BUFFER_MAX = 1024 * 16;
 
+/**
+ * @return {!Promise<function(string): blep.Base>}
+ */
 export default async function wrapper() {
   const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
   const wasm = fs.readFileSync(source);
