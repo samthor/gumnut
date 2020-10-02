@@ -455,6 +455,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
     case TOKEN_CLOSE: {
       int update = td->depth - 1;
       if (!update) {
+        debugf("got TOKEN_CLOSE with bad depth=%d", td->depth);
         _ret(0, TOKEN_EOF);
       }
 
@@ -645,7 +646,8 @@ int blep_token_restore() {
   }
 
   // TODO: set_restore and restore currently just move the top token back
-  // but we could/should store a ring buffer of ~128 tokens for re-parsing
+  // but we could/should store a ring buffer of ~256 tokens for re-parsing
+  // challenges are with looping again/overflows: we enact tokens in consume 
 
   memcpy(&(td->curr), &(td->restore__curr), sizeof(struct token));
 
