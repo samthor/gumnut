@@ -1,5 +1,9 @@
 {
   "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "./src/test/parser.sh && ./src/test/test262.sh"
+  },
   "devDependencies": {
     "test262-parser-tests": "^0.0.5"
   }
