@@ -952,7 +952,9 @@ static int consume_optional_definition(int special, int is_statement) {
 static int consume_optional_assign_suffix(int is_statement) {
   if (cursor->special == MISC_EQUALS) {
     cursor_next();
+    _STACK_BEGIN(STACK__EXPR);
     _check(consume_expr(is_statement));
+    _STACK_END();
   }
   return 0;
 }
@@ -1450,8 +1452,6 @@ static int consume_expr_statement() {
 }
 
 static int consume_statement() {
-  debugf("consume_statement: %d (%.*s %d)", cursor->type, cursor->len, cursor->p, cursor->special);
-
   switch (cursor->type) {
     case TOKEN_EOF:
     case TOKEN_COLON:
@@ -1462,11 +1462,11 @@ static int consume_statement() {
       return 0;
 
     case TOKEN_BRACE:
+      // naked block statement (or under function)
       _STACK_BEGIN(STACK__BLOCK);
       cursor_next();
 
       do {
-        debugf("consuming block statement");
         _check(consume_statement());
       } while (cursor->type != TOKEN_CLOSE);
 
@@ -1524,7 +1524,9 @@ static int consume_statement() {
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
 
+      _STACK_BEGIN(STACK__EXPR);
       _check(consume_expr(0));
+      _STACK_END();
 
       if (cursor->type != TOKEN_COLON) {
         debugf("no : after case");
@@ -1543,10 +1545,16 @@ static int consume_statement() {
       // fall-through
 
     case LIT_FUNCTION:
-      return consume_function(SPECIAL__DECLARE | SPECIAL__TOP);
+      _STACK_BEGIN(STACK__DECLARE);
+      _check(consume_function(SPECIAL__DECLARE | SPECIAL__TOP));
+      _STACK_END();
+      return 0;
 
     case LIT_CLASS:
-      return consume_class(SPECIAL__DECLARE);
+      _STACK_BEGIN(STACK__DECLARE);
+      _check(consume_class(SPECIAL__DECLARE));
+      _STACK_END();
+      return 0;
 
     case LIT_RETURN:
     case LIT_THROW:
@@ -1629,8 +1637,8 @@ static int consume_statement() {
   }
 
   // catches things like "enum", "protected", which are keywords but largely unhandled
+  // we catch these inside expr too, but only inside expr (or parens)
   if (cursor->special & (_MASK_KEYWORD | _MASK_STRICT_KEYWORD)) {
-    debugf("got fallback TOKEN_KEYWORD");
     _STACK_BEGIN(STACK__MISC);
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
