@@ -313,7 +313,7 @@ static int consume_expr_group() {
 }
 
 // consume arrowfunc from and including "=>"
-static int consume_arrowfunc_from_arrow() {
+static int consume_arrowfunc_from_arrow(int is_statement) {
   if (cursor->special != MISC_ARROW) {
     debugf("arrowfunc missing =>\n");
     return ERROR__UNEXPECTED;
@@ -323,12 +323,12 @@ static int consume_arrowfunc_from_arrow() {
   if (cursor->type == TOKEN_BRACE) {
     return consume_statement();
   }
-  _check(consume_expr(0));  // TODO: if statement we might want to pass this through
+  _check(consume_expr(is_statement));
   return 0;
 }
 
 // we assume that we're pointing at one (is_arrowfunc has returned true)
-static int consume_arrowfunc() {
+static int consume_arrowfunc(int is_statement) {
   _STACK_BEGIN(STACK__FUNCTION);
 
   // "async" prefix without immediate =>
@@ -353,7 +353,7 @@ static int consume_arrowfunc() {
       return ERROR__UNEXPECTED;
   }
 
-  _check(consume_arrowfunc_from_arrow());
+  _check(consume_arrowfunc_from_arrow(is_statement));
   _STACK_END();
   return 0;
 }
@@ -441,12 +441,12 @@ static int lookahead_is_paren_arrowfunc() {
   return 0;
 }
 
-static int maybe_consume_arrowfunc() {
+static int maybe_consume_arrowfunc(int is_statement) {
   // short-circuits
   if (cursor->type == TOKEN_LIT) {
     blep_token_peek();
     if (peek->special == MISC_ARROW) {
-      return consume_arrowfunc();  // "blah =>" or even "async =>"
+      return consume_arrowfunc(is_statement);  // "blah =>" or even "async =>"
     } else if (cursor->special != LIT_ASYNC) {
       return 0;
     } else if (peek->type == TOKEN_LIT) {
@@ -454,7 +454,7 @@ static int maybe_consume_arrowfunc() {
       if (peek->special == LIT_FUNCTION) {
         return 0;
       }
-      return consume_arrowfunc();  // "async foo"
+      return consume_arrowfunc(is_statement);  // "async foo"
     } else if (peek->type != TOKEN_PAREN) {
       return 0;  // "async ???" ignored, not group OR arrowfunc
     }
@@ -476,7 +476,7 @@ static int maybe_consume_arrowfunc() {
 
   debugf("lookahead found arrowfunc=%d", is_arrowfunc);
   if (is_arrowfunc) {
-    return consume_arrowfunc();
+    return consume_arrowfunc(is_statement);
   }
 
   return 0;
@@ -500,7 +500,7 @@ restart_expr:
   char *start = cursor->p;
 
   // lookahead #1: check for arrowfunc at this position
-  _check(maybe_consume_arrowfunc());
+  _check(maybe_consume_arrowfunc(is_statement));
   if (start != cursor->p) {
     if (paren_count == 0) {
       // arrowfunc is expr on its own
