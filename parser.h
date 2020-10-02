@@ -18,15 +18,16 @@ int blep_parser_stack(int);
 
 #define SPECIAL__BASE            32768
 
-#define STACK__EXPR       1
-#define STACK__DECLARE    2  // var, let, const
-#define STACK__CONTROL    3  // control start (if, for,... etc)
-#define STACK__BLOCK      4  // {}'s
-#define STACK__MODULE     5  // import or export
-#define STACK__FUNCTION   6  // nb., defines new top-level scope
-#define STACK__CLASS      7
-#define STACK__MISC       8  // continue, break, return, throw, debugger
-#define STACK__LABEL      9  // label "foo":
+#define STACK__EXPR       1   // top-level statement expr
+#define STACK__DECLARE    2   // var, let, const
+#define STACK__CONTROL    3   // control start (if, for,... etc)
+#define STACK__BLOCK      4   // {}'s
+#define STACK__FUNCTION   5   // function including arrowfunc (defines scope)
+#define STACK__CLASS      6   // any class
+#define STACK__MISC       7   // continue, break, return, throw, debugger
+#define STACK__LABEL      8   // label "foo":
+#define STACK__MODULE     9   // normal import/export
+#define STACK__EXTERNAL   10  // export which just re-exports another
 
 
-#define _STACK_MAX        9
+#define _STACK_MAX        10

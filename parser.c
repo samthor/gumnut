@@ -1189,16 +1189,40 @@ static int consume_import() {
   return consume_basic_key_string_special(SPECIAL__EXTERNAL);
 }
 
-static int consume_export() {
+// consumes only a reexport (must be on `export` keyword)
+static int consume_export_reexport() {
 #ifdef DEBUG
   if (cursor->special != LIT_EXPORT) {
     debugf("missing export keyword\n");
     return ERROR__UNEXPECTED;
   }
 #endif
-  cursor->type = TOKEN_KEYWORD;
+  cursor_next();  // move to star/brace
+  _check(consume_module_list(MODULE_LIST__EXPORT | MODULE_LIST__REEXPORT));
 
+  if (cursor->special != LIT_FROM) {
+    debugf("could not find FROM again");
+    return ERROR__INTERNAL;
+  }
+  cursor->type = TOKEN_KEYWORD;
+  cursor_next();
+  return consume_basic_key_string_special(SPECIAL__EXTERNAL);
+}
+
+// consumes a normal export (must be on `export` keyword) from self
+static int consume_export_normal() {
+#ifdef DEBUG
+  if (cursor->special != LIT_EXPORT) {
+    debugf("missing export keyword\n");
+    return ERROR__UNEXPECTED;
+  }
+#endif
   blep_token_peek();
+  if (peek->type == TOKEN_BRACE) {
+    cursor_next();  // move to star/brace
+    return consume_module_list(MODULE_LIST__EXPORT);
+  }
+
   int is_default = (peek->special == LIT_DEFAULT);
   if (is_default) {
     cursor_next();  // move over "export"
@@ -1240,35 +1264,44 @@ static int consume_export() {
     return consume_statement();
   }
 
-  // otherwise, we expect a * or {, and need to check for reexport
-  if (peek->special != MISC_STAR && peek->type != TOKEN_BRACE) {
-    debugf("expected `export` followed by star, brace or others");
+  debugf("expected `export` followed by brace or others");
+  return ERROR__UNEXPECTED;
+}
+
+// consumes a regular export or a reexport, generating stack information
+static int consume_export_wrap() {
+#ifdef DEBUG
+  if (cursor->special != LIT_EXPORT) {
+    debugf("missing export keyword\n");
     return ERROR__UNEXPECTED;
   }
+#endif
+  cursor->type = TOKEN_KEYWORD;  // set first so valid for STACK_BEGIN
 
+  // check if this is actually a reexport
+  blep_token_peek();
   int is_reexport = 0;
-
-  _SET_RESTORE();
-  cursor_next();  // move to star/brace
-  _check(consume_module_list(MODULE_LIST__EXPORT));
-  is_reexport = (cursor->special == LIT_FROM);
-  _RESUME_RESTORE();
-
-  // TODO: special is now overloaded hash/special, can't apply is_rexport?
-  cursor_next();  // move to star/brace
-  int flags = MODULE_LIST__EXPORT | (is_reexport ? MODULE_LIST__REEXPORT : 0);
-  _check(consume_module_list(flags));
-
-  if (!is_reexport) {
-    return 0;
+  if (peek->special == MISC_STAR) {
+    is_reexport = 1;  // must be `export * from 'foo'`
+  } else if (peek->type == TOKEN_BRACE) {
+    _SET_RESTORE();
+    cursor_next();  // move to star/brace
+    _check(consume_module_list(MODULE_LIST__EXPORT));
+    is_reexport = (cursor->special == LIT_FROM);
+    _RESUME_RESTORE();
   }
-  if (cursor->special != LIT_FROM) {
-    debugf("could not find FROM again");
-    return ERROR__INTERNAL;
+
+  if (is_reexport) {
+    _STACK_BEGIN(STACK__EXTERNAL);
+    _check(consume_export_reexport());
+    _STACK_END_SEMICOLON();
+  } else {
+    _STACK_BEGIN(STACK__MODULE);
+    _check(consume_export_normal());
+    _STACK_END_SEMICOLON();
   }
-  cursor->type = TOKEN_KEYWORD;
-  cursor_next();
-  return consume_basic_key_string_special(SPECIAL__EXTERNAL);
+
+  return 0;
 }
 
 static inline int consume_control_group_inner(int control_hash) {
@@ -1569,10 +1602,7 @@ static int consume_statement() {
       return 0;
 
     case LIT_EXPORT:
-      _STACK_BEGIN(STACK__MODULE);
-      _check(consume_export());
-      _STACK_END_SEMICOLON();
-      return 0;
+      return consume_export_wrap();
   }
 
   if (!(cursor->special & _MASK_MASQUERADE)) {

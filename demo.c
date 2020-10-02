@@ -15,11 +15,12 @@ static const char *stack_names[] = {
   "declare",
   "control",
   "block",
-  "module",
   "function",
   "class",
   "misc",
   "label",
+  "module",
+  "external",
 };
 
 static const char *token_names[] = {
@@ -47,7 +48,7 @@ void blep_parser_callback() {
   }
 
   char hint = ' ';
-  if (t->special && !(t->special & SPECIAL__BASE)) {
+  if (t->special && t->special >= 65536) {
     hint = '#';
   }
 
@@ -59,7 +60,7 @@ void blep_parser_callback() {
 
   printf("%.*s", t->len, t->p);
 
-  if (t->special) {
+  if (t->special && t->special < 65536) {
     printf(" ~%d", t->special);
     if (t->special & SPECIAL__DECLARE) {
       printf(" declare");
@@ -73,7 +74,7 @@ void blep_parser_callback() {
     if (t->special & SPECIAL__EXTERNAL) {
       printf(" external");
     }
-    if (t->special & SPECIAL__EXTERNAL) {
+    if (t->special & SPECIAL__CHANGE) {
       printf(" change");
     }
   }

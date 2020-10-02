@@ -267,7 +267,11 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
 #define _reth(_len, _type, _hash) {t->special = _hash; t->type = _type; t->len = _len; return;};
 #define _inc_stack(_type) { \
       td->stack[td->depth] = _type; \
-      if (++td->depth == STACK_SIZE) { \
+      if (td->depth < td->restore__depth) { \
+        debugf("got stack increment below restore depth"); \
+        _ret(0, TOKEN_EOF); \
+      } else if (++td->depth == STACK_SIZE) { \
+        debugf("hit stack upper limit"); \
         _ret(0, TOKEN_EOF); \
       } \
     }
