@@ -39,7 +39,7 @@ static int parser_skip = 0;
 // emit cursor and continue
 static inline int cursor_next() {
   if (!parser_skip) {
-    blep_parser_callback(cursor);
+    blep_parser_callback();
   }
   return blep_token_next();
 }

@@ -11,8 +11,6 @@
 tokendef _td;
 #endif
 
-static int hint_type;
-
 
 #ifdef DEBUG
 #include <stdio.h>
