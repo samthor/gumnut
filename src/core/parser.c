@@ -562,6 +562,14 @@ restart_expr:
             }
             break;
 
+          case LIT_NEW:
+            blep_token_peek();
+            if (peek->special != MISC_DOT) {
+              // "new.target" is valid, allow all
+              cursor->type = TOKEN_OP;
+            }
+            break;
+
           default:
             if (cursor->special & (_MASK_UNARY_OP | _MASK_REL_OP)) {
               cursor->type = TOKEN_OP;
@@ -581,11 +589,11 @@ restart_expr:
           case LIT_ASYNC:
           case LIT_FUNCTION:
             _check(consume_function(0));
-            break;
+            continue;
 
           case LIT_CLASS:
             _check(consume_class(0));
-            break;
+            continue;
         }
 
         cursor_next();  // invalid but allow anyway
@@ -647,6 +655,7 @@ restart_expr:
         if (paren_count) {
           --paren_count;
           cursor_next();
+          value_line = td->line_no;
           continue;
         }
         return 0;
@@ -773,6 +782,7 @@ restart_expr:
           continue;
         }
 
+        cursor->type = TOKEN_SYMBOL;
         cursor->special = SPECIAL__CHANGE;
         value_line = cursor->line_no;
         cursor_next();
@@ -794,7 +804,7 @@ static inline int consume_expr(int is_statement) {
   _check(consume_expr_internal(is_statement));
 
   if (start == cursor->p) {
-    debugf("could not consume expr, was: %d", cursor->type);
+    debugf("could not consume expr, was: %d (%.*s)", cursor->type, cursor->len, cursor->p);
     return ERROR__UNEXPECTED;
   }
   return 0;
@@ -962,7 +972,7 @@ static int consume_optional_assign_suffix(int is_statement) {
   return 0;
 }
 
-// consumes a number of comma-separated definitions
+// consumes a number of comma-separated definitions (does not create stack)
 static int consume_definition_list(int special, int is_statement) {
   for (;;) {
     _check(consume_optional_definition(special, is_statement));
@@ -983,10 +993,15 @@ static int consume_definition_group() {
   }
   cursor_next();
 
-  _check(consume_definition_list(SPECIAL__TOP, 0));
   if (cursor->type != TOKEN_CLOSE) {
-    debugf("arg_group did not finish with close");
-    return ERROR__UNEXPECTED;
+    _STACK_BEGIN(STACK__DECLARE);
+    _check(consume_definition_list(SPECIAL__TOP, 0));
+    _STACK_END();
+
+    if (cursor->type != TOKEN_CLOSE) {
+      debugf("arg_group did not finish with close");
+      return ERROR__UNEXPECTED;
+    }
   }
   cursor_next();
   return 0;
@@ -1044,6 +1059,7 @@ static int consume_class(int special) {
     cursor_next();
 
     // nb. something must be here (but if it's not, that's an error, as we expect a '{' following)
+    // we actually allow any expr here (e.g., `1+2`) although technically it should be one token
     _STACK_BEGIN(STACK__EXPR);
     _check(consume_expr(1));  // use "is_statement=1" because we want to fail early
     _STACK_END();
@@ -1315,17 +1331,26 @@ static inline int consume_control_group_inner(int control_hash) {
       // special-case catch, which creates a local scoped var
       return consume_optional_definition(0, 0);
 
+    case LIT_AWAIT:
     case LIT_FOR:
       break;
 
     default:
-      return consume_expr_zero_many(0);
+      if (cursor->type != TOKEN_CLOSE) {
+        _STACK_BEGIN(STACK__EXPR);
+        _check(consume_expr_zero_many(0));
+        _STACK_END();
+      }
+      return 0;
   }
 
   if (cursor->type == TOKEN_SEMICOLON) {
     // fine, ignore left block
   } else {
     if (cursor->special & _MASK_DECL) {
+      int allow_semicolon = (control_hash == LIT_FOR);
+      _STACK_BEGIN(STACK__DECLARE);
+
       // started with "var" etc
       int special = cursor->special == LIT_VAR ? SPECIAL__TOP : 0;
       cursor->type = TOKEN_KEYWORD;
@@ -1340,23 +1365,36 @@ static inline int consume_control_group_inner(int control_hash) {
 
       // `for (var x of y)` or `for (var {x,y} of z)`
       if (cursor->special == LIT_OF || cursor->special == LIT_IN) {
-        cursor->type = TOKEN_KEYWORD;
+        cursor->type = TOKEN_OP;
         cursor_next();
-        return consume_expr(0);
+        _STACK_BEGIN(STACK__EXPR);
+        _check(consume_expr(0));
+        _STACK_END();
+        allow_semicolon = 0;
+      } else {
+        // otherwise, this is a ;; loop and can be a normal decl
+        // step past optional "= 1" and "," then continue more definitions
+        _check(consume_optional_assign_suffix(0));
+        if (cursor->special == MISC_COMMA) {
+          cursor_next();
+          _check(consume_definition_list(special, 0));
+        }
+      }
+      _STACK_END();
+      if (!allow_semicolon) {
+        return 0;
       }
 
-      // otherwise, this is a ;; loop and can be a normal decl
-      // step past optional "= 1" and "," then continue more definitions
-      _check(consume_optional_assign_suffix(0));
-      if (cursor->special == MISC_COMMA) {
-        cursor_next();
-        _check(consume_definition_list(special, 0));
-      }
     } else {
       // otherwise, this is an expr
       // ... it allows "is" and "of" to be mapped to keywords
       _check(consume_expr_zero_many(0));
     }
+  }
+
+  // this awkwardly only applies to some branches above
+  if (control_hash == LIT_AWAIT) {
+    return 0;
   }
 
   // after left block, check for semicolon
@@ -1366,7 +1404,11 @@ static inline int consume_control_group_inner(int control_hash) {
   cursor_next();
 
   // consume middle block (skip if semicolon)
-  _check(consume_expr_zero_many(0));
+  if (cursor->type != TOKEN_SEMICOLON) {
+    _STACK_BEGIN(STACK__EXPR);
+    _check(consume_expr_zero_many(0));
+    _STACK_END();
+  }
   if (cursor->type != TOKEN_SEMICOLON) {
     debugf("expected 2nd semicolon");
     return ERROR__UNEXPECTED;
@@ -1377,7 +1419,10 @@ static inline int consume_control_group_inner(int control_hash) {
   if (cursor->type == TOKEN_CLOSE) {
     return 0;
   }
-  return consume_expr_zero_many(0);
+  _STACK_BEGIN(STACK__EXPR);
+  _check(consume_expr_zero_many(0));
+  _STACK_END();
+  return 0;
 }
 
 static int consume_control() {
@@ -1389,6 +1434,7 @@ static int consume_control() {
 #endif
 
   int control_hash = cursor->special;
+  int consume_paren = (control_hash & _MASK_CONTROL_PAREN);
 
   _STACK_BEGIN(STACK__CONTROL);
   cursor->type = TOKEN_KEYWORD;
@@ -1397,13 +1443,14 @@ static int consume_control() {
   // match "for" and "for await"
   if (control_hash == LIT_FOR) {
     if (cursor->special == LIT_AWAIT) {
+      control_hash = LIT_AWAIT;
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
     }
   }
 
   // match inner parens of control
-  if (cursor->type == TOKEN_PAREN) {
+  if (consume_paren && cursor->type == TOKEN_PAREN) {
     cursor_next();
     _check(consume_control_group_inner(control_hash));
     if (cursor->type != TOKEN_CLOSE) {
@@ -1418,7 +1465,6 @@ static int consume_control() {
 
   // special-case trailing "while(...)" for a 'do-while'
   if (control_hash == LIT_DO) {
-
     if (cursor->special != LIT_WHILE) {
       debugf("could not find while of do-while");
       return ERROR__UNEXPECTED;
@@ -1433,6 +1479,11 @@ static int consume_control() {
 
     // this isn't special (can't define var/let etc), just consume as expr on paren
     _check(consume_expr_group());
+
+    // can have lines here
+    if (cursor->type == TOKEN_SEMICOLON) {
+      cursor_next();
+    }
   }
 
   _STACK_END();
@@ -1442,12 +1493,11 @@ static int consume_control() {
 static int consume_expr_statement() {
   _STACK_BEGIN(STACK__EXPR);
 
-  for (;;) {
-    _check(consume_expr(1));
-    if (cursor->special != MISC_COMMA) {
-      break;
-    }
-    cursor_next();
+  char *start = cursor->p;
+  _check(consume_expr_zero_many(1));
+  if (start == cursor->p) {
+    debugf("could not consume any expr statement");
+    return ERROR__UNEXPECTED;
   }
 
   _STACK_END_SEMICOLON();
@@ -1658,6 +1708,16 @@ static int consume_statement() {
 
 int blep_parser_init(char *p, int len) {
   _check(blep_token_init(p, len));
+
+  if (p[0] == '#' && p[1] == '!') {
+    td->at = strchr(p, '\n');
+    if (td->at == NULL) {
+      td->at = p + len;
+    }
+    blep_token_peek();
+    peek->vp = p;
+  }
+
   blep_token_next();
   return 0;
 }

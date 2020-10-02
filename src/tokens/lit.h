@@ -1,4 +1,4 @@
-// Generated on Fri Oct 02 2020 13:24:40 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Fri Oct 02 2020 14:55:23 GMT+1000 (Australian Eastern Standard Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -10,13 +10,14 @@
 #define _MASK_VARIABLE         16
 #define _MASK_DECL             32
 #define _MASK_CONTROL          64
+#define _MASK_CONTROL_PAREN    128
 
 #define LIT_AS           1085506560
 #define LIT_ASYNC        1098089472
 #define LIT_AWAIT        1098351621
 #define LIT_BREAK        1098024961
 #define LIT_CASE         1092717577
-#define LIT_CATCH        1096911937
+#define LIT_CATCH        1096912065
 #define LIT_CLASS        1097632769
 #define LIT_CONST        1097829409
 #define LIT_CONTINUE     1110412289
@@ -30,11 +31,11 @@
 #define LIT_EXTENDS      1106809857
 #define LIT_FALSE        1096914968
 #define LIT_FINALLY      1105827905
-#define LIT_FOR          1089443905
+#define LIT_FOR          1089444033
 #define LIT_FROM         1093834752
 #define LIT_FUNCTION     1110808577
 #define LIT_GET          1088789504
-#define LIT_IF           1084662849
+#define LIT_IF           1084662977
 #define LIT_IMPLEMENTS   1118675969
 #define LIT_IMPORT       1101898776
 #define LIT_IN           1085187075
@@ -52,7 +53,7 @@
 #define LIT_SET          1088801792
 #define LIT_STATIC       1102367745
 #define LIT_SUPER        1098239000
-#define LIT_SWITCH       1102564417
+#define LIT_SWITCH       1102564545
 #define LIT_THIS         1093193752
 #define LIT_THROW        1097388033
 #define LIT_TRUE         1093849112
@@ -61,8 +62,8 @@
 #define LIT_UNDEFINED    1114559504
 #define LIT_VAR          1088542753
 #define LIT_VOID         1093654533
-#define LIT_WHILE        1097391169
-#define LIT_WITH         1093262401
+#define LIT_WHILE        1097391297
+#define LIT_WITH         1093262529
 #define LIT_YIELD        1097458693
 
 #define MISC_ARROW       1084126208 // =>

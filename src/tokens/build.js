@@ -82,7 +82,7 @@ const specials = [
   'variable',
   'decl',
   'control',
-  // 'controlParen',
+  'controlParen',
   // 'controlBrace',
   // 'es3Reserved',
 ];
@@ -130,7 +130,7 @@ queue(variableLike, 'variable');
 queue(optionalKeyword);
 queue(declKeyword, 'decl');
 queue(controlKeyword, 'control');
-// queue(controlParenKeyword, 'controlParen');
+queue(controlParenKeyword, 'controlParen');
 // queue(controlBraceKeyword, 'controlBrace');
 // queue(oldKeyword, 'es3Reserved');
 const litOnly = Array.from(pendingNames.keys()).sort();

@@ -128,8 +128,8 @@ static inline int blepi_consume_basic_string(char *p, int *line_no) {
         continue;
 
       case '\\':
-        if (p[1] == *start) {
-          ++p;  // the only thing we care about escaping
+        if (p[1] == *start || p[1] == '\\') {
+          ++p;  // the only things we care about escaping
         }
         continue;
 
@@ -168,7 +168,7 @@ static inline int blepi_consume_template(char *p, int *line_no) {
         continue;
 
       case '\\':
-        if (p[1] == '$' || p[1] == '`') {
+        if (p[1] == '$' || p[1] == '`' || p[1] == '\\') {
           ++p;  // we can only escape these
         }
         continue;
@@ -266,7 +266,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
 #define _inc_stack(_type) { \
       td->stack[td->depth] = _type; \
       if (td->depth < td->restore__depth) { \
-        debugf("got stack increment below restore depth"); \
+        debugf("got stack increment below restore depth: was=%d, depth=%d", td->depth, td->restore__depth); \
         _ret(0, TOKEN_EOF); \
       } else if (++td->depth == STACK_SIZE) { \
         debugf("hit stack upper limit"); \
@@ -275,7 +275,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
     }
 
   struct token *prev = &(td->curr);
-  const char initial = p[0];
+  const unsigned char initial = p[0];
   int op = lookup_op[initial];
   int len = 0;
 
@@ -499,7 +499,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
     default:
 #ifdef DEBUG
       if (op <= 0 || op > _TOKEN_MAX) {
-        debugf("got invalid OP, returning EOF");
+        debugf("got invalid OP, returning EOF: %d initial=%d", op, initial);
         _ret(0, TOKEN_EOF);
       }
 #endif
