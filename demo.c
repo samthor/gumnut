@@ -97,6 +97,8 @@ int blep_parser_stack(int type) {
 }
 
 int main() {
+  fprintf(stderr, "sizeof(tokendef)=%lu\n", sizeof(tokendef));
+
   char *buf;
   int len = read_stdin(&buf);
   if (len < 0) {
