@@ -9,6 +9,8 @@
 static int depth = 0;
 static struct token *t;
 
+static int saved_stack[STACK_SIZE];
+
 static const char *stack_names[] = {
   "null",
   "expr",
@@ -84,6 +86,7 @@ void blep_parser_callback() {
 
 int blep_parser_stack(int type) {
   if (type) {
+    saved_stack[depth] = type;
     ++depth;
     if (type < 0 || type > _STACK_MAX) {
       exit(1);
@@ -91,7 +94,8 @@ int blep_parser_stack(int type) {
     printf("%-11s>\n", stack_names[type]);
   } else {
     --depth;
-    printf("           <\n");
+    type = saved_stack[depth];
+    printf("%-11s<\n", stack_names[type]);
   }
   return 0;
 }
