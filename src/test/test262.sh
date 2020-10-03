@@ -17,7 +17,8 @@ function fail() {
   # Likely that this test uses `let` as a variable name, which is unsupported.
   echo '"use strict";' > _test.js
   cat $X >> _test.js
-  if ! node _test.js; then
+  if ! node _test.js 2>/dev/null; then
+    # TODO: not quite right, as some code doesn't run at all
     echo "SKIP: $BASE (unsupported by nodeJS strict mode)"
     return
   fi
