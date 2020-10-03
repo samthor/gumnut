@@ -71,7 +71,6 @@ export const stacks = Object.freeze({
   label: 8,
   module: 9,
   external: 10,
-  inner: 11,
 });
 
 async function initialize(modulePromise, callback) {

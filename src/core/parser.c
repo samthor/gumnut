@@ -1023,7 +1023,7 @@ static int consume_definition_group() {
 }
 
 static int consume_function(int special) {
-  _STACK_BEGIN(STACK__FUNCTION);
+  // nb. this is either inside a decl or statement, we don't emit FUNCTION until inner scope
 
   int is_async = 0;
   int is_generator = 0;
@@ -1049,17 +1049,15 @@ static int consume_function(int special) {
   _check(consume_defn_name(special));
   debugf("function, generator=%d async=%d", is_generator, is_async);
 
-  _STACK_BEGIN(STACK__INNER);
+  _STACK_BEGIN(STACK__FUNCTION);
   _check(consume_definition_group());
   _check(consume_statement());
   _STACK_END();
 
-  _STACK_END();
   return 0;
 }
 
 static int consume_class(int special) {
-  _STACK_BEGIN(STACK__CLASS);
 #ifdef DEBUG
   if (cursor->special != LIT_CLASS) {
     debugf("expected class keyword\n");
@@ -1082,11 +1080,10 @@ static int consume_class(int special) {
     _STACK_END();
   }
 
-  _STACK_BEGIN(STACK__INNER);
+  _STACK_BEGIN(STACK__CLASS);
   _check(consume_dict());
   _STACK_END();
 
-  _STACK_END();
   return 0;
 }
 
