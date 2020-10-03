@@ -1480,6 +1480,14 @@ static int consume_control() {
   // consume inner statement
   _check(consume_statement());
 
+  // we awkwardly peer into the parser to see if we _just_ consumed a semicolon
+  // this allows us to to parse `do 1 \n ; while (0)`, which is totally valid
+  // (although ; isn't attached to the above stack)
+  char prev = cursor->vp[-1];
+  if (prev != ';' && cursor->type == TOKEN_SEMICOLON) {
+    cursor_next();
+  }
+
   // special-case trailing "while(...)" for a 'do-while'
   if (control_hash == LIT_DO) {
     if (cursor->special != LIT_WHILE) {

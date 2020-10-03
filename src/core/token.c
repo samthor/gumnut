@@ -545,8 +545,8 @@ int blep_token_update(int type) {
       return ERROR__INTERNAL;
   }
 #endif
-    // slash is always length=1
-    td->at -= (td->curr.len + 1);
+    // slash is always length=1, don't remove it
+    td->at -= (td->curr.len - 1);
     td->curr.len = 1;
     td->curr.type = TOKEN_OP;
     return 0;
