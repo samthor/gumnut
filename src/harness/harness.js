@@ -69,8 +69,8 @@ export const stacks = Object.freeze({
   class: 6,
   misc: 7,
   label: 8,
-  module: 9,
-  external: 10,
+  export: 9,
+  module: 10,
 });
 
 async function initialize(modulePromise, callback) {

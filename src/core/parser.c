@@ -1331,11 +1331,11 @@ static int consume_export_wrap() {
   }
 
   if (is_reexport) {
-    _STACK_BEGIN(STACK__EXTERNAL);
+    _STACK_BEGIN(STACK__MODULE);
     _check(consume_export_reexport());
     _STACK_END_SEMICOLON();
   } else {
-    _STACK_BEGIN(STACK__MODULE);
+    _STACK_BEGIN(STACK__EXPORT);
     _check(consume_export_normal());
     _STACK_END_SEMICOLON();
   }

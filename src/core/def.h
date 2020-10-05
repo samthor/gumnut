@@ -45,8 +45,8 @@
 #define STACK__CLASS      6   // any class
 #define STACK__MISC       7   // continue, break, return, throw, debugger
 #define STACK__LABEL      8   // label "foo":
-#define STACK__MODULE     9   // normal import/export
-#define STACK__EXTERNAL   10  // export which just re-exports another
+#define STACK__EXPORT     9   // normal export
+#define STACK__MODULE     10  // import/export that interacts with another
 #define _STACK_MAX        10
 
 
