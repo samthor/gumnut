@@ -1007,12 +1007,11 @@ static int consume_definition_group() {
     debugf("definition didn't start with paren, was type=%d special=%d", cursor->type, cursor->special);
     return ERROR__UNEXPECTED;
   }
+  _STACK_BEGIN(STACK__DECLARE);
   cursor_next();
 
   if (cursor->type != TOKEN_CLOSE) {
-    _STACK_BEGIN(STACK__DECLARE);
     _check(consume_definition_list(SPECIAL__TOP, 0));
-    _STACK_END();
 
     if (cursor->type != TOKEN_CLOSE) {
       debugf("arg_group did not finish with close");
@@ -1020,6 +1019,7 @@ static int consume_definition_group() {
     }
   }
   cursor_next();
+  _STACK_END();
   return 0;
 }
 
