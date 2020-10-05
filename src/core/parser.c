@@ -28,6 +28,7 @@
 static int consume_statement();
 static int consume_expr(int);
 static int consume_expr_group();
+static int consume_expr_statement();
 static int consume_definition_group();
 static int consume_function(int);
 static int consume_class(int);
@@ -1296,7 +1297,7 @@ static int consume_export_normal() {
 
   if (is_default) {
     cursor_next();  // move over "default"
-    return consume_expr(1);  // MUST be expr
+    return consume_expr_statement();  // MUST be expr
   } else if (peek->special & _MASK_DECL) {
     cursor_next();  // move to statement start
     return consume_statement();
@@ -1624,7 +1625,7 @@ static int consume_statement() {
 
     case LIT_FUNCTION:
       _STACK_BEGIN(STACK__DECLARE);
-      _check(consume_function(SPECIAL__DECLARE | SPECIAL__TOP | SPECIAL__CHANGE));
+      _check(consume_function(SPECIAL__DECLARE | SPECIAL__CHANGE));
       _STACK_END();
       return 0;
 
