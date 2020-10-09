@@ -21,6 +21,7 @@
 const PAGE_SIZE = 65536;
 const WRITE_AT = PAGE_SIZE * 2;
 const ERROR_CONTEXT_MAX = 256;  // display this much text on either side
+const TOKEN_WORD_COUNT = 6;
 
 const decoder = new TextDecoder('utf-8');
 
@@ -144,7 +145,7 @@ export default async function build(modulePromise) {
     throw new Error(`token in invalid location`);
   }
 
-  let tokenView = new Int32Array(memory.buffer, tokenAt, 24 >> 2);
+  let tokenView = new Int32Array(memory.buffer, tokenAt, TOKEN_WORD_COUNT);
   let inputSize = 0;
 
   return {
@@ -193,7 +194,7 @@ export default async function build(modulePromise) {
         memory.grow(Math.ceil((memoryNeeded - memory.buffer.byteLength) / PAGE_SIZE));
       }
 
-      tokenView = new Int32Array(memory.buffer, tokenAt, 24 >> 2);  // in 32-bit
+      tokenView = new Int32Array(memory.buffer, tokenAt, TOKEN_WORD_COUNT);  // in 32-bit
       view = new Uint8Array(memory.buffer);
       view[WRITE_AT + size] = 0;  // null-terminate
       inputSize = size;
