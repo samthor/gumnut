@@ -26,7 +26,6 @@
 
 
 #define STATEMENT__TOP        1
-#define STATEMENT__DO_WHILE   2
 
 
 static int consume_statement(int);
@@ -43,6 +42,7 @@ static int consume_destructuring(int);
 
 
 static int parser_skip = 0;
+static int parser_allow_semicolon = 0;  // within do-while
 
 #define cursor (&(td->curr))
 #define peek (&(td->peek))
@@ -68,8 +68,8 @@ static inline int cursor_next() {
 }
 
 // ends an optional stack _and_ consumes an upcoming semicolon on same line
-#define _STACK_END_SEMICOLON(mode) \
-    if (cursor->type == TOKEN_SEMICOLON && (cursor->special == SPECIAL__SAMELINE || mode == STATEMENT__DO_WHILE)) { \
+#define _STACK_END_SEMICOLON() \
+    if (cursor->type == TOKEN_SEMICOLON && cursor->special == SPECIAL__SAMELINE) { \
       cursor_next(); /* only if on same line */ \
     } \
     _STACK_END();
@@ -1414,11 +1414,11 @@ static int consume_export_wrap() {
   if (is_reexport) {
     _STACK_BEGIN(STACK__MODULE);
     _check(consume_export_reexport());
-    _STACK_END_SEMICOLON(0);
+    _STACK_END_SEMICOLON();
   } else {
     _STACK_BEGIN(STACK__EXPORT);
     _check(consume_export_normal());
-    _STACK_END_SEMICOLON(0);
+    _STACK_END_SEMICOLON();
   }
 
   return 0;
@@ -1561,7 +1561,15 @@ static int consume_control() {
 
   // special case do-while
   if (control_hash == LIT_DO) {
-    _check(consume_statement(STATEMENT__DO_WHILE));
+    _check(consume_statement(0));
+
+    // we awkwardly peer into the parser to see if we _just_ consumed a semicolon
+    // this allows us to to parse `do 1 \n ; while (0)`, which is totally valid
+    // (although ; isn't attached to the prior stack)
+    char prev = cursor->vp[-1];
+    if (prev != ';' && cursor->type == TOKEN_SEMICOLON) {
+      cursor_next();
+    }
 
     if (cursor->special != LIT_WHILE) {
       debugf("could not find while of do-while");
@@ -1602,7 +1610,7 @@ static int consume_expr_statement(int mode) {
     return ERROR__UNEXPECTED;
   }
 
-  _STACK_END_SEMICOLON(mode);
+  _STACK_END_SEMICOLON();
   return 0;
 }
 
@@ -1725,7 +1733,7 @@ static int consume_statement(int mode) {
         _STACK_END();
       }
 
-      _STACK_END_SEMICOLON(mode);
+      _STACK_END_SEMICOLON();
       return 0;
 
     case LIT_DEBUGGER:
@@ -1734,7 +1742,7 @@ static int consume_statement(int mode) {
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
 
-      _STACK_END_SEMICOLON(mode);
+      _STACK_END_SEMICOLON();
       return 0;
 
     case LIT_CONTINUE:
@@ -1753,7 +1761,7 @@ static int consume_statement(int mode) {
         }
       }
 
-      _STACK_END_SEMICOLON(mode);
+      _STACK_END_SEMICOLON();
       return 0;
 
     case LIT_IMPORT:
@@ -1765,7 +1773,7 @@ static int consume_statement(int mode) {
       if (mode == STATEMENT__TOP) {
         _STACK_BEGIN(STACK__MODULE);
         _check(consume_import());
-        _STACK_END_SEMICOLON(0);
+        _STACK_END_SEMICOLON();
         return 0;
       }
       break;
@@ -1795,7 +1803,7 @@ static int consume_statement(int mode) {
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
     _check(consume_definition_list(special, 1));
-    _STACK_END_SEMICOLON(mode);
+    _STACK_END_SEMICOLON();
     return 0;
   } else if (cursor->special & _MASK_UNARY_OP || !cursor->special) {
     return consume_expr_statement(mode);
@@ -1807,7 +1815,7 @@ static int consume_statement(int mode) {
     _STACK_BEGIN(STACK__MISC);
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
-    _STACK_END_SEMICOLON(mode);
+    _STACK_END_SEMICOLON();
     return 0;
   }
 
