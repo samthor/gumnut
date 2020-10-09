@@ -25,10 +25,14 @@
 #define MODULE_LIST__DEEP     4
 
 
-static int consume_statement();
+#define STATEMENT__TOP        1
+#define STATEMENT__DO_WHILE   2
+
+
+static int consume_statement(int);
 static int consume_expr(int);
 static int consume_expr_group();
-static int consume_expr_statement();
+static int consume_expr_statement(int);
 static int consume_definition_group();
 static int consume_function(int);
 static int consume_class(int);
@@ -64,8 +68,8 @@ static inline int cursor_next() {
 }
 
 // ends an optional stack _and_ consumes an upcoming semicolon on same line
-#define _STACK_END_SEMICOLON() \
-    if (cursor->type == TOKEN_SEMICOLON && cursor->special == SPECIAL__SAMELINE) { \
+#define _STACK_END_SEMICOLON(flags) \
+    if (cursor->type == TOKEN_SEMICOLON && (cursor->special == SPECIAL__SAMELINE || flags & STATEMENT__DO_WHILE)) { \
       cursor_next(); /* only if on same line */ \
     } \
     _STACK_END();
@@ -231,7 +235,7 @@ static inline int consume_dict() {
         // method
         _STACK_BEGIN(STACK__FUNCTION);
         _check(consume_definition_group());
-        _check(consume_statement());
+        _check(consume_statement(0));
         _STACK_END();
         break;
 
@@ -331,7 +335,7 @@ static int consume_arrowfunc_from_arrow(int is_statement) {
   cursor_next();  // consume =>
 
   if (cursor->type == TOKEN_BRACE) {
-    return consume_statement();
+    return consume_statement(0);
   }
   _check(consume_expr(is_statement));
   return 0;
@@ -732,7 +736,7 @@ restart_expr:
         // this only happens for badly attached arrows or in skip mode
         cursor_next();
         if (cursor->type == TOKEN_BRACE) {
-          _check(consume_statement());
+          _check(consume_statement(0));
         }
         goto restart_expr;
 
@@ -1052,7 +1056,7 @@ static int consume_function(int special) {
 
   _STACK_BEGIN(STACK__FUNCTION);
   _check(consume_definition_group());
-  _check(consume_statement());
+  _check(consume_statement(0));
   _STACK_END();
 
   return 0;
@@ -1277,7 +1281,7 @@ static int consume_export_normal() {
         if (peek->special != LIT_FUNCTION) {
           return consume_expr(1);  // e.g. "async("
         }
-        return consume_statement();  // "async function" as statement
+        return consume_statement(0);  // "async function" as statement
       }
       // fall-through
     case LIT_FUNCTION:
@@ -1292,15 +1296,15 @@ static int consume_export_normal() {
         }
       }
 
-      return consume_statement();
+      return consume_statement(0);
   }
 
   if (is_default) {
     cursor_next();  // move over "default"
-    return consume_expr_statement();  // MUST be expr
+    return consume_expr_statement(0);  // MUST be expr
   } else if (peek->special & _MASK_DECL) {
     cursor_next();  // move to statement start
-    return consume_statement();
+    return consume_statement(0);
   }
 
   debugf("expected `export` followed by brace or others");
@@ -1333,11 +1337,11 @@ static int consume_export_wrap() {
   if (is_reexport) {
     _STACK_BEGIN(STACK__MODULE);
     _check(consume_export_reexport());
-    _STACK_END_SEMICOLON();
+    _STACK_END_SEMICOLON(0);
   } else {
     _STACK_BEGIN(STACK__EXPORT);
     _check(consume_export_normal());
-    _STACK_END_SEMICOLON();
+    _STACK_END_SEMICOLON(0);
   }
 
   return 0;
@@ -1478,19 +1482,10 @@ static int consume_control() {
     cursor_next();
   }
 
-  // consume inner statement
-  _check(consume_statement());
-
-  // we awkwardly peer into the parser to see if we _just_ consumed a semicolon
-  // this allows us to to parse `do 1 \n ; while (0)`, which is totally valid
-  // (although ; isn't attached to the above stack)
-  char prev = cursor->vp[-1];
-  if (prev != ';' && cursor->type == TOKEN_SEMICOLON) {
-    cursor_next();
-  }
-
-  // special-case trailing "while(...)" for a 'do-while'
+  // special case do-while
   if (control_hash == LIT_DO) {
+    _check(consume_statement(STATEMENT__DO_WHILE));
+
     if (cursor->special != LIT_WHILE) {
       debugf("could not find while of do-while");
       return ERROR__UNEXPECTED;
@@ -1506,17 +1501,21 @@ static int consume_control() {
     // this isn't special (can't define var/let etc), just consume as expr on paren
     _check(consume_expr_group());
 
-    // can have lines here
+    // can have newlines here, consume next anyway
     if (cursor->type == TOKEN_SEMICOLON) {
       cursor_next();
     }
+
+  } else {
+    // ... otherwise it's a boring statement
+     _check(consume_statement(0));
   }
 
   _STACK_END();
   return 0;
 }
 
-static int consume_expr_statement() {
+static int consume_expr_statement(int flags) {
   _STACK_BEGIN(STACK__EXPR);
 
   char *start = cursor->p;
@@ -1526,11 +1525,11 @@ static int consume_expr_statement() {
     return ERROR__UNEXPECTED;
   }
 
-  _STACK_END_SEMICOLON();
+  _STACK_END_SEMICOLON(flags);
   return 0;
 }
 
-static int consume_statement() {
+static int consume_statement(int flags) {
   switch (cursor->type) {
     case TOKEN_EOF:
     case TOKEN_COLON:
@@ -1546,7 +1545,7 @@ static int consume_statement() {
       cursor_next();
 
       do {
-        _check(consume_statement());
+        _check(consume_statement(0));
       } while (cursor->type != TOKEN_CLOSE);
 
       cursor_next();
@@ -1567,7 +1566,7 @@ static int consume_statement() {
         return ERROR__UNEXPECTED;
       }
       cursor_next();
-      _check(consume_statement());
+      _check(consume_statement(0));
 
       _STACK_END();
       return 0;
@@ -1578,7 +1577,7 @@ static int consume_statement() {
       break;
 
     default:
-      return consume_expr_statement();
+      return consume_expr_statement(flags);
   }
 
   switch (cursor->special) {
@@ -1649,7 +1648,7 @@ static int consume_statement() {
         _STACK_END();
       }
 
-      _STACK_END_SEMICOLON();
+      _STACK_END_SEMICOLON(flags);
       return 0;
 
     case LIT_DEBUGGER:
@@ -1658,7 +1657,7 @@ static int consume_statement() {
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
 
-      _STACK_END_SEMICOLON();
+      _STACK_END_SEMICOLON(flags);
       return 0;
 
     case LIT_CONTINUE:
@@ -1677,22 +1676,28 @@ static int consume_statement() {
         }
       }
 
-      _STACK_END_SEMICOLON();
+      _STACK_END_SEMICOLON(flags);
       return 0;
 
     case LIT_IMPORT:
       // if this is "import(" or "import.", treat as expr
       blep_token_peek();
       if (peek->type == TOKEN_PAREN || peek->special == MISC_DOT) {
-        return consume_expr_statement();
+        return consume_expr_statement(flags);
       }
-      _STACK_BEGIN(STACK__MODULE);
-      _check(consume_import());
-      _STACK_END_SEMICOLON();
-      return 0;
+      if (flags & STATEMENT__TOP) {
+        _STACK_BEGIN(STACK__MODULE);
+        _check(consume_import());
+        _STACK_END_SEMICOLON(0);
+        return 0;
+      }
+      break;
 
     case LIT_EXPORT:
-      return consume_export_wrap();
+      if (flags & STATEMENT__TOP) {
+        return consume_export_wrap();
+      }
+      break;
   }
 
   if (!(cursor->special & _MASK_MASQUERADE)) {
@@ -1701,7 +1706,7 @@ static int consume_statement() {
       // we restart this function to parse as label
       cursor->special = 0;
       cursor->type = TOKEN_LABEL;
-      return consume_statement();
+      return consume_statement(0);
     }
   }
 
@@ -1713,10 +1718,10 @@ static int consume_statement() {
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
     _check(consume_definition_list(special, 1));
-    _STACK_END_SEMICOLON();
+    _STACK_END_SEMICOLON(flags);
     return 0;
   } else if (cursor->special & _MASK_UNARY_OP || !cursor->special) {
-    return consume_expr_statement();
+    return consume_expr_statement(flags);
   }
 
   // catches things like "enum", "protected", which are keywords but largely unhandled
@@ -1725,11 +1730,11 @@ static int consume_statement() {
     _STACK_BEGIN(STACK__MISC);
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
-    _STACK_END_SEMICOLON();
+    _STACK_END_SEMICOLON(flags);
     return 0;
   }
 
-  return consume_expr_statement();
+  return consume_expr_statement(flags);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -1756,7 +1761,7 @@ int blep_parser_run() {
   }
   char *head = cursor->p;
 
-  _check(consume_statement());
+  _check(consume_statement(STATEMENT__TOP));
 
   int len = cursor->p - head;
   if (len == 0 && cursor->type != TOKEN_EOF) {
