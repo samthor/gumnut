@@ -21,7 +21,7 @@
 
 import * as harness from './harness.js';
 import rewriter from './node-rewriter.js';
-import * as lit from '../tokens/lit.mjs';
+import * as lit from '../tokens/lit.js';
 import {performance} from 'perf_hooks';
 
 const allowAllStack = false;

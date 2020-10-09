@@ -202,7 +202,7 @@ export default async function build(modulePromise) {
     },
 
     /**
-     * @param {!function(): void} callback to push
+     * @param {function(): void} callback to push
      */
     push(callback) {
       shadowed.push(_callback);
@@ -210,7 +210,7 @@ export default async function build(modulePromise) {
     },
 
     /**
-     * @return {!function(number): void} now active callback
+     * @return {function(number): void} now active callback
      */
     pop() {
       if (shadowed.length) {
