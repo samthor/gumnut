@@ -20,9 +20,9 @@
 #endif
 
 
+#define MODULE_LIST__IMPORT   0
 #define MODULE_LIST__EXPORT   1
 #define MODULE_LIST__REEXPORT 2
-#define MODULE_LIST__DEEP     4
 
 
 #define STATEMENT__TOP        1
@@ -68,8 +68,8 @@ static inline int cursor_next() {
 }
 
 // ends an optional stack _and_ consumes an upcoming semicolon on same line
-#define _STACK_END_SEMICOLON(flags) \
-    if (cursor->type == TOKEN_SEMICOLON && (cursor->special == SPECIAL__SAMELINE || flags & STATEMENT__DO_WHILE)) { \
+#define _STACK_END_SEMICOLON(mode) \
+    if (cursor->type == TOKEN_SEMICOLON && (cursor->special == SPECIAL__SAMELINE || mode == STATEMENT__DO_WHILE)) { \
       cursor_next(); /* only if on same line */ \
     } \
     _STACK_END();
@@ -1092,22 +1092,111 @@ static int consume_class(int special) {
   return 0;
 }
 
-static int consume_module_list(int flags) {
+static int consume_module_list_deep(int mode) {
+#ifdef DEBUG
+  if (cursor->type != TOKEN_BRACE) {
+    debugf("expected { to start module deep");
+    return ERROR__UNEXPECTED;
+  }
+#endif
+  cursor_next();
+
   for (;;) {
-    // check for inner brace
-    if (cursor->type == TOKEN_BRACE) {
-      if (flags & MODULE_LIST__DEEP) {
-        debugf("only one layer of braces allowed in module list\n");
+    switch (cursor->type) {
+      case TOKEN_CLOSE:
+        cursor_next();
+        return 0;
+
+      case TOKEN_SYMBOL:  // reentry
+      case TOKEN_LIT:
+        break;
+
+      case TOKEN_OP:
+        if (cursor->special == MISC_COMMA) {
+          cursor_next();
+          continue;
+        }
+        // fall-through
+
+      default:
+        debugf("deep module list expected lit or close");
         return ERROR__UNEXPECTED;
-      }
-      cursor_next();
-      _check(consume_module_list(flags | MODULE_LIST__DEEP));
-      if (cursor->type != TOKEN_CLOSE) {
-        debugf("missing close after module list\n");
-        return ERROR__UNEXPECTED;
+    }
+
+    blep_token_peek();
+    if (peek->special == LIT_AS) {
+      // this isn't a definition, but it's a property of the thing being imported or exported
+      // e.g., "foo as bar"
+
+      if (mode == MODULE_LIST__EXPORT) {
+        // foo=symbol, bar=external
+        cursor->special = 0;
+        cursor->type = TOKEN_SYMBOL;
+      } else {
+        // foo=external, bar=?
+        cursor->special = SPECIAL__EXTERNAL;
+        cursor->type = TOKEN_LIT;  // reset in case
       }
       cursor_next();
 
+      // consume "as"
+      cursor->type = TOKEN_KEYWORD;
+      cursor_next();
+
+      if (cursor->type != TOKEN_LIT && cursor->type != TOKEN_SYMBOL) {
+        debugf("missing literal after 'as'\n");
+        return ERROR__UNEXPECTED;
+      }
+
+      if (mode == MODULE_LIST__IMPORT) {
+        // this is an import, bar=symbol
+        cursor->type = TOKEN_SYMBOL;
+        cursor->special = SPECIAL__DECLARE | SPECIAL__TOP;
+      } else {
+        // export or reexport, bar=external
+        cursor->type = TOKEN_LIT;
+        cursor->special = SPECIAL__EXTERNAL;
+      }
+      cursor_next();
+
+    } else {
+      // we found "foo" on its own
+      switch (mode) {
+        case MODULE_LIST__EXPORT:
+          // symbol (not decl) being exported
+          // nb. technically modules can't export globals, but eh
+          cursor->type = TOKEN_SYMBOL;
+          cursor->special = SPECIAL__EXTERNAL;
+          break;
+
+        case MODULE_LIST__REEXPORT:
+          // reexport, not a symbol here
+          cursor->type = TOKEN_LIT;
+          cursor->special = SPECIAL__EXTERNAL;
+          break;
+
+        default:
+          // declares new value being imported from elsewhere, inside e.g. "{foo}"
+          cursor->type = TOKEN_SYMBOL;
+          cursor->special = SPECIAL__EXTERNAL | SPECIAL__DECLARE | SPECIAL__TOP;
+      }
+      cursor_next();
+
+    }
+
+    // check for comma in loop
+    if (cursor->special == MISC_COMMA) {
+      cursor_next();
+    }
+  }
+}
+
+// consumes comma-separated part after `import` keyword
+static int consume_import_module_list() {
+  for (;;) {
+    // check for inner brace
+    if (cursor->type == TOKEN_BRACE) {
+      _check(consume_module_list_deep(MODULE_LIST__IMPORT));
       if (cursor->special != MISC_COMMA) {
         return 0;
       }
@@ -1117,9 +1206,9 @@ static int consume_module_list(int flags) {
 
     switch (cursor->type) {
       case TOKEN_OP:
-        if (flags & MODULE_LIST__DEEP) {
-          debugf("can't have * inside {}'s of module");
-          return ERROR__UNEXPECTED;
+        if (cursor->special == MISC_COMMA) {
+          cursor_next();
+          continue;
         }
 
         // check for "*" start
@@ -1127,76 +1216,33 @@ static int consume_module_list(int flags) {
           return 0;
         }
         cursor_next();
-        // nb. we MUST be followed by "as x", but don't bother checking here
+
+        if (cursor->special != LIT_AS) {
+          debugf("expected `* as ...`");
+          return ERROR__UNEXPECTED;
+        }
+        cursor->type = TOKEN_KEYWORD;
+        cursor_next();
+
+        if (cursor->type != TOKEN_LIT && cursor->type != TOKEN_SYMBOL) {
+          debugf("missing literal after 'import * as'");
+          return ERROR__UNEXPECTED;
+        }
+        cursor->type = TOKEN_SYMBOL;
+        cursor->special = SPECIAL__DECLARE | SPECIAL__TOP;
+        cursor_next();
         break;
 
       case TOKEN_SYMBOL:  // reentry
       case TOKEN_LIT:
-        // check for random lit followed by "as x"
-        // nb. this can be "as" or "from", this is gross
-        blep_token_peek();
-        if (peek->special == LIT_AS) {
-          // this isn't a definition, but it's a property of the thing being imported
-
-          if ((flags & (MODULE_LIST__EXPORT | MODULE_LIST__REEXPORT)) == MODULE_LIST__EXPORT) {
-            // foo=symbol, bar=external
-            cursor->special = 0;
-            cursor->type = TOKEN_SYMBOL;
-          } else {
-            // foo=external, bar=?
-            cursor->special = SPECIAL__EXTERNAL;
-            cursor->type = TOKEN_LIT;  // reset in case
-          }
-          cursor_next();
-
-        } else {
-          // we found "foo" on its own
-          if (flags & MODULE_LIST__REEXPORT) {
-            // reexport, not a symbol here
-            cursor->type = TOKEN_LIT;
-            cursor->special = SPECIAL__EXTERNAL;
-          } else if (flags & MODULE_LIST__EXPORT) {
-            // symbol (not decl) being exported
-            // nb. technically modules can't export globals, but eh
-            cursor->type = TOKEN_SYMBOL;
-            cursor->special = SPECIAL__EXTERNAL;
-          } else {
-            // declares new value being imported from elsewhere
-            cursor->type = TOKEN_SYMBOL;
-            if (flags & MODULE_LIST__DEEP) {
-              // inside e.g. "{foo}", so foo is the var from elsewhere
-              cursor->special = SPECIAL__EXTERNAL | SPECIAL__DECLARE | SPECIAL__TOP;
-            } else {
-              // this _isn't_ external as it fundamentally points to "default"
-              cursor->special = SPECIAL__DECLARE | SPECIAL__TOP;
-            }
-          }
-          cursor_next();
-        }
+        // this imports the defaultExport of another file as a single name
+        cursor->type = TOKEN_SYMBOL;
+        cursor->special = SPECIAL__DECLARE | SPECIAL__TOP;
+        cursor_next();
         break;
 
       default:
         return 0;
-    }
-
-    // catch optional "as x" (this is here as we can be "* as x" or "foo as x")
-    if (cursor->special == LIT_AS) {
-      cursor->type = TOKEN_KEYWORD;
-      cursor_next();
-
-      if (cursor->type != TOKEN_LIT && cursor->type != TOKEN_SYMBOL) {
-        debugf("missing literal after 'as'\n");
-        return ERROR__UNEXPECTED;
-      }
-
-      if (flags & MODULE_LIST__EXPORT) {
-        cursor->type = TOKEN_LIT;
-        cursor->special = SPECIAL__EXTERNAL;
-      } else {
-        cursor->type = TOKEN_SYMBOL;
-        cursor->special = SPECIAL__DECLARE | SPECIAL__TOP;
-      }
-      cursor_next();
     }
 
     if (cursor->special != MISC_COMMA) {
@@ -1217,7 +1263,7 @@ static int consume_import() {
   cursor_next();
 
   if (cursor->type != TOKEN_STRING) {
-    _check(consume_module_list(0));
+    _check(consume_import_module_list());
 
     // consume "from"
     if (cursor->special != LIT_FROM) {
@@ -1241,7 +1287,38 @@ static int consume_export_reexport() {
   }
 #endif
   cursor_next();  // move to star/brace
-  _check(consume_module_list(MODULE_LIST__EXPORT | MODULE_LIST__REEXPORT));
+
+  switch (cursor->type) {
+    case TOKEN_BRACE:
+      _check(consume_module_list_deep(MODULE_LIST__REEXPORT));
+      break;
+
+    case TOKEN_OP:
+      if (cursor->special != MISC_STAR) {
+        debugf("expected `export *`");
+        return ERROR__UNEXPECTED;
+      }
+      cursor_next();
+
+      if (cursor->special == LIT_AS) {
+        cursor->type = TOKEN_KEYWORD;
+        cursor_next();
+
+        if (cursor->type != TOKEN_LIT && cursor->type != TOKEN_SYMBOL) {
+          debugf("reexport * as foo missing foo");
+          return ERROR__UNEXPECTED;
+        }
+
+        cursor->type = TOKEN_LIT;
+        cursor->special = SPECIAL__EXTERNAL;
+        cursor_next();
+      }
+      break;
+
+    default:
+      debugf("unexpected after export");
+      return ERROR__UNEXPECTED;
+  }
 
   if (cursor->special != LIT_FROM) {
     debugf("could not find FROM again");
@@ -1263,7 +1340,7 @@ static int consume_export_normal() {
   blep_token_peek();
   if (peek->type == TOKEN_BRACE) {
     cursor_next();  // move to star/brace
-    return consume_module_list(MODULE_LIST__EXPORT);
+    return consume_module_list_deep(MODULE_LIST__EXPORT);
   }
 
   int is_default = (peek->special == LIT_DEFAULT);
@@ -1329,7 +1406,7 @@ static int consume_export_wrap() {
   } else if (peek->type == TOKEN_BRACE) {
     _SET_RESTORE();
     cursor_next();  // move to star/brace
-    _check(consume_module_list(MODULE_LIST__EXPORT));
+    _check(consume_module_list_deep(MODULE_LIST__EXPORT));
     is_reexport = (cursor->special == LIT_FROM);
     _RESUME_RESTORE();
   }
@@ -1515,7 +1592,7 @@ static int consume_control() {
   return 0;
 }
 
-static int consume_expr_statement(int flags) {
+static int consume_expr_statement(int mode) {
   _STACK_BEGIN(STACK__EXPR);
 
   char *start = cursor->p;
@@ -1525,11 +1602,11 @@ static int consume_expr_statement(int flags) {
     return ERROR__UNEXPECTED;
   }
 
-  _STACK_END_SEMICOLON(flags);
+  _STACK_END_SEMICOLON(mode);
   return 0;
 }
 
-static int consume_statement(int flags) {
+static int consume_statement(int mode) {
   switch (cursor->type) {
     case TOKEN_EOF:
     case TOKEN_COLON:
@@ -1577,7 +1654,7 @@ static int consume_statement(int flags) {
       break;
 
     default:
-      return consume_expr_statement(flags);
+      return consume_expr_statement(mode);
   }
 
   switch (cursor->special) {
@@ -1648,7 +1725,7 @@ static int consume_statement(int flags) {
         _STACK_END();
       }
 
-      _STACK_END_SEMICOLON(flags);
+      _STACK_END_SEMICOLON(mode);
       return 0;
 
     case LIT_DEBUGGER:
@@ -1657,7 +1734,7 @@ static int consume_statement(int flags) {
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
 
-      _STACK_END_SEMICOLON(flags);
+      _STACK_END_SEMICOLON(mode);
       return 0;
 
     case LIT_CONTINUE:
@@ -1676,16 +1753,16 @@ static int consume_statement(int flags) {
         }
       }
 
-      _STACK_END_SEMICOLON(flags);
+      _STACK_END_SEMICOLON(mode);
       return 0;
 
     case LIT_IMPORT:
       // if this is "import(" or "import.", treat as expr
       blep_token_peek();
       if (peek->type == TOKEN_PAREN || peek->special == MISC_DOT) {
-        return consume_expr_statement(flags);
+        return consume_expr_statement(mode);
       }
-      if (flags & STATEMENT__TOP) {
+      if (mode == STATEMENT__TOP) {
         _STACK_BEGIN(STACK__MODULE);
         _check(consume_import());
         _STACK_END_SEMICOLON(0);
@@ -1694,7 +1771,7 @@ static int consume_statement(int flags) {
       break;
 
     case LIT_EXPORT:
-      if (flags & STATEMENT__TOP) {
+      if (mode == STATEMENT__TOP) {
         return consume_export_wrap();
       }
       break;
@@ -1718,10 +1795,10 @@ static int consume_statement(int flags) {
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
     _check(consume_definition_list(special, 1));
-    _STACK_END_SEMICOLON(flags);
+    _STACK_END_SEMICOLON(mode);
     return 0;
   } else if (cursor->special & _MASK_UNARY_OP || !cursor->special) {
-    return consume_expr_statement(flags);
+    return consume_expr_statement(mode);
   }
 
   // catches things like "enum", "protected", which are keywords but largely unhandled
@@ -1730,16 +1807,17 @@ static int consume_statement(int flags) {
     _STACK_BEGIN(STACK__MISC);
     cursor->type = TOKEN_KEYWORD;
     cursor_next();
-    _STACK_END_SEMICOLON(flags);
+    _STACK_END_SEMICOLON(mode);
     return 0;
   }
 
-  return consume_expr_statement(flags);
+  return consume_expr_statement(mode);
 }
 
 EMSCRIPTEN_KEEPALIVE
 int blep_parser_init(char *p, int len) {
   _check(blep_token_init(p, len));
+  parser_skip = 0;
 
   if (p[0] == '#' && p[1] == '!') {
     td->at = memchr(p, '\n', td->end - p);
