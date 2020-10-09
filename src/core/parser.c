@@ -722,7 +722,17 @@ restart_expr:
         // e.g., "var x = 123 new foo", "a ~ 2", "b ! c" is invalid
         _maybe_abandon();
       }
-      cursor_next();
+
+      if (cursor->special == LIT_YIELD) {
+        int line_no = cursor->line_no;
+        cursor_next();
+        if (cursor->line_no != line_no) {
+          _maybe_abandon();  // "yield \n 123" is invalid (generates ASI)
+        }
+      } else {
+        cursor_next();
+      }
+
       value_line = 0;
       continue;
     } else if (is_token_assign_like(cursor)) {
@@ -732,6 +742,9 @@ restart_expr:
     }
 
     switch (cursor->special) {
+      case LIT_YIELD:
+        cursor_next();
+
       case MISC_ARROW:
         // this only happens for badly attached arrows or in skip mode
         cursor_next();
