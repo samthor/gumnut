@@ -47,7 +47,8 @@
 #define STACK__LABEL      8   // label "foo":
 #define STACK__EXPORT     9   // normal export
 #define STACK__MODULE     10  // import/export that interacts with another
-#define _STACK_MAX        10
+#define STACK__INNER      11  // inner of function/class, defines top-level scope
+#define _STACK_MAX        11
 
 
 #endif//__BLEP_DEF_H

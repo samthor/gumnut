@@ -72,6 +72,7 @@ export const stacks = Object.freeze({
   label: 8,
   export: 9,
   module: 10,
+  inner: 11,
 });
 
 async function initialize(modulePromise, callback) {
@@ -134,6 +135,7 @@ export default async function build(modulePromise) {
       },
 
       _blep_parser_stack(special) {
+        // if specifically returns false, skip this stack
         return _stack(special) === false ? 1 : 0;
       },
     };

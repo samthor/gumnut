@@ -343,13 +343,19 @@ static int consume_arrowfunc_from_arrow(int is_statement) {
 
 // we assume that we're pointing at one (is_arrowfunc has returned true)
 static int consume_arrowfunc(int is_statement) {
+  // "async" prefix without immediate =>
+  int is_async = (cursor->special == LIT_ASYNC && !(blep_token_peek() == TOKEN_OP && peek->special == MISC_ARROW));
+  if (is_async) {
+    cursor->type = TOKEN_KEYWORD;
+  }
+
   _STACK_BEGIN(STACK__FUNCTION);
 
-  // "async" prefix without immediate =>
-  if (cursor->special == LIT_ASYNC && !(blep_token_peek() == TOKEN_OP && peek->special == MISC_ARROW)) {
-    cursor->type = TOKEN_KEYWORD;
+  if (is_async) {
     cursor_next();
   }
+
+  _STACK_BEGIN(STACK__INNER);
 
   switch (cursor->type) {
     case TOKEN_LIT:
@@ -368,6 +374,7 @@ static int consume_arrowfunc(int is_statement) {
   }
 
   _check(consume_arrowfunc_from_arrow(is_statement));
+  _STACK_END();
   _STACK_END();
   return 0;
 }
@@ -777,7 +784,7 @@ restart_expr:
           debugf("got dot/chain with unknown after: %d", cursor->type);
           return ERROR__UNEXPECTED;
         }
-        cursor->special = 0;
+        cursor->special = SPECIAL__PROPERTY;
         cursor_next();
         continue;
 
@@ -1024,7 +1031,6 @@ static int consume_definition_group() {
     debugf("definition didn't start with paren, was type=%d special=%d", cursor->type, cursor->special);
     return ERROR__UNEXPECTED;
   }
-  _STACK_BEGIN(STACK__DECLARE);
   cursor_next();
 
   if (cursor->type != TOKEN_CLOSE) {
@@ -1036,27 +1042,28 @@ static int consume_definition_group() {
     }
   }
   cursor_next();
-  _STACK_END();
   return 0;
 }
 
 static int consume_function(int special) {
-  // nb. this is either inside a decl or statement, we don't emit FUNCTION until inner scope
+  cursor->type = TOKEN_KEYWORD;
+
+  // nb. this is either a top-level declaration or within an expr
+  _STACK_BEGIN(STACK__FUNCTION);
 
   int is_async = 0;
   int is_generator = 0;
 
   if (cursor->special == LIT_ASYNC) {
     is_async = 1;
-    cursor->type = TOKEN_KEYWORD;
     cursor_next();
+    cursor->type = TOKEN_KEYWORD;
   }
 
   if (cursor->special != LIT_FUNCTION) {
     debugf("function did not start with 'function'");
     return ERROR__UNEXPECTED;
   }
-  cursor->type = TOKEN_KEYWORD;
   cursor_next();
 
   if (cursor->special == MISC_STAR) {
@@ -1067,11 +1074,12 @@ static int consume_function(int special) {
   _check(consume_defn_name(special));
   debugf("function, generator=%d async=%d", is_generator, is_async);
 
-  _STACK_BEGIN(STACK__FUNCTION);
+  _STACK_BEGIN(STACK__INNER);
   _check(consume_definition_group());
   _check(consume_statement(0));
   _STACK_END();
 
+  _STACK_END();
   return 0;
 }
 
@@ -1083,6 +1091,7 @@ static int consume_class(int special) {
   }
 #endif
   cursor->type = TOKEN_KEYWORD;
+  _STACK_BEGIN(STACK__CLASS);
   cursor_next();
 
   _check(consume_defn_name(special));
@@ -1098,12 +1107,30 @@ static int consume_class(int special) {
     _STACK_END();
   }
 
-  _STACK_BEGIN(STACK__CLASS);
+  _STACK_BEGIN(STACK__INNER);
   _check(consume_dict());
   _STACK_END();
 
+  _STACK_END();
   return 0;
 }
+
+static int consume_decl_stack(int special) {
+#ifdef DEBUG
+  if (!(cursor->special & _MASK_DECL)) {
+    debugf("expected decl start\n");
+    return ERROR__UNEXPECTED;
+  }
+#endif
+  _STACK_BEGIN(STACK__DECLARE);
+  special |= (cursor->special == LIT_VAR ? SPECIAL__TOP : 0);
+  cursor->type = TOKEN_KEYWORD;
+  cursor_next();
+  _check(consume_definition_list(special, 1));
+  _STACK_END_SEMICOLON();
+  return 0;
+}
+
 
 static int consume_module_list_deep(int mode) {
 #ifdef DEBUG
@@ -1342,62 +1369,50 @@ static int consume_export_reexport() {
   return consume_basic_key_string_special(SPECIAL__EXTERNAL);
 }
 
-// consumes a normal export (must be on `export` keyword) from self
-static int consume_export_normal() {
+// consumes a declare export (must be on `export` keyword) from self
+static int consume_export_declare() {
 #ifdef DEBUG
   if (cursor->special != LIT_EXPORT) {
     debugf("missing export keyword\n");
     return ERROR__UNEXPECTED;
   }
 #endif
-  blep_token_peek();
-  if (peek->type == TOKEN_BRACE) {
-    cursor_next();  // move to star/brace
-    return consume_module_list_deep(MODULE_LIST__EXPORT);
-  }
+  cursor_next();  // move over export
 
-  int is_default = (peek->special == LIT_DEFAULT);
+  int special_hoist;
+  int is_default = (cursor->special == LIT_DEFAULT);
   if (is_default) {
-    cursor_next();  // move over "export"
     cursor->type = TOKEN_KEYWORD;
-    blep_token_peek();
+    cursor_next();  // move over "default"
+    special_hoist = SPECIAL__DECLARE | SPECIAL__CHANGE;
+  } else {
+    special_hoist = SPECIAL__DECLARE | SPECIAL__CHANGE | SPECIAL__EXTERNAL;
   }
 
-  switch (peek->special) {
+  switch (cursor->special) {
+    case LIT_CLASS:
+      _check(consume_class(special_hoist));
+      return 0;
+
     case LIT_ASYNC:
-      if (is_default) {
-        cursor_next();  // move over "default"
-        blep_token_peek();
-        if (peek->special != LIT_FUNCTION) {
-          return consume_expr(1);  // e.g. "async("
-        }
-        return consume_statement(0);  // "async function" as statement
+      blep_token_peek();
+      if (peek->special != LIT_FUNCTION) {
+        break;  // this will be an expr
       }
       // fall-through
+
     case LIT_FUNCTION:
-    case LIT_CLASS:
-      cursor_next();  // move to statement start
-
-      if (cursor->special == LIT_ASYNC) {
-        blep_token_peek();
-        if (peek->special != LIT_FUNCTION) {
-          debugf("can't consume arrowfunc expr as non-default export");
-          return ERROR__UNEXPECTED;
-        }
-      }
-
-      return consume_statement(0);
+      _check(consume_function(special_hoist));
+      return 0;
   }
 
   if (is_default) {
-    cursor_next();  // move over "default"
     return consume_expr_statement(0);  // MUST be expr
-  } else if (peek->special & _MASK_DECL) {
-    cursor_next();  // move to statement start
-    return consume_statement(0);
+  } else if (cursor->special & _MASK_DECL) {
+    return consume_decl_stack(SPECIAL__EXTERNAL);
   }
 
-  debugf("expected `export` followed by brace or others");
+  debugf("bad `export` declaration (should be default, var/lit/const, function, class)");
   return ERROR__UNEXPECTED;
 }
 
@@ -1413,6 +1428,7 @@ static int consume_export_wrap() {
 
   // check if this is actually a reexport
   blep_token_peek();
+
   int is_reexport = 0;
   if (peek->special == MISC_STAR) {
     is_reexport = 1;  // must be `export * from 'foo'`
@@ -1422,6 +1438,14 @@ static int consume_export_wrap() {
     _check(consume_module_list_deep(MODULE_LIST__EXPORT));
     is_reexport = (cursor->special == LIT_FROM);
     _RESUME_RESTORE();
+
+    if (!is_reexport) {
+      _STACK_BEGIN(STACK__MODULE);
+      cursor_next();
+      _check(consume_module_list_deep(MODULE_LIST__EXPORT));
+      _STACK_END_SEMICOLON();
+      return 0;
+    }
   }
 
   if (is_reexport) {
@@ -1430,7 +1454,7 @@ static int consume_export_wrap() {
     _STACK_END_SEMICOLON();
   } else {
     _STACK_BEGIN(STACK__EXPORT);
-    _check(consume_export_normal());
+    _check(consume_export_declare());
     _STACK_END_SEMICOLON();
   }
 
@@ -1721,16 +1745,10 @@ static int consume_statement(int mode) {
       // fall-through
 
     case LIT_FUNCTION:
-      _STACK_BEGIN(STACK__DECLARE);
-      _check(consume_function(SPECIAL__DECLARE | SPECIAL__CHANGE));
-      _STACK_END();
-      return 0;
+      return consume_function(SPECIAL__DECLARE | SPECIAL__CHANGE);
 
     case LIT_CLASS:
-      _STACK_BEGIN(STACK__DECLARE);
-      _check(consume_class(SPECIAL__DECLARE | SPECIAL__CHANGE));
-      _STACK_END();
-      return 0;
+      return consume_class(SPECIAL__DECLARE | SPECIAL__CHANGE);
 
     case LIT_RETURN:
     case LIT_THROW:
@@ -1811,13 +1829,7 @@ static int consume_statement(int mode) {
   if (cursor->special & _MASK_CONTROL) {
     return consume_control();
   } else if (cursor->special & _MASK_DECL) {
-    _STACK_BEGIN(STACK__DECLARE);
-    int special = cursor->special == LIT_VAR ? SPECIAL__TOP : 0;
-    cursor->type = TOKEN_KEYWORD;
-    cursor_next();
-    _check(consume_definition_list(special, 1));
-    _STACK_END_SEMICOLON();
-    return 0;
+    return consume_decl_stack(0);
   } else if (cursor->special & _MASK_UNARY_OP || !cursor->special) {
     return consume_expr_statement(mode);
   }
