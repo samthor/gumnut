@@ -21,8 +21,8 @@ static const char *stack_names[] = {
   "class",
   "misc",
   "label",
+  "export",
   "module",
-  "external",
 };
 
 static const char *token_names[] = {
