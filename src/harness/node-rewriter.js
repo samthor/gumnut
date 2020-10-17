@@ -19,9 +19,9 @@
  */
 
 import fs from 'fs';
-import path from 'path';
-import build from './harness.js';
+import build from './node-harness.js';
 import stream from 'stream';
+import {noop} from './harness.js';
 
 const PENDING_BUFFER_MAX = 1024 * 16;
 
@@ -29,15 +29,9 @@ const PENDING_BUFFER_MAX = 1024 * 16;
  * @return {!Promise<function(string): blep.Base>}
  */
 export default async function wrapper() {
-  const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
-  const wasm = fs.readFileSync(source);
+  const {prepare, token, run: internal, handle} = await build();
 
-  const {prepare, run: internal, token, push, pop} = await build(wasm);
-
-  return (f) => {
-    // We want to stat the file so that we can create the correctly sized buffer and then _not_
-    // have to move the source code around.
-
+  const run = (f, {callback = noop, stack = noop}) => {
     const fd = fs.openSync(f);
     const stat = fs.fstatSync(fd);
     const readable = new stream.Readable({emitClose: true});
@@ -48,13 +42,13 @@ export default async function wrapper() {
       throw new Error(`did not read all bytes at once: ${read}/${stat.size}`);
     }
 
-    const run = (callback, stack) => {
-      let sent = 0;
+    let sent = 0;
 
-      internal((special) => {
+    handle({
+      callback() {
         const p = token.at();
 
-        const update = callback(special);
+        const update = callback();
         if (update === undefined) {
           if (p - sent > PENDING_BUFFER_MAX) {
             // send some data, we've gone through a lot
@@ -72,15 +66,22 @@ export default async function wrapper() {
 
         // move past the "original" string
         sent = p + token.length();
-      }, stack);
+      },
 
-      // send rest
-      readable.push(buffer.subarray(sent, buffer.length));
-      readable.push(null);
-      return readable;
-    };
+      open: stack,
 
-    return {token, run, push, pop};
+      close(type) {
+        stack(0);
+      },
+    });
+
+    internal();
+
+    // send rest
+    readable.push(buffer.subarray(sent, buffer.length));
+    readable.push(null);
+    return readable;
   };
 
+  return {run, token};
 }

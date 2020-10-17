@@ -23,6 +23,11 @@ const WRITE_AT = PAGE_SIZE * 2;
 const ERROR_CONTEXT_MAX = 256;  // display this much text on either side
 const TOKEN_WORD_COUNT = 6;
 
+const safeEval = eval;  // try to avoid global side-effects with rename
+
+export const noop = () => {};
+const defaultHandlers = {callback: noop, open: noop, close: noop};
+
 const decoder = new TextDecoder('utf-8');
 
 const errorMap = new Map();
@@ -90,13 +95,10 @@ async function initialize(modulePromise, callback) {
   }
 
   const module = await modulePromise;
-  let instance = await WebAssembly.instantiate(module, importObject);
+  const {instance} = await WebAssembly.instantiate(module, importObject);
 
-  // emscripten _post_instantiate
-  if (!instance.exports && instance.instance) {
-    instance = instance.instance;
-  }
-  instance.exports.__post_instantiate && instance.exports.__post_instantiate();
+  // emscripten creates _post_instantiate to configure statics
+  instance.exports.__post_instantiate?.();
 
   return {instance, memory};
 }
@@ -106,43 +108,49 @@ async function initialize(modulePromise, callback) {
  * @return {!Promise<blep.Harness>}
  */
 export default async function build(modulePromise) {
-  const shadowed = [];  // shadowed callbacks
-  let _callback = null;
-  let _stack = null;
+  let {callback, open, close} = defaultHandlers;
 
   // These views need to be mutable as they'll point to a new WebAssembly.Memory when it gets
   // resized for a new run.
   let view = new Uint8Array(0);
 
-  const {instance, memory} = await initialize(modulePromise, () => {
-    return {
-      _memset(s, c, n) {
-        // nb. This only happens once per run in prsr.
-        view.fill(c, s, s + n);
-        return s;
-      },
+  const imports = {
+    _memset(s, c, n) {
+      // nb. This only happens once per run in prsr.
+      view.fill(c, s, s + n);
+      return s;
+    },
 
-      _memchr(ptr, char, len) {
-        const index = view.subarray(ptr, ptr + len).indexOf(char);
-        if (index === -1) {
-          return 0;
-        }
-        return ptr + index;
-      },
+    _memchr(ptr, char, len) {
+      const index = view.subarray(ptr, ptr + len).indexOf(char);
+      if (index === -1) {
+        return 0;
+      }
+      return ptr + index;
+    },
 
-      _blep_parser_callback() {
-        _callback();
-      },
+    _blep_parser_callback() {
+      callback();
+    },
 
-      _blep_parser_stack(special) {
-        // if specifically returns false, skip this stack
-        return _stack(special) === false ? 1 : 0;
-      },
-    };
-  });
+    _blep_parser_open(type) {
+      // if specifically returns false, skip this stack
+      return open(type) === false ? 1 : 0;
+    },
 
-  const {exports} = instance;
-  const tokenAt = exports._blep_parser_cursor();
+    _blep_parser_close(type) {
+      close(type);
+    },
+  };
+
+  const {instance, memory} = await initialize(modulePromise, () => imports);
+  const {exports: {
+    _blep_parser_cursor: parser_cursor,
+    _blep_parser_init: parser_init,
+    _blep_parser_run: parser_run,
+  }} = instance;
+
+  const tokenAt = parser_cursor();
   if (tokenAt >= WRITE_AT) {
     throw new Error(`token in invalid location`);
   }
@@ -150,41 +158,62 @@ export default async function build(modulePromise) {
   let tokenView = new Int32Array(memory.buffer, tokenAt, TOKEN_WORD_COUNT);
   let inputSize = 0;
 
-  return {
-
-    token: {
-      void() {
-        return tokenView[0] - WRITE_AT;
-      },
-
-      at() {
-        return tokenView[1] - WRITE_AT;
-      },
-
-      length() {
-        return tokenView[2];
-      },
-
-      lineNo() {
-        return tokenView[3];
-      },
-
-      type() {
-        return tokenView[4];
-      },
-
-      special() {
-        return tokenView[5];
-      },
-
-      view() {
-        return view.subarray(tokenView[1], tokenView[1] + tokenView[2]);
-      },
-
-      string() {
-        return decoder.decode(view.subarray(tokenView[1], tokenView[1] + tokenView[2]));
-      },
+  const token = /** @type {blep.Token} */ ({
+    void() {
+      return tokenView[0] - WRITE_AT;
     },
+
+    at() {
+      return tokenView[1] - WRITE_AT;
+    },
+
+    length() {
+      return tokenView[2];
+    },
+
+    lineNo() {
+      return tokenView[3];
+    },
+
+    type() {
+      return tokenView[4];
+    },
+
+    special() {
+      return tokenView[5];
+    },
+
+    view() {
+      return view.subarray(tokenView[1], tokenView[1] + tokenView[2]);
+    },
+
+    string() {
+      return decoder.decode(view.subarray(tokenView[1], tokenView[1] + tokenView[2]));
+    },
+
+    stringValue() {
+      if (tokenView[4] !== types.string) {
+        throw new TypeError('Can\'t stringValue() on non-string');
+      }
+      const target = view.subarray(tokenView[1], tokenView[1] + tokenView[2]);
+
+      switch (target[0]) {
+        case 96:
+          if (target[target.length - 1] == 96) {
+            break;
+          }
+          // fall-through
+
+        case 125:
+          throw new TypeError('Can\'t stringValue() on template string with holes');
+      }
+
+      return safeEval(decoder.decode(target));
+    },
+  });
+
+  return {
+    token,
 
     /**
      * @param {number} size
@@ -205,44 +234,31 @@ export default async function build(modulePromise) {
     },
 
     /**
-     * @param {function(): void} callback to push
+     * @param {blep.Handlers} handlers
      */
-    push(callback) {
-      shadowed.push(_callback);
-      _callback = callback;
-    },
-
-    /**
-     * @return {function(number): void} now active callback
-     */
-    pop() {
-      if (shadowed.length) {
-        _callback = shadowed.pop();
-      }
-      return _callback;
+    handle(handlers) {
+      ({callback, open, close} = {callback, open, close, ...handlers});
     },
 
     /**
      * @param {function(): void} callback
      * @param {(function(number): boolean)=} stack
      */
-    run(callback, stack=() => {}) {
-      _callback = callback;
-      _stack = stack;
-      shadowed.splice(0, shadowed.length);  // clear previous shadowed callbacks
-
-      let ret = exports._blep_parser_init(WRITE_AT, inputSize);
+    run() {
+      let statements = 0;
+      let ret = parser_init(WRITE_AT, inputSize);
       if (ret >= 0) {
         do {
-          ret = exports._blep_parser_run();
+          ret = parser_run();
+          ++statements;
         } while (ret > 0);
       }
 
-      _callback = null;
-      _stack = null;
+      // reset handlers
+      ({callback, open, close} = defaultHandlers);
 
       if (ret === 0) {
-        return;
+        return statements;
       }
       const at = tokenView[1];
       const view = new Uint8Array(memory.buffer);

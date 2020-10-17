@@ -37,45 +37,34 @@ const runTimes = [];
  */
 async function moduleImportRewriter(resolve) {
   const prepStart = performance.now();
-  const w = await rewriter();
+  const {token, run} = await rewriter();
   prepTime = performance.now() - prepStart;
 
   return (f) => {
     const runStart = performance.now();
-    const {token, run} = w(f);
 
-    const callback = () => {
-      if (token.special() === harness.specials.external && token.type() === harness.types.string) {
-        const s = token.string();
-        const out = resolve(s.substr(1, s.length - 2), f);
-        if (out && typeof out === 'string') {
-          return JSON.stringify(out);
+    const args = {
+      callback() {
+        if (token.special() === harness.specials.external && token.type() === harness.types.string) {
+          const out = resolve(token.stringValue(), f);
+          if (out && typeof out === 'string') {
+            return JSON.stringify(out);
+          }
         }
-      }
-    };
-    const stack = (type) => {
-      if (allowAllStack) {
-        return true;
-      }
-      if (type === harness.stacks.external) {
-        return true;
-      }
-      if (type === harness.stacks.module && token.special() === lit.IMPORT) {
-        return true;
-      }
-      return false;
+      },
+
+      stack(type) {
+        return (allowAllStack || type === harness.stacks.module);
+      },
     };
 
     try {
-      return run(callback, stack);
+      return run(f, args);
     } finally {
       runTimes.push(performance.now() - runStart);
     }
   };
 }
-
-
-
 
 
 const run = await moduleImportRewriter((importee, importer) => {

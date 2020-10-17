@@ -1,4 +1,10 @@
 declare namespace blep {
+  export interface Handlers {
+    callback?: () => void;
+    open?: (number) => boolean|void;
+    close?: (number) => void;
+  }
+
   export interface Token {
     void(): number;
     at(): number;
@@ -8,6 +14,7 @@ declare namespace blep {
     special(): number;
     view(): Uint8Array;
     string(): string;
+    stringValue(): string;
   }
 
   export interface Base {
@@ -18,27 +25,19 @@ declare namespace blep {
     token: Token;
 
     /**
-     * Runs the parser over the entire source.
+     * Runs the parser over the entire source. Clears handlers on finish.
      *
-     * @param callback to call for tokens
-     * @param stack handles stack calls, return true to allow stack
+     * @returns number of top-level statements
      */
-    run(callback: () => void, stack?: (number) => boolean): void;
+    run(): number;
 
     /**
-     * Pushes a new callback for tokens.
+     * Replaces any number of handlers with passed handlers.
      * 
-     * @param callback call for tokens
+     * @param handlers to replace with
      */
-    push(callback: () => void): void;
+    handle(handlers: blep.Handlers): void;
 
-    /**
-     * Pops the top callback for tokens, returning the new active callback. Cannot pop the original
-     * callback configured in `run()`.
-     * 
-     * @returns the new active callback
-     */
-    pop(): () => void;
   }
 
   export interface Harness extends Base {
