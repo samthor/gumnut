@@ -13,7 +13,7 @@ tokendef _td;
 #endif
 
 #ifndef NULL
-#define NULL 0
+#define NULL ((char*)0)
 #endif
 
 #ifdef DEBUG
