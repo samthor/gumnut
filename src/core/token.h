@@ -23,8 +23,6 @@ int blep_token_peek();
 int blep_token_set_restore();
 int blep_token_restore();
 
-inline int blep_token_is_symbol_part(char);
-
 
 #define STACK_SIZE    256
 

@@ -12,6 +12,7 @@ struct token *blep_parser_cursor();
 // below must be provided
 
 void blep_parser_callback();
-int blep_parser_stack(int);
+int blep_parser_open(int);
+void blep_parser_close(int);
 
 #endif//__BLEP_PARSER_H

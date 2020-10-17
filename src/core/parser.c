@@ -26,12 +26,13 @@
 
 
 #define STATEMENT__TOP        1
+#define STATEMENT__BLOCK      2
 
 
 static int consume_statement(int);
 static int consume_expr(int);
 static int consume_expr_group();
-static int consume_expr_statement(int);
+static int consume_expr_statement();
 static int consume_definition_group();
 static int consume_function(int);
 static int consume_class(int);
@@ -58,13 +59,14 @@ static inline int cursor_next() {
 
 // begins an optional stack (client can ignore it)
 #define _STACK_BEGIN(type) { \
-  int prev_parser_skip = parser_skip; \
-  parser_skip = parser_skip || blep_parser_stack(type);
+  const int _stack_type = type; \
+  int _prev_parser_skip = parser_skip; \
+  parser_skip = parser_skip || blep_parser_open(type);
 
 // ends an optional stack
 #define _STACK_END() ; \
-  parser_skip || blep_parser_stack(0); \
-  parser_skip = prev_parser_skip; \
+  if (!parser_skip) { blep_parser_close(_stack_type); } \
+  parser_skip = _prev_parser_skip; \
 }
 
 // ends an optional stack _and_ consumes an upcoming semicolon on same line
@@ -1407,7 +1409,7 @@ static int consume_export_declare() {
   }
 
   if (is_default) {
-    return consume_expr_statement(0);  // MUST be expr
+    return consume_expr_statement();  // MUST be expr
   } else if (cursor->special & _MASK_DECL) {
     return consume_decl_stack(SPECIAL__EXTERNAL);
   }
@@ -1637,7 +1639,7 @@ static int consume_control() {
   return 0;
 }
 
-static int consume_expr_statement(int mode) {
+static int consume_expr_statement() {
   _STACK_BEGIN(STACK__EXPR);
 
   char *start = cursor->p;
@@ -1667,7 +1669,7 @@ static int consume_statement(int mode) {
       cursor_next();
 
       do {
-        _check(consume_statement(0));
+        _check(consume_statement(STATEMENT__BLOCK));
       } while (cursor->type != TOKEN_CLOSE);
 
       cursor_next();
@@ -1699,7 +1701,7 @@ static int consume_statement(int mode) {
       break;
 
     default:
-      return consume_expr_statement(mode);
+      return consume_expr_statement();
   }
 
   switch (cursor->special) {
@@ -1714,6 +1716,7 @@ static int consume_statement(int mode) {
         return ERROR__UNEXPECTED;
       }
       cursor_next();
+      // nb. this doesn't parent a statement
 
       _STACK_END();
       return 0;
@@ -1733,22 +1736,10 @@ static int consume_statement(int mode) {
         return ERROR__UNEXPECTED;
       }
       cursor_next();
+      // nb. this doesn't parent a statement
 
       _STACK_END();
       return 0;
-
-    case LIT_ASYNC:
-      blep_token_peek();
-      if (peek->special != LIT_FUNCTION) {
-        break;  // only "async function" is a top-level function
-      }
-      // fall-through
-
-    case LIT_FUNCTION:
-      return consume_function(SPECIAL__DECLARE | SPECIAL__CHANGE);
-
-    case LIT_CLASS:
-      return consume_class(SPECIAL__DECLARE | SPECIAL__CHANGE);
 
     case LIT_RETURN:
     case LIT_THROW:
@@ -1795,11 +1786,30 @@ static int consume_statement(int mode) {
       _STACK_END_SEMICOLON();
       return 0;
 
+    case LIT_ASYNC:
+      blep_token_peek();
+      if (peek->special != LIT_FUNCTION) {
+        break;  // only "async function" is a top-level function
+      }
+      // fall-through
+
+    case LIT_FUNCTION:
+      if (!mode) {
+        return consume_expr_statement();
+      }
+      return consume_function(SPECIAL__DECLARE | SPECIAL__CHANGE);
+
+    case LIT_CLASS:
+      if (!mode) {
+        return consume_expr_statement();
+      }
+      return consume_class(SPECIAL__DECLARE | SPECIAL__CHANGE);
+
     case LIT_IMPORT:
       // if this is "import(" or "import.", treat as expr
       blep_token_peek();
       if (peek->type == TOKEN_PAREN || peek->special == MISC_DOT) {
-        return consume_expr_statement(mode);
+        return consume_expr_statement();
       }
       if (mode == STATEMENT__TOP) {
         _STACK_BEGIN(STACK__MODULE);
@@ -1831,7 +1841,7 @@ static int consume_statement(int mode) {
   } else if (cursor->special & _MASK_DECL) {
     return consume_decl_stack(0);
   } else if (cursor->special & _MASK_UNARY_OP || !cursor->special) {
-    return consume_expr_statement(mode);
+    return consume_expr_statement();
   }
 
   // catches things like "enum", "protected", which are keywords but largely unhandled
@@ -1844,7 +1854,7 @@ static int consume_statement(int mode) {
     return 0;
   }
 
-  return consume_expr_statement(mode);
+  return consume_expr_statement();
 }
 
 EMSCRIPTEN_KEEPALIVE

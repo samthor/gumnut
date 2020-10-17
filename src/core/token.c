@@ -662,7 +662,3 @@ int blep_token_restore() {
 
   return td->depth;
 }
-
-inline int blep_token_is_symbol_part(char c) {
-  return lookup_symbol[c];
-}
