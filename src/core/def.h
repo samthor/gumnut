@@ -25,7 +25,8 @@
 #define TOKEN_SYMBOL    13  // this and above must be literal types
 #define TOKEN_KEYWORD   14
 #define TOKEN_LABEL     15  // to the left of a ':', e.g. 'foo:'
-#define _TOKEN_MAX      15
+#define TOKEN_BLOCK     16  // also {, but for block code
+#define _TOKEN_MAX      16
 
 
 #define SPECIAL__NEWLINE         1
@@ -34,6 +35,7 @@
 #define SPECIAL__PROPERTY        8
 #define SPECIAL__CHANGE          16   // underlying symbol is being changed
 #define SPECIAL__EXTERNAL        32   // is an external reference (import/export)
+#define SPECIAL__DESTRUCTURING   64   // on { or [
 #define SPECIAL__LIT             (1 << 30)
 
 

@@ -53,6 +53,7 @@ export const types = Object.freeze({
   symbol: 13,
   keyword: 14,
   label: 15,
+  block: 16,
 });
 
 export const specials = Object.freeze({
@@ -62,6 +63,7 @@ export const specials = Object.freeze({
   property: 8,
   change: 16,
   external: 32,
+  destructuring: 64,
   lit: (1 << 30),
 });
 
@@ -95,7 +97,11 @@ async function initialize(modulePromise, callback) {
   }
 
   const module = await modulePromise;
-  const {instance} = await WebAssembly.instantiate(module, importObject);
+  let instance = await WebAssembly.instantiate(module, importObject);
+
+  if (instance.instance) {
+    instance = instance;
+  }
 
   // emscripten creates _post_instantiate to configure statics
   instance.exports.__post_instantiate?.();

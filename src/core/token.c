@@ -526,30 +526,34 @@ int blep_token_update(int type) {
     return 0;
   }
 
-  if (type == TOKEN_REGEXP) {
+  switch (type) {
+    case TOKEN_REGEXP: {
 #ifdef DEBUG
-    if (!(td->curr.type == TOKEN_OP && td->curr.p[0] == '/')) {
-      debugf("can't update non-slash to regexp: %d", td->curr.type);
-      return ERROR__INTERNAL;
+      if (!(td->curr.type == TOKEN_OP && td->curr.p[0] == '/')) {
+        debugf("can't update non-slash to regexp: %d", td->curr.type);
+        return ERROR__INTERNAL;
+      }
+#endif
+      int len = blepi_consume_slash_regexp(td->curr.p);
+      td->at += (len - 1);
+      td->curr.len = len;
+      td->curr.type = TOKEN_REGEXP;
+      return 0;
     }
-#endif
-    int len = blepi_consume_slash_regexp(td->curr.p);
-    td->at += (len - 1);
-    td->curr.len = len;
-    td->curr.type = TOKEN_REGEXP;
-    return 0;
-  } else if (type == TOKEN_OP) {
+
+    case TOKEN_OP: {
 #ifdef DEBUG
-  if (td->curr.type != TOKEN_REGEXP) {
-      debugf("can't update non-regexp to slash");
-      return ERROR__INTERNAL;
-  }
+      if (td->curr.type != TOKEN_REGEXP) {
+        debugf("can't update non-regexp to slash");
+        return ERROR__INTERNAL;
+      }
 #endif
-    // slash is always length=1, don't remove it
-    td->at -= (td->curr.len - 1);
-    td->curr.len = 1;
-    td->curr.type = TOKEN_OP;
-    return 0;
+      // slash is always length=1, don't remove it
+      td->at -= (td->curr.len - 1);
+      td->curr.len = 1;
+      td->curr.type = TOKEN_OP;
+      return 0;
+    }
   }
 
   debugf("got bad blep_token_update");

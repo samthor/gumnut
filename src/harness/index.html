@@ -58,8 +58,13 @@ window.addEventListener('load', (ev) => {
       }
 
       const node = append(token.s, TOKEN_LOOKUP(token.type));
+      node.tabIndex = 0;
 
       let special = token.special;
+      if (special & harness.specials.lit || token.type === harness.types.close) {
+        return;  // don't mark this one
+      }
+
       for (let check = 1; special; check <<= 1) {
         if (special & check) {
           const mark = SPECIAL_LOOKUP(check);
@@ -69,8 +74,6 @@ window.addEventListener('load', (ev) => {
           special &= ~(check);
         }
       }
-
-      node.tabIndex = 0;
     });
 
     // take largest lineNo length and set as var
@@ -80,7 +83,7 @@ window.addEventListener('load', (ev) => {
     }
   };
 
-  runnerPromise.then(({prepare, run, token}) => {
+  runnerPromise.then(({prepare, run, token, handle}) => {
     const update = () => {
       const bytes = encoder.encode(input.value);
       const tokens = [];
@@ -91,15 +94,20 @@ window.addEventListener('load', (ev) => {
       try {
         const buffer = prepare(bytes.length);
         buffer.set(bytes);
-        run((special) => {
-          const t = {
-            lineNo: token.lineNo(),
-            type: token.type(),
-            s: token.string(),
-            special,
-          };
-          tokens.push(t);
+
+        handle({
+          callback() {
+            const t = {
+              lineNo: token.lineNo(),
+              type: token.type(),
+              s: token.string(),
+              special: token.special(),
+            };
+            tokens.push(t);
+          },
         });
+
+        run();
       } catch (e) {
         err = e;
       }

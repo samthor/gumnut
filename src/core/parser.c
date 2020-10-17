@@ -867,6 +867,7 @@ static int consume_destructuring(int special) {
   }
 #endif
   int start = cursor->type;
+  cursor->special = SPECIAL__DESTRUCTURING;
   cursor_next();
 
   for (;;) {
@@ -1665,6 +1666,7 @@ static int consume_statement(int mode) {
 
     case TOKEN_BRACE:
       // naked block statement (or under function)
+      cursor->type = TOKEN_BLOCK;
       _STACK_BEGIN(STACK__BLOCK);
       cursor_next();
 

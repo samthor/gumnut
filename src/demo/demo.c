@@ -41,6 +41,7 @@ static const char *token_names[] = {
   "symbol",
   "keyword",
   "label",
+  "block",
 };
 
 void blep_parser_callback() {
@@ -80,6 +81,9 @@ void blep_parser_callback() {
     }
     if (t->special & SPECIAL__CHANGE) {
       printf(" change");
+    }
+    if (t->special & SPECIAL__DESTRUCTURING) {
+      printf(" destructuring");
     }
   }
 
