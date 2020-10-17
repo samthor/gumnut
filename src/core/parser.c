@@ -71,7 +71,7 @@ static inline int cursor_next() {
 
 // ends an optional stack _and_ consumes an upcoming semicolon on same line
 #define _STACK_END_SEMICOLON() \
-    if (cursor->type == TOKEN_SEMICOLON && cursor->special == SPECIAL__SAMELINE) { \
+    if (cursor->type == TOKEN_SEMICOLON && cursor->special == 0) { \
       cursor_next(); /* only if on same line */ \
     } \
     _STACK_END();

@@ -63,8 +63,8 @@ void blep_parser_callback() {
 
   if (t->special && !(t->special & SPECIAL__LIT) && t->type != TOKEN_CLOSE) {
     printf(" ~");
-    if (t->special & SPECIAL__SAMELINE) {
-      printf(" sameline");
+    if (t->special & SPECIAL__NEWLINE) {
+      printf(" newline");
     }
     if (t->special & SPECIAL__DECLARE) {
       printf(" declare");

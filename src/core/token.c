@@ -489,10 +489,10 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
     }
 
     case _LOOKUP__SEMICOLON:
-      if (prev->line_no == *line_no) {
-        _reth(1, TOKEN_SEMICOLON, SPECIAL__SAMELINE);
+      if (prev->line_no == *line_no || td->depth[td->stack] == LIT_DO) {
+        _ret(1, TOKEN_SEMICOLON);
       }
-      _ret(1, TOKEN_SEMICOLON);
+      _reth(1, TOKEN_SEMICOLON, SPECIAL__NEWLINE);
 
     case TOKEN_EOF:
     case _LOOKUP__SPACE:

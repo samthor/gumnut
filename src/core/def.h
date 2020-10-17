@@ -28,7 +28,7 @@
 #define _TOKEN_MAX      15
 
 
-#define SPECIAL__SAMELINE        1
+#define SPECIAL__NEWLINE         1
 #define SPECIAL__DECLARE         2    // let, const, var
 #define SPECIAL__TOP             4    // for "var" or var-like only (top-level)
 #define SPECIAL__PROPERTY        8
