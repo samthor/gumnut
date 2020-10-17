@@ -43,7 +43,7 @@ static int consume_destructuring(int);
 
 
 static int parser_skip = 0;
-static int parser_allow_semicolon = 0;  // within do-while
+
 
 #define cursor (&(td->curr))
 #define peek (&(td->peek))
