@@ -23,10 +23,15 @@
 #include "../demo/read.c"
 
 void blep_parser_callback() {
+  // ignore
 }
 
-int blep_parser_stack(int stack) {
+int blep_parser_open(int type) {
   return 0;
+}
+
+void blep_parser_close(int type) {
+  // ignore
 }
 
 int main() {

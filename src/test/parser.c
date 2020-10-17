@@ -44,8 +44,12 @@ void blep_parser_callback() {
   ++active.at;
 }
 
-int blep_parser_stack(int special) {
+int blep_parser_open(int type) {
   return 0;
+}
+
+void blep_parser_close(int type) {
+  // ignore
 }
 
 int run_testdef(testdef *def) {
