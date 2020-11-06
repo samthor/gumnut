@@ -41,4 +41,5 @@ emcc $FLAGS \
   -o runner.wasm \
   *.c ../core/*.c
 
+chmod -x runner.wasm
 echo "Ok! => runner.wasm"
