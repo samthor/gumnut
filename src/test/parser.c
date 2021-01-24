@@ -671,6 +671,40 @@ int main() {
     TOKEN_SYMBOL,    // foo
   );
 
+  _test("class var should close", "class X { #foo = 1\n#bar() {} }",
+    TOKEN_KEYWORD,   // class
+    TOKEN_SYMBOL,    // X
+    TOKEN_BRACE,     // {
+    TOKEN_LIT,       // foo
+    TOKEN_OP,        // =
+    TOKEN_NUMBER,    // 1
+    TOKEN_LIT,       // bar
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BLOCK,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
+  );
+
+  _test("class var should close", "class X { foo = () => {\n}\nbar() {} }",
+    TOKEN_KEYWORD,   // class
+    TOKEN_SYMBOL,    // X
+    TOKEN_BRACE,     // {
+    TOKEN_LIT,       // foo
+    TOKEN_OP,        // =
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_OP,        // =>
+    TOKEN_BLOCK,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_LIT,       // bar
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BLOCK,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
+  );
+
   // restate all errors
   render_output = 1;
   testdef *p = &fail;

@@ -208,6 +208,8 @@ static inline int consume_dict() {
 
         if (is_symbol) {
           cursor->type = TOKEN_SYMBOL;
+        } else {
+          cursor->type = TOKEN_LIT;
         }
         cursor->special = SPECIAL__PROPERTY;
         cursor_next();
@@ -250,7 +252,8 @@ static inline int consume_dict() {
       case TOKEN_COLON:
         // nb. this allows "async * foo:" or "async foo =" which is nonsensical
         cursor_next();
-        _check(consume_expr(0));
+        // this isn't really a statement, but we want to _abandon_ like it is
+        _check(consume_expr(1));
         break;
     }
 
@@ -276,6 +279,7 @@ static inline int consume_dict() {
         cursor_next();
         continue;
 
+      case TOKEN_SYMBOL:  // reentry
       case TOKEN_LIT:
       case TOKEN_NUMBER:
       case TOKEN_STRING:
@@ -673,13 +677,19 @@ restart_expr:
         continue;
 
       case TOKEN_CLOSE:
-        if (paren_count) {
-          --paren_count;
-          cursor_next();
-          value_line = td->line_no;
-          continue;
+        if (!paren_count) {
+          return 0;
         }
-        return 0;
+        --paren_count;
+        cursor_next();
+
+        // if we saw () in skip mode, we don't look for the arrowfunc, so check for it here
+        if (parser_skip && cursor->special == MISC_ARROW) {
+          _check(consume_arrowfunc_from_arrow(is_statement));
+        }
+
+        value_line = td->line_no;
+        continue;
 
       case TOKEN_STRING:
         if (cursor->p[0] == '}') {
