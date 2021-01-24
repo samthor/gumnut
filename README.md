@@ -1,3 +1,5 @@
+[![Tests](https://github.com/samthor/blep/workflows/Tests/badge.svg)](https://github.com/samthor/blep/actions)
+
 # B L EcmaScript Parser
 
 
