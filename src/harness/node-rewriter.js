@@ -18,23 +18,31 @@
  * @fileoverview Provides a wrapper for modifying JS with Node.
  */
 
-import fs from 'fs';
+import * as blep from './types/index.js';
+import * as fs from 'fs';
+import * as stream from 'stream';
 import build from './node-harness.js';
-import stream from 'stream';
 import {noop} from './harness.js';
 
 const PENDING_BUFFER_MAX = 1024 * 16;
 
 /**
- * @return {!Promise<function(string): blep.Base>}
+ * @return {!Promise<{
+ *   run(file: string, args?: blep.RewriterArgs): stream.Readable,
+ *   token: blep.Token,
+ * }>}
  */
 export default async function wrapper() {
-  const {prepare, token, run: internal, handle} = await build();
+  const {prepare, token, run: internalRun, handle} = await build();
 
+  /**
+   * @param {string} f
+   * @param {blep.RewriterArgs} args
+   */
   const run = (f, {callback = noop, stack = noop}) => {
-    const fd = fs.openSync(f);
+    const fd = fs.openSync(f, 'r');
     const stat = fs.fstatSync(fd);
-    const readable = new stream.Readable({emitClose: true});
+    const readable = new stream.Readable();
 
     const buffer = prepare(stat.size);
     const read = fs.readSync(fd, buffer, 0, stat.size, 0);
@@ -71,11 +79,12 @@ export default async function wrapper() {
       open: stack,
 
       close(type) {
+        // nb. we're passed the type being closed
         stack(0);
       },
     });
 
-    internal();
+    internalRun();
 
     // send rest
     readable.push(buffer.subarray(sent, buffer.length));
@@ -83,5 +92,8 @@ export default async function wrapper() {
     return readable;
   };
 
-  return {run, token};
+  return {
+    run,
+    token,
+  };
 }

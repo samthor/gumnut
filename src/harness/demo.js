@@ -23,6 +23,7 @@ import * as harness from './harness.js';
 import rewriter from './node-rewriter.js';
 import * as lit from '../tokens/lit.js';
 import {performance} from 'perf_hooks';
+import * as stream from 'stream';
 
 const allowAllStack = false;
 
@@ -32,8 +33,8 @@ const runTimes = [];
 /**
  * Builds a method which rewrites imports from a passed filename.
  *
- * @param {function(string, string): string} resolve passed importee and importer, return new import
- * @return {function(string): !ReadableStream}
+ * @param {(importee: string, importer: string) => string} resolve passed importee and importer, return new import
+ * @return {Promise<(file: string) => stream.Readable>}
  */
 async function moduleImportRewriter(resolve) {
   const prepStart = performance.now();

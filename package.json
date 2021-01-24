@@ -5,6 +5,7 @@
     "test": "./src/test/parser.sh && ./src/test/test262.sh"
   },
   "devDependencies": {
+    "@types/node": "^14.14.22",
     "test262-parser-tests": "^0.0.5"
   }
 }

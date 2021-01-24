@@ -370,7 +370,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
       // js is dumb: slashes are ambiguous, so guess here. we're almost always right, but callers
       // can fix it later if we're, for example, being run through an esoteric validation suite.
       switch (prev->type) {
-        case TOKEN_KEYWORD:  // only seen if modified by parser
+        case TOKEN_KEYWORD:  // reentry
         case TOKEN_LIT:
           if (prev->special & (_MASK_KEYWORD | _MASK_REL_OP | _MASK_UNARY_OP)) {
             break;
@@ -390,7 +390,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
           }
           _ret(1, TOKEN_OP);
 
-        case TOKEN_SYMBOL:  // only seen if modified by parser
+        case TOKEN_SYMBOL:  // reentry
         case TOKEN_REGEXP:  // facepalm
         case TOKEN_NUMBER:
           _ret(1, TOKEN_OP);

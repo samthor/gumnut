@@ -18,6 +18,8 @@
  * @fileoverview Low-level wrapper for blep. Does not use Node-specific APIs.
  */
 
+import * as blep from './types/index.js';
+
 const PAGE_SIZE = 65536;
 const WRITE_AT = PAGE_SIZE * 2;
 const ERROR_CONTEXT_MAX = 256;  // display this much text on either side
@@ -26,6 +28,7 @@ const TOKEN_WORD_COUNT = 6;
 const safeEval = eval;  // try to avoid global side-effects with rename
 
 export const noop = () => {};
+/** @type {blep.Handlers} */
 const defaultHandlers = {callback: noop, open: noop, close: noop};
 
 const decoder = new TextDecoder('utf-8');
@@ -82,7 +85,11 @@ export const stacks = Object.freeze({
   inner: 11,
 });
 
-async function initialize(modulePromise, callback) {
+/**
+ * @param {Promise<BufferSource>} modulePromise
+ * @param {blep.BlepImports} imports
+ */
+async function initialize(modulePromise, imports) {
   const memory = new WebAssembly.Memory({initial: 2});
 
   const env = {
@@ -91,27 +98,29 @@ async function initialize(modulePromise, callback) {
   };
   const importObject = {env};
 
-  const methods = await callback();
-  for (const method in methods) {
-    importObject.env[method] = methods[method];
+  for (const method in imports) {
+    importObject.env[method] = imports[method];
   }
 
   const module = await modulePromise;
-  let instance = await WebAssembly.instantiate(module, importObject);
+  const instantiatedSource = await WebAssembly.instantiate(module, importObject);
+  const {instance} = instantiatedSource;
 
-  if (instance.instance) {
-    instance = instance;
-  }
+  const calls = /** @type {blep.BlepCalls} */ (/** @type {unknown} */ (instance.exports));
 
   // emscripten creates _post_instantiate to configure statics
-  instance.exports.__post_instantiate?.();
+  calls.__post_instantiate();
 
-  return {instance, memory};
+  return {
+    instance,
+    memory,
+    calls,
+  };
 }
 
 /**
- * @param {!Promise<BufferSource>} modulePromise
- * @return {!Promise<blep.Harness>}
+ * @param {Promise<BufferSource>} modulePromise
+ * @return {Promise<blep.Harness>}
  */
 export default async function build(modulePromise) {
   let {callback, open, close} = defaultHandlers;
@@ -120,14 +129,15 @@ export default async function build(modulePromise) {
   // resized for a new run.
   let view = new Uint8Array(0);
 
+  /** @type {blep.BlepImports} */
   const imports = {
-    _memset(s, c, n) {
+    memset(s, c, n) {
       // nb. This only happens once per run in prsr.
       view.fill(c, s, s + n);
       return s;
     },
 
-    _memchr(ptr, char, len) {
+    memchr(ptr, char, len) {
       const index = view.subarray(ptr, ptr + len).indexOf(char);
       if (index === -1) {
         return 0;
@@ -135,26 +145,31 @@ export default async function build(modulePromise) {
       return ptr + index;
     },
 
-    _blep_parser_callback() {
+    blep_parser_callback() {
       callback();
     },
 
-    _blep_parser_open(type) {
+    blep_parser_open(type) {
       // if specifically returns false, skip this stack
       return open(type) === false ? 1 : 0;
     },
 
-    _blep_parser_close(type) {
+    blep_parser_close(type) {
       close(type);
     },
   };
 
-  const {instance, memory} = await initialize(modulePromise, () => imports);
-  const {exports: {
-    _blep_parser_cursor: parser_cursor,
-    _blep_parser_init: parser_init,
-    _blep_parser_run: parser_run,
-  }} = instance;
+  const {
+    instance,
+    memory,
+    calls,
+  } = await initialize(modulePromise, imports);
+
+  const {
+    blep_parser_init: parser_init,
+    blep_parser_run: parser_run,
+    blep_parser_cursor: parser_cursor,
+  } = calls;
 
   const tokenAt = parser_cursor();
   if (tokenAt >= WRITE_AT) {
@@ -223,7 +238,7 @@ export default async function build(modulePromise) {
 
     /**
      * @param {number} size
-     * @return {!Uint8Array}
+     * @return {Uint8Array}
      */
     prepare(size) {
       const memoryNeeded = WRITE_AT + size + 1;
@@ -240,7 +255,7 @@ export default async function build(modulePromise) {
     },
 
     /**
-     * @param {blep.Handlers} handlers
+     * @param {Partial<blep.Handlers>} handlers
      */
     handle(handlers) {
       ({callback, open, close} = {callback, open, close, ...handlers});
@@ -285,7 +300,7 @@ export default async function build(modulePromise) {
 }
 
 /**
- * @param {!Uint8Array} view
+ * @param {Uint8Array} view
  * @return {string}
  */
 export function stringFrom(view) {
@@ -306,7 +321,7 @@ export function stringFrom(view) {
 }
 
 /**
- * @param {!Uint8Array} view
+ * @param {Uint8Array} view
  * @param {number} at of error or character
  * @param {number} writeAt start of buffer
  * @return {{line: string, pos: number, offset: number}}
