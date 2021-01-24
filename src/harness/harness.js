@@ -88,6 +88,11 @@ export const stacks = Object.freeze({
 /**
  * @param {Promise<BufferSource>} modulePromise
  * @param {blep.BlepImports} imports
+ * @return {Promise<{
+ *   instance: WebAssembly.Instance,
+ *   memory: WebAssembly.Memory,
+ *   calls: blep.BlepCalls,
+ * }>}
  */
 async function initialize(modulePromise, imports) {
   const memory = new WebAssembly.Memory({initial: 2});
@@ -95,12 +100,9 @@ async function initialize(modulePromise, imports) {
   const env = {
     memory,
     __memory_base: PAGE_SIZE,  // put Emscripten 'stack' at start of memory, not really used
+    ...imports,
   };
   const importObject = {env};
-
-  for (const method in imports) {
-    importObject.env[method] = imports[method];
-  }
 
   const module = await modulePromise;
   const instantiatedSource = await WebAssembly.instantiate(module, importObject);
@@ -108,14 +110,10 @@ async function initialize(modulePromise, imports) {
 
   const calls = /** @type {blep.BlepCalls} */ (/** @type {unknown} */ (instance.exports));
 
-  // emscripten creates _post_instantiate to configure statics
+  // emscripten creates __post_instantiate to configure statics
   calls.__post_instantiate();
 
-  return {
-    instance,
-    memory,
-    calls,
-  };
+  return {instance, memory, calls};
 }
 
 /**
@@ -159,11 +157,7 @@ export default async function build(modulePromise) {
     },
   };
 
-  const {
-    instance,
-    memory,
-    calls,
-  } = await initialize(modulePromise, imports);
+  const {memory, calls} = await initialize(modulePromise, imports);
 
   const {
     blep_parser_init: parser_init,
@@ -261,10 +255,6 @@ export default async function build(modulePromise) {
       ({callback, open, close} = {callback, open, close, ...handlers});
     },
 
-    /**
-     * @param {function(): void} callback
-     * @param {(function(number): boolean)=} stack
-     */
     run() {
       let statements = 0;
       let ret = parser_init(WRITE_AT, inputSize);

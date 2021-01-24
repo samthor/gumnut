@@ -27,10 +27,7 @@ import {noop} from './harness.js';
 const PENDING_BUFFER_MAX = 1024 * 16;
 
 /**
- * @return {!Promise<{
- *   run(file: string, args?: blep.RewriterArgs): stream.Readable,
- *   token: blep.Token,
- * }>}
+ * @return {Promise<blep.RewriterReturn>}
  */
 export default async function wrapper() {
   const {prepare, token, run: internalRun, handle} = await build();

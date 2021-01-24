@@ -15,21 +15,21 @@
  */
 
 /**
- * @fileoverview Low-level wrapper for blep. Does not use Node-specific APIs.
+ * @fileoverview Node wrapper for Blep. Uses Node's fs package to load the runner wasm.
  */
 
 import * as blep from './types/index.js';
 
 export * from './harness.js';
 import build from './harness.js';
-import * as path from 'path';
+
 import * as fs from 'fs';
 
 /**
  * @return {!Promise<blep.Harness>}
  */
 export default async function wrapper() {
-  const source = path.join(path.dirname(import.meta.url.split(':')[1]), 'runner.wasm');
-  const wasm = fs.readFileSync(source);
+  const {pathname} = new URL('./runner.wasm', import.meta.url);
+  const wasm = fs.readFileSync(pathname);
   return build(Promise.resolve(wasm));
 }

@@ -22,6 +22,10 @@ export interface Handlers {
   close: (number) => void;
 }
 
+/**
+ * An interface to the current token. This will change what it is pointing to, when the parser
+ * moves its head as it just reflects the current token.
+ */
 export interface Token {
   void(): number;
   at(): number;
@@ -29,8 +33,21 @@ export interface Token {
   lineNo(): number;
   type(): number;
   special(): number;
+
+  /**
+   * Finds the current subarray for this token.
+   */
   view(): Uint8Array;
+
+  /**
+   * Decodes as UTF-8 to a raw string the current subarray for this token.
+   */
   string(): string;
+
+  /**
+   * Evaluates the current string token into a JS string (i.e., removes quotes and escapes). Throws
+   * if pointing to a non-string, or a template string with holes.
+   */
   stringValue(): string;
 }
 
@@ -72,4 +89,9 @@ export interface Harness extends Base {
 export interface RewriterArgs {
   callback(): string|void;
   stack(type: number): boolean|void;
+}
+
+export interface RewriterReturn {
+  run(file: string, args?: RewriterArgs): stream.Readable;
+  token: Token;
 }

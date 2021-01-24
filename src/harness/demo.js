@@ -19,12 +19,15 @@
  * @fileoverview Node interface to a JS imports rewriter.
  */
 
+import * as blep from './types/index.js';
+
 import * as harness from './harness.js';
 import rewriter from './node-rewriter.js';
-import * as lit from '../tokens/lit.js';
 import {performance} from 'perf_hooks';
 import * as stream from 'stream';
 
+// Set to true to allow all stacks to be parsed (even though we don't need to as modules are
+// top-level).
 const allowAllStack = false;
 
 let prepTime = 0.0;
@@ -44,6 +47,7 @@ async function moduleImportRewriter(resolve) {
   return (f) => {
     const runStart = performance.now();
 
+    /** @type {blep.RewriterArgs} */
     const args = {
       callback() {
         if (token.special() === harness.specials.external && token.type() === harness.types.string) {
