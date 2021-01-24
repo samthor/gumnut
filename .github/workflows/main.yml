@@ -1,0 +1,29 @@
+# This relies on Clang being installed.  
+
+name: Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v2
+
+    - name: node
+      uses: actions/setup-node@v1
+      with:
+        node-version: '14.x'
+
+    - name: install
+      run: npm install
+
+    - name: test
+      run: npm run test
