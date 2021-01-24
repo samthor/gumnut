@@ -382,7 +382,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
             break;  // inner of template string starts expr
             // TODO: could check stack too
           }
-          _ret(1, TOKEN_OP);  // strings coeerce to numbers if divided
+          _ret(1, TOKEN_OP);  // strings coeerce to numbers if divided (except import targets)
 
         case TOKEN_CLOSE:
           if (prev->p[0] == ':') {

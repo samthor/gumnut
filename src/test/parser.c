@@ -191,7 +191,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_SYMBOL,    // y
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_REGEXP,    // / 100 /
   );
@@ -210,7 +210,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_SYMBOL,    // y
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_OP,        // /
     TOKEN_NUMBER,    // 100
@@ -254,7 +254,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_SYMBOL,    // x
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
     TOKEN_OP,        // /
@@ -268,7 +268,7 @@ int main() {
     TOKEN_STRING,    // 'abc'
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );
@@ -295,7 +295,7 @@ int main() {
     TOKEN_LIT,       // get
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );
@@ -306,7 +306,7 @@ int main() {
     TOKEN_SYMBOL,    //
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_OP,        // yield
     TOKEN_REGEXP,    // /123/
     TOKEN_CLOSE,     // }
@@ -318,7 +318,7 @@ int main() {
     TOKEN_SYMBOL,    //
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_PAREN,     // (
     TOKEN_OP,        // yield
     TOKEN_REGEXP,    // /123/
@@ -392,7 +392,7 @@ int main() {
 
   _test("do-while block", "do {} while ();",
     TOKEN_KEYWORD,   // do
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_KEYWORD,   // while
     TOKEN_PAREN,     // (
@@ -434,19 +434,19 @@ int main() {
   );
 
   _test("arrow ASI bug", "{_ => {}}",
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_SYMBOL,    // _
     TOKEN_OP,        // =>
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );
 
   _test("arrow value bug", "{_ => {}/123/g;}",
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_SYMBOL,    // _
     TOKEN_OP,        // =>
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_REGEXP,    // /123/g
     TOKEN_SEMICOLON, // ;
@@ -455,7 +455,7 @@ int main() {
 
   _test("ASI in case", "switch { default: }",
     TOKEN_KEYWORD,   // switch
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_KEYWORD,   // default
     TOKEN_COLON,     // :
     TOKEN_CLOSE,     // }
@@ -472,7 +472,7 @@ int main() {
     TOKEN_LIT,       // x
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );
@@ -493,7 +493,7 @@ int main() {
     TOKEN_CLOSE,     // ]
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );
@@ -520,7 +520,7 @@ int main() {
     TOKEN_LIT,       // x
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );
@@ -550,7 +550,7 @@ int main() {
   );
 
   _test("doesn't consume label", "{break}",
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_KEYWORD,   // break
     TOKEN_CLOSE,     // }
   );
@@ -561,7 +561,7 @@ int main() {
     TOKEN_SYMBOL,    // foo
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
   );
 
@@ -571,7 +571,7 @@ int main() {
     TOKEN_SYMBOL,    // foo
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
   );
 
@@ -608,7 +608,7 @@ int main() {
     TOKEN_LIT,       // if
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_CLOSE,     // }
   );
@@ -630,10 +630,10 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
     TOKEN_KEYWORD,   // try
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_KEYWORD,   // finally
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
   );
 
@@ -661,7 +661,7 @@ int main() {
   );
 
   _test("regexp as start of block", "{/f/}",
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_REGEXP,    // /f/
     TOKEN_CLOSE,     // }
   );
