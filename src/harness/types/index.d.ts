@@ -1,4 +1,7 @@
 
+// TODO(samthor): This is a Node-specific type.
+import * as stream from 'stream';
+
 /**
  * Calls provided by the internal C code.
  */

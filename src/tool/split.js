@@ -18,6 +18,8 @@
  * @fileoverview Splits an incoming JS file into parts.
  */
 
+import * as blep from '../harness/types/index.js';
+
 import {StackTree, ModuleNode} from './lib/vars.js';
 import {stacks, specials, types} from '../harness/harness.js';
 import * as lit from '../tokens/lit.js';
@@ -25,7 +27,7 @@ import {parseModule} from './lib/handlers.js';
 import {hashBuffer} from './lib/hash.js';
 
 
-const encoder = new TextEncoder('utf-8');
+const encoder = new TextEncoder();
 
 
 // TODO(samthor): There's several types of code:

@@ -2,8 +2,8 @@
 
 import {processFile} from './split.js';
 import build from '../harness/node-harness.js';
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const runner = await build();
 const sources = process.argv.slice(2).map((source) => {
