@@ -1,4 +1,7 @@
 
+/**
+ * Calls provided by the internal C code.
+ */
 export interface BlepCalls {
   __post_instantiate(): void;
 
@@ -7,6 +10,9 @@ export interface BlepCalls {
   blep_parser_cursor(): number;
 }
 
+/**
+ * Imports required by the internal C code, including standard library calls.
+ */
 export interface BlepImports {
   memset(at: number, byte: number, size: number): void;
   memchr(at: number, byte: number, siez: number): number;

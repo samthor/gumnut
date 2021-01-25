@@ -86,7 +86,7 @@ export const stacks = Object.freeze({
 });
 
 /**
- * @param {Promise<BufferSource>} modulePromise
+ * @param {Promise<BufferSource>|BufferSource} modulePromise
  * @param {blep.BlepImports} imports
  * @return {Promise<{
  *   instance: WebAssembly.Instance,
@@ -117,7 +117,7 @@ async function initialize(modulePromise, imports) {
 }
 
 /**
- * @param {Promise<BufferSource>} modulePromise
+ * @param {Promise<BufferSource>|BufferSource} modulePromise
  * @return {Promise<blep.Harness>}
  */
 export default async function build(modulePromise) {

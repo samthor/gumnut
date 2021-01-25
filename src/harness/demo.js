@@ -21,13 +21,14 @@
 
 import * as blep from './types/index.js';
 
-import * as harness from './harness.js';
+import * as e from './harness.js';
+import buildHarness from './node-harness.js';
 import rewriter from './node-rewriter.js';
 import {performance} from 'perf_hooks';
 import * as stream from 'stream';
 
 // Set to true to allow all stacks to be parsed (even though we don't need to as modules are
-// top-level).
+// top-level). Useful for debugging.
 const allowAllStack = false;
 
 let prepTime = 0.0;
@@ -41,7 +42,10 @@ const runTimes = [];
  */
 async function moduleImportRewriter(resolve) {
   const prepStart = performance.now();
-  const {token, run} = await rewriter();
+
+  const harness = await buildHarness();
+  const {token, run} = await rewriter(harness);
+
   prepTime = performance.now() - prepStart;
 
   return (f) => {
@@ -50,7 +54,7 @@ async function moduleImportRewriter(resolve) {
     /** @type {blep.RewriterArgs} */
     const args = {
       callback() {
-        if (token.special() === harness.specials.external && token.type() === harness.types.string) {
+        if (token.special() === e.specials.external && token.type() === e.types.string) {
           const out = resolve(token.stringValue(), f);
           if (out && typeof out === 'string') {
             return JSON.stringify(out);
@@ -59,7 +63,7 @@ async function moduleImportRewriter(resolve) {
       },
 
       stack(type) {
-        return (allowAllStack || type === harness.stacks.module);
+        return (allowAllStack || type === e.stacks.module);
       },
     };
 

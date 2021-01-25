@@ -21,16 +21,16 @@
 import * as blep from './types/index.js';
 import * as fs from 'fs';
 import * as stream from 'stream';
-import build from './node-harness.js';
 import {noop} from './harness.js';
 
 const PENDING_BUFFER_MAX = 1024 * 16;
 
 /**
- * @return {Promise<blep.RewriterReturn>}
+ * @param {blep.Harness} harness
+ * @return {blep.RewriterReturn}
  */
-export default async function wrapper() {
-  const {prepare, token, run: internalRun, handle} = await build();
+export default function wrapper(harness) {
+  const {prepare, token, run: internalRun, handle} = harness;
 
   /**
    * @param {string} f
