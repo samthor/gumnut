@@ -104,3 +104,10 @@ export interface RewriterReturn {
   run(file: string, args?: RewriterArgs): stream.Readable;
   token: Token;
 }
+
+/**
+ * Resolver helper for module import rewriting.
+ *
+ * Notably this cannot be async as blep internally cannot be.
+ */
+export type Resolver = (importee: string, importer: string) => string|void;

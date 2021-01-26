@@ -15,7 +15,10 @@
  */
 
 /**
- * @fileoverview Provides a wrapper for modifying JS with Node.
+ * @fileoverview Provides a wrapper for modifying on-disk JS with Node.
+ *
+ * This reads from disk as we can read the file directly into the WebAssembly memory reqiured by
+ * blep, rather than copying it around.
  */
 
 import * as blep from './types/index.js';
