@@ -16,9 +16,26 @@
 
 import * as blep from '../../harness/types/index.js';
 import * as path from 'path';
-
+import {Worker} from 'worker_threads';
 
 const regexpValidPath = /^\.{0,2}\//;
+
+
+function buildImportMetaWorker() {
+  const source = `console.debug('lol'); globalThis ? 1 : 2`;
+  const w = new Worker(source, {eval: true});
+  console.debug('started worker');
+}
+
+
+const internalResolver = (() => {
+  try {
+    import.meta.resolve;
+    return buildImportMetaWorker();
+  } catch (e) {
+    throw 'unsupported';
+  }
+})();
 
 
 /**
