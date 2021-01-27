@@ -17,26 +17,54 @@
 import * as blep from '../../harness/types/index.js';
 import * as path from 'path';
 import {Worker} from 'worker_threads';
-
-const regexpValidPath = /^\.{0,2}\//;
-
+import * as imw from './import-meta-worker-shared.js';
 
 function buildImportMetaWorker() {
-  const source = `console.debug('lol'); globalThis ? 1 : 2`;
-  const w = new Worker(source, {eval: true});
-  console.debug('started worker');
+  // Use a shared, SharedArrayBuffer as even though this is a worker we fundamentally cannot call
+  // it in async fashion since we block on Atomics. This whole file is NOT async.
+  const shared = new SharedArrayBuffer(imw.RESOLVE_BUFFER_SIZE);
+  const i32 = new Int32Array(shared, 0, 2);  // result, length
+  const i8 = new Uint8Array(shared, 8);
+
+  const u = new URL('import-meta-worker.mjs', import.meta.url);
+  const w = new Worker(u, {workerData: shared});
+
+  w.on('error', (err) => Promise.reject(err));
+
+  const dec = new TextDecoder('utf-8');
+
+  /**
+   * @param {string} specifier
+   * @param {string|URL} parent
+   * @return {string}
+   */
+  return (specifier, parent) => {
+    parent = parent.toString();  // flatten URL to string
+    w.postMessage({specifier, parent});
+
+    Atomics.wait(i32, 0, 0);
+    const ok = i32[0] === imw.STATUS_SUCCESS;
+    if (ok) {
+      const length = i32[1];
+      return dec.decode(i8.slice(0, length));
+    }
+    return undefined;
+  };
 }
 
 
+/**
+ * @type {(specifier: string, parent: string|URL) => string|undefined}
+ */
 const internalResolver = (() => {
   try {
-    import.meta.resolve;
+    import.meta.resolve('.');
     return buildImportMetaWorker();
   } catch (e) {
-    throw 'unsupported';
+    // TODO(samthor): Write something the old fashioned way.
+    throw new Error('unsupported');
   }
 })();
-
 
 /**
  * Builds a resolver function.
@@ -51,20 +79,21 @@ export function buildResolver(root = process.cwd()) {
       return; // ignore, is valid URL
     } catch {}
 
-    if (!regexpValidPath.test(importee)) {
-
-      const pathname = path.join(root, path.dirname(importer));
-
-      // TODO: weird blocking shit to extract this
-      const cand = import.meta.resolve(importee, importer);
-
-
-      return;  // valid
+    const absoluteImporter = new URL(path.join(root, importer), import.meta.url);
+    const resolved = internalResolver(importee, absoluteImporter);
+    if (resolved === undefined) {
+      return;  // failed to resolve
     }
 
-    // TODO(samthor): the work
-    return `/node_modules/${importee}/index.js`;
-
-    // TODO(samthor): Look for missing '.js' or importing directories (imports index.js)
+    // We get back file:// URLs, beacause Node doesn't care about our webserver.
+    // Find the relative path to node_modules from the request.
+    const resolvedUrl = new URL(resolved);
+    if (resolvedUrl.protocol !== 'file:') {
+      throw new Error(`expected file:, was: ${resolvedUrl.toString()}`);
+    }
+    const importerDir = path.dirname(absoluteImporter.pathname)
+    return path.relative(importerDir, resolvedUrl.pathname);
   };
 }
+
+// console.info('TEST imported', internalResolver('viz-observer', import.meta.url));

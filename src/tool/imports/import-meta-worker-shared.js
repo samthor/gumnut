@@ -1,6 +1,5 @@
-#!/usr/bin/env node --experimental-import-meta-resolve
 /*
- * Copyright 2020 Sam Thorogood.
+ * Copyright 2021 Sam Thorogood.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -15,18 +14,6 @@
  * the License.
  */
 
-/**
- * @fileoverview Node interface to a JS imports rewriter.
- */
-
-import {moduleImportRewriter} from './lib.js';
-import {buildResolver} from './resolve.js';
-
-const resolver = buildResolver();
-const run = await moduleImportRewriter(resolver);
-
-const targets = process.argv.slice(2);
-targets.forEach((target) => {
-  const s = run(target);
-  s.pipe(process.stdout);
-});
+export const STATUS_SUCCESS = 1;
+export const STATUS_FAILURE = 2;
+export const RESOLVE_BUFFER_SIZE = 1024;
