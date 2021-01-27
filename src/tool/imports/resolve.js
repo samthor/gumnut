@@ -18,6 +18,11 @@ import * as blep from '../../harness/types/index.js';
 import * as path from 'path';
 import {Worker} from 'worker_threads';
 import * as imw from './import-meta-worker-shared.js';
+import * as fs from 'fs';
+
+
+const relativeRegexp = /^\.{0,2}\//;
+
 
 function buildImportMetaWorker() {
   // Use a shared, SharedArrayBuffer as even though this is a worker we fundamentally cannot call
@@ -44,6 +49,7 @@ function buildImportMetaWorker() {
 
     Atomics.wait(i32, 0, 0);
     const ok = i32[0] === imw.STATUS_SUCCESS;
+    i32[0] = 0;  // clear result
     if (ok) {
       const length = i32[1];
       return dec.decode(i8.slice(0, length));
@@ -91,9 +97,27 @@ export function buildResolver(root = process.cwd()) {
     if (resolvedUrl.protocol !== 'file:') {
       throw new Error(`expected file:, was: ${resolvedUrl.toString()}`);
     }
+    let {pathname} = resolvedUrl;
+
+    // Make sure the resolved path actually exists.
+    let stat;
+    try {
+      stat = fs.statSync(pathname);
+    } catch (e) {
+      return undefined;  // doesn't actually exist
+    }
+    if (stat.isDirectory()) {
+      // TODO(samthor): Check for index.js? package.json?
+    }
+
     const importerDir = path.dirname(absoluteImporter.pathname)
-    return path.relative(importerDir, resolvedUrl.pathname);
+    const out = path.relative(importerDir, pathname);
+    if (!relativeRegexp.test(out)) {
+      return `./${out}`;  // don't allow naked pathname
+    }
+    return out;
   };
 }
 
-// console.info('TEST imported', internalResolver('viz-observer', import.meta.url));
+// const r = buildResolver();
+// console.info('TEST imported', r('./_test.js', './_test.js'));
