@@ -145,7 +145,8 @@ export function buildResolver(root = process.cwd()) {
       }
       ({pathname} = resolvedUrl);
     } else {
-      pathname = importee;
+      const absoluteUrl = new URL(importee, absoluteImporter);
+      ({pathname} = absoluteUrl);
     }
 
     // Confirm the path actually exists (with extra node things).
