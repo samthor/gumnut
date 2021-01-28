@@ -31,6 +31,8 @@ const relativeRegexp = /^\.{0,2}\//;
 /**
  * This builds a "sync" worker that calls out to `import.meta.resolve` where available.
  *
+ * TODO(samthor): Maybe drop this, because it'll always prefer "node" import.
+ *
  * @return {blep.Resolver}
  */
 function buildImportMetaWorker() {
