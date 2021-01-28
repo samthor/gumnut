@@ -1,4 +1,4 @@
-#!/usr/bin/env node --experimental-import-meta-resolve
+#!/usr/bin/env node
 /*
  * Copyright 2020 Sam Thorogood.
  *

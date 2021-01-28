@@ -19,11 +19,20 @@ import * as path from 'path';
 import {Worker} from 'worker_threads';
 import * as imw from './import-meta-worker-shared.js';
 import * as fs from 'fs';
+import {legacyResolve} from './legacy-resolve.js';
+
+
+const extToCheck = ['js', 'mjs'];
 
 
 const relativeRegexp = /^\.{0,2}\//;
 
 
+/**
+ * This builds a "sync" worker that calls out to `import.meta.resolve` where available.
+ *
+ * @return {blep.Resolver}
+ */
 function buildImportMetaWorker() {
   // Use a shared, SharedArrayBuffer as even though this is a worker we fundamentally cannot call
   // it in async fashion since we block on Atomics. This whole file is NOT async.
@@ -33,16 +42,12 @@ function buildImportMetaWorker() {
 
   const u = new URL('import-meta-worker.mjs', import.meta.url);
   const w = new Worker(u, {workerData: shared});
+  w.unref();
 
   w.on('error', (err) => Promise.reject(err));
 
   const dec = new TextDecoder('utf-8');
 
-  /**
-   * @param {string} specifier
-   * @param {string|URL} parent
-   * @return {string}
-   */
   return (specifier, parent) => {
     parent = parent.toString();  // flatten URL to string
     w.postMessage({specifier, parent});
@@ -59,18 +64,58 @@ function buildImportMetaWorker() {
 }
 
 
+let internalResolver;
+
+try {
+  // @ts-ignore
+  import.meta.resolve('.');
+  internalResolver = buildImportMetaWorker();
+} catch (e) {
+  internalResolver = legacyResolve;
+}
+
+
 /**
- * @type {(specifier: string, parent: string|URL) => string|undefined}
+ * @param {string} p
  */
-const internalResolver = (() => {
+const statOrNull = (p) => {
   try {
-    import.meta.resolve('.');
-    return buildImportMetaWorker();
+    return fs.statSync(p);
   } catch (e) {
-    // TODO(samthor): Write something the old fashioned way.
-    throw new Error('unsupported');
+    return null;
   }
-})();
+};
+
+
+/**
+ * @param {string} pathname
+ * @return {string=}
+ */
+function confirmPath(pathname) {
+  const stat = statOrNull(pathname);
+  if (stat === null) {
+    // Look for a file with a suffix.
+    for (const ext of extToCheck) {
+      const check = `${pathname}.${ext}`;
+      const stat = statOrNull(check);
+      if (stat && !stat.isDirectory()) {
+        return check;
+      }
+    }
+  } else if (stat.isDirectory()) {
+    // Look for index.js in the directory.
+    for (const ext of extToCheck) {
+      const check = path.join(pathname, `index.${ext}`);
+      const stat = statOrNull(check);
+      if (stat && !stat.isDirectory()) {
+        return check;
+      }
+    }
+  } else {
+    return pathname;
+  }
+}
+
 
 /**
  * Builds a resolver function.
@@ -85,31 +130,29 @@ export function buildResolver(root = process.cwd()) {
       return; // ignore, is valid URL
     } catch {}
 
+    /** @type {string=} */
+    let pathname;
+
     const absoluteImporter = new URL(path.join(root, importer), import.meta.url);
-    const resolved = internalResolver(importee, absoluteImporter);
-    if (resolved === undefined) {
-      return;  // failed to resolve
+    const resolved = internalResolver(importee, absoluteImporter.toString());
+    if (resolved !== undefined) {
+      // We get back file:// URLs, beacause Node doesn't care about our webserver.
+      const resolvedUrl = new URL(resolved);
+      if (resolvedUrl.protocol !== 'file:') {
+        throw new Error(`expected file:, was: ${resolvedUrl.toString()}`);
+      }
+      ({pathname} = resolvedUrl);
+    } else {
+      pathname = importee;
     }
 
-    // We get back file:// URLs, beacause Node doesn't care about our webserver.
-    // Find the relative path to node_modules from the request.
-    const resolvedUrl = new URL(resolved);
-    if (resolvedUrl.protocol !== 'file:') {
-      throw new Error(`expected file:, was: ${resolvedUrl.toString()}`);
-    }
-    let {pathname} = resolvedUrl;
-
-    // Make sure the resolved path actually exists.
-    let stat;
-    try {
-      stat = fs.statSync(pathname);
-    } catch (e) {
-      return undefined;  // doesn't actually exist
-    }
-    if (stat.isDirectory()) {
-      // TODO(samthor): Check for index.js? package.json?
+    // Confirm the path actually exists (with extra node things).
+    pathname = confirmPath(pathname);
+    if (pathname === undefined) {
+      return;
     }
 
+    // Find the relative path from the request.
     const importerDir = path.dirname(absoluteImporter.pathname)
     const out = path.relative(importerDir, pathname);
     if (!relativeRegexp.test(out)) {
@@ -118,6 +161,3 @@ export function buildResolver(root = process.cwd()) {
     return out;
   };
 }
-
-// const r = buildResolver();
-// console.info('TEST imported', r('./_test.js', './_test.js'));
