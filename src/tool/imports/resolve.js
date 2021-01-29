@@ -21,10 +21,15 @@ import * as imw from './import-meta-worker-shared.js';
 import * as fs from 'fs';
 import {legacyResolve} from './legacy-resolve.js';
 
+// Whether to try to use the import.meta.resolve code. This is only available in a flag and
+// unlike our local implementation, will prefer the "node" option inside package.json, rather
+// than "browser".
+const tryImportMetaWorker = false;
 
+// Allow files or "/index." missing these suffixes. Update if you hate mjs.
 const extToCheck = ['js', 'mjs'];
 
-
+// Regexp that matches "../", "./" or "/" as a prefix.
 const relativeRegexp = /^\.{0,2}\//;
 
 
@@ -66,14 +71,16 @@ function buildImportMetaWorker() {
 }
 
 
-let internalResolver;
+let internalResolver = legacyResolve;
 
 try {
-  // @ts-ignore
-  import.meta.resolve('.');
-  internalResolver = buildImportMetaWorker();
+  if (tryImportMetaWorker) {
+    // @ts-ignore
+    import.meta.resolve('.');
+    internalResolver = buildImportMetaWorker();
+  }
 } catch (e) {
-  internalResolver = legacyResolve;
+  // ignore
 }
 
 
