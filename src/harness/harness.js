@@ -108,7 +108,8 @@ async function initialize(modulePromise, imports) {
   const instantiatedSource = await WebAssembly.instantiate(module, importObject);
   const {instance} = instantiatedSource;
 
-  const calls = /** @type {blep.BlepCalls} */ (/** @type {unknown} */ (instance.exports));
+  // In the browser, the exports appear on instantiatedSource; in Node, they're on instance.
+  const calls = /** @type {blep.BlepCalls} */ (/** @type {unknown} */ (instantiatedSource.exports || instance.exports));
 
   // emscripten creates __post_instantiate to configure statics
   calls.__post_instantiate();
