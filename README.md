@@ -34,7 +34,7 @@ harness.run();
 ```
 
 This is fairly low-level.
-Check out a [module rewriting demo](#).
+Check out a [module rewriting demo](https://github.com/samthor/prsr/tree/main/src/tool/imports).
 
 ## Coverage
 
