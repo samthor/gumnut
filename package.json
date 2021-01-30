@@ -1,11 +1,11 @@
 {
   "version": "0.1.0",
-  "keywords": {
+  "keywords": [
     "javascript",
     "javascript-parser"
-  },
+  ],
   "exports": {
-    ".": ""
+    
   },
   "author": "Sam Thorogood <sam.thorogood@gmail.com>",
   "license": "Apache-2.0",
