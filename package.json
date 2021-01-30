@@ -1,6 +1,16 @@
 {
-  "type": "module",
+  "version": "0.1.0",
+  "keywords": {
+    "javascript",
+    "javascript-parser"
+  },
+  "exports": {
+    ".": ""
+  },
+  "author": "Sam Thorogood <sam.thorogood@gmail.com>",
   "license": "Apache-2.0",
+  "types": "./src/harness/types/index.d.ts",
+  "type": "module",
   "scripts": {
     "test": "ava ./src/test/harness.js && ./src/test/parser.sh && ./src/test/test262.sh"
   },
@@ -8,6 +18,5 @@
     "@types/node": "^14.14.22",
     "ava": "^3.15.0",
     "test262-parser-tests": "^0.0.5"
-  },
-  "dependencies": {}
+  }
 }

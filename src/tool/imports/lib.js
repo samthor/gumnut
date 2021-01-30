@@ -32,7 +32,7 @@ const allowAllStack = false;
  */
 export async function moduleImportRewriter(resolve) {
   const harness = await buildHarness();
-  const {token, run} = await rewriter(harness);
+  const {token, run} = rewriter(harness);
 
   /**
    * @param {number} type
