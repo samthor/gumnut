@@ -1,13 +1,13 @@
-// Generated on Fri Oct 02 2020 18:47:55 GMT+1000 (Australian Eastern Standard Time)
+// Generated on Sat Jan 30 2021 16:04:39 GMT+1100 (Australian Eastern Daylight Time)
 
-export const $KEYWORD = 1;
-export const $REL_OP = 2;
-export const $UNARY_OP = 4;
-export const $MASQUERADE = 8;
-export const $VARIABLE = 16;
-export const $DECL = 32;
-export const $CONTROL = 64;
-export const $CONTROL_PAREN = 128;
+export const _KEYWORD = 1;
+export const _REL_OP = 2;
+export const _UNARY_OP = 4;
+export const _MASQUERADE = 8;
+export const _VARIABLE = 16;
+export const _DECL = 32;
+export const _CONTROL = 64;
+export const _CONTROL_PAREN = 128;
 
 export const AS = 1085506560;
 export const ASYNC = 1098089472;

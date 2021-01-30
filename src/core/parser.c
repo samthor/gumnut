@@ -1684,6 +1684,7 @@ static int consume_statement(int mode) {
         _check(consume_statement(STATEMENT__BLOCK));
       } while (cursor->type != TOKEN_CLOSE);
 
+      cursor->special = TOKEN_BLOCK;
       cursor_next();
       _STACK_END();
       return 0;

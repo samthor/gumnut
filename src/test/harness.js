@@ -17,6 +17,8 @@
 import buildHarness from '../harness/node-harness.js';
 import buildRewriter from '../harness/node-rewriter.js';
 import {specials, types} from '../harness/harness.js';
+import * as lit from '../tokens/lit.js';
+
 import * as path from 'path';
 import * as fs from 'fs';
 import test from 'ava';
@@ -27,41 +29,41 @@ const {run, token} = buildRewriter(harness);
 test.serial('simple', (t) => {
   const expected = [
     // import ...
-    types.keyword, 1101898776,
+    types.keyword, lit.IMPORT,
     types.symbol, specials.declare | specials.top,
-    types.keyword, 1093834752,
+    types.keyword, lit.FROM,
     types.string, specials.external,
     types.semicolon, 0,
     // async function ...
-    types.keyword, 1098089472,
-    types.keyword, 1110808577,
+    types.keyword, lit.ASYNC,
+    types.keyword, lit.FUNCTION,
     types.symbol, specials.declare | specials.change,
     types.paren, 0,
     types.symbol, specials.declare | specials.top,
     types.close, types.paren,
     types.block, 0,
     types.symbol, 0,
-    types.op, 1077950464,
+    types.op, lit.$DOT,
     types.lit, specials.property,
     types.paren, 0,
     types.string, 0,
     types.close, types.paren,
     types.semicolon, 0,
-    types.close, types.brace,  // FIXME
+    types.close, types.block,
     // var a = ...
-    types.keyword, 1088542753,
+    types.keyword, lit.VAR,
     types.symbol, specials.declare | specials.top | specials.change,
-    types.op, 1077965824,
-    types.keyword, 1098089472,
+    types.op, lit.$EQUALS,
+    types.keyword, lit.ASYNC,
     types.paren, 0,
     types.close, types.paren,
-    types.op, 1084126208,
+    types.op, lit.$ARROW,
     types.number, 0,
     types.semicolon, 0,
     // let b = ...
-    types.keyword, 1088794657,
+    types.keyword, lit.LET,
     types.symbol, specials.declare | specials.change,
-    types.op, 1077965824,
+    types.op, lit.$EQUALS,
     types.symbol, 0,
     types.paren, 0,
     types.close, types.paren,
