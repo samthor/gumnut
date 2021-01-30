@@ -2,7 +2,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
-    "test": "./src/test/parser.sh && ./src/test/test262.sh"
+    "test": "ava ./src/test/harness.js && ./src/test/parser.sh && ./src/test/test262.sh"
   },
   "devDependencies": {
     "@types/node": "^14.14.22",
