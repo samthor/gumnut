@@ -1,21 +1,67 @@
-[![Tests](https://github.com/samthor/blep/workflows/Tests/badge.svg)](https://github.com/samthor/blep/actions)
+[![Tests](https://github.com/samthor/prsr/workflows/Tests/badge.svg)](https://github.com/samthor/prsr/actions)
 
-# B L EcmaScript Parser
+A fast, permissive JavaScript tokenizer and parser in C.
+See a [demo syntax highlighter](https://samthor.github.io/prsr/src/harness/).
 
+Supports ESM code only (i.e., `type="module"`, which is implicitly strict).
+Supports all language features in the [draft specification](https://github.com/tc39/proposals/blob/master/finished-proposals.md) (as of January 2021).
 
-### Notes
+This is compiled via Web Assembly to run on the web or inside Node without native bindings.
+It's not reentrant, so you can't parse another file from within its callbacks.
+It does not generate an AST (although does emit enough data to do so in JS), does not modify the passed source code, and does not use `malloc` or `free`.
 
-* token always writes its next token to its internal storage: this helps us fast-path checking it
+## Usage
 
+This works by invoking callbacks on every token as well as open/close announcements for a 'stack', which roughly maps to something you might make an AST node out of.
+To see a parser's work in Node, use `./src/harness/node-harness.js`:
 
-### Memory
+```js
+import buildHarness from './prsr-git-repo/src/harness/node-harness.js`;
 
-We'll require O(2) memory: one for source code, and one for working space.
-(This could be the same memory and we could be destructive to the source.)
-The working space can be _larger_ than the space required for the source.
-Web Assembly, our primary target, supports at least 2gb, so files can be ~1gb.
+const harness = await buildHarness();  // WebAssembly instantiation is async
 
-The working space has marks/updates placed at the corresponding location to the source to record the state of previous tricky questions (destructuring assignment, arrow functions).
+// returns Uint8Array to place code
+const memory = harness.prepare(code.length);
+memory.set(fs.readFileSync('source.js'));
 
-We also use space up to our successfully parsed high water mark for temporary token storage.
-TODO: but we can't guarantee that we can just yield all these tokens (end up in random state)
+harness.handle({
+  callback() { /* check harness.token to see token */ },
+  open(stackType) { /* open stack type, return false to skip contents */ },
+  close(stackType) { /* close stack type */ },
+});
+
+harness.run();
+```
+
+This is fairly low-level.
+Check out a [module rewriting demo](#).
+
+## Coverage
+
+prsr correctly parses all 'pass-explicit' tests from [test262-parser-tests](https://github.com/tc39/test262-parser-tests), _except_ those which rely on non-strict mode behavior (e.g., use variable names like `static` and `let`).
+
+## Note
+
+JavaScript has a single open-ended 'after-the-fact' ambiguity, as `async` is not always a keyword—even in strict mode.
+Here's an example:
+
+```js
+// this is a function call of a method named "async"
+async(/* anything can go here */) {}
+
+// this is an async arrow function
+async(/* anything can go here */) => {}
+
+// this calls the async method on foo, and is _not_ ambiguous
+foo.async() {}
+```
+
+This parser has to walk over code like this at most twice to resolve whether `async` is a keyword.
+See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-functions-break-javascript-parsers-1ldp) for more details.
+
+It also needs to walk over non-async functions at most twice—like `(a, b) =>`—to correctly label the argument as either _creating_ new variables in scope, or just using them (like a function call or simple parens).
+
+## History
+
+Since engineers like to rewrite everything all the time, see [the 2020 branch](https://github.com/samthor/prsr/tree/legacy-2020) of this code.
+
