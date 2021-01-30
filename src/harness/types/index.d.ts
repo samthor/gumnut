@@ -5,7 +5,7 @@ import * as stream from 'stream';
 /**
  * Calls provided by the internal C code.
  */
-export interface BlepCalls {
+export interface InternalCalls {
   __post_instantiate(): void;
 
   blep_parser_init(at: number, len: number): number;
@@ -16,7 +16,7 @@ export interface BlepCalls {
 /**
  * Imports required by the internal C code, including standard library calls.
  */
-export interface BlepImports {
+export interface InternalImports {
   memset(at: number, byte: number, size: number): void;
   memchr(at: number, byte: number, siez: number): number;
 
@@ -25,10 +25,27 @@ export interface BlepImports {
   blep_parser_close(type: number): void;
 }
 
+/**
+ * Handlers provided to the harness code.
+ */
 export interface Handlers {
+
+  /**
+   * Called on every token in valid open stacks. Use the {@link Token} instance to access the
+   * current token.
+   */
   callback: () => void;
-  open: (number) => boolean|void;
-  close: (number) => void;
+
+  /**
+   * A stack is being opened. Return false if you'd like to skip it and its close.
+   */
+  open: (stack: number) => boolean|void;
+
+  /**
+   * A previously opened stack is being closed.
+   */
+  close: (stack: number) => void;
+
 }
 
 /**
@@ -36,15 +53,41 @@ export interface Handlers {
  * moves its head as it just reflects the current token.
  */
 export interface Token {
+
+  /**
+   * The location in the code immediately after the previous token. Between the void and at
+   * locations, it's possible be empty, whitespace only, or contain many comments.
+   */
   void(): number;
+
+  /**
+   * The starting point of the current token.
+   */
   at(): number;
+
+  /**
+   * The length of this token. It is possible for this to be zero in some rare cases.
+   */
   length(): number;
+
+  /**
+   * The line number of this token (not the void).
+   */
   lineNo(): number;
+
+  /**
+   * The type of this token.
+   */
   type(): number;
+
+  /**
+   * Special for this token. This changes depending on token type. For ops and keywords, this
+   * returns their hash. For close, it returns the type of its paired open token.
+   */
   special(): number;
 
   /**
-   * Finds the current subarray for this token.
+   * Finds the current subarray for this token, based on its location and length.
    */
   view(): Uint8Array;
 
@@ -79,7 +122,7 @@ export interface Base {
    * 
    * @param handlers to replace with
    */
-  handle(handlers: Handlers): void;
+  handle(handlers: Partial<Handlers>): void;
 
 }
 
@@ -108,6 +151,6 @@ export interface RewriterReturn {
 /**
  * Resolver helper for module import rewriting.
  *
- * Notably this cannot be async as blep internally cannot be.
+ * Notably this cannot be async because the Web Assembly runner cannot be. 
  */
 export type Resolver = (importee: string, importer: string) => string|void;
