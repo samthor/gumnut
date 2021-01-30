@@ -1,0 +1,8 @@
+src/**/*.c
+src/**/*.h
+src/**/*.html
+src/**/*.sh
+src/test
+src/tokens/build.js
+.github
+tsconfig.json
