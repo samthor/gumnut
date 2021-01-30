@@ -4,9 +4,7 @@
     "javascript",
     "javascript-parser"
   ],
-  "exports": {
-    
-  },
+  "exports": {},
   "author": "Sam Thorogood <sam.thorogood@gmail.com>",
   "license": "Apache-2.0",
   "types": "./src/harness/types/index.d.ts",
