@@ -2,3 +2,4 @@ node_modules/
 _*
 .DS_Store
 .vscode
+generatedTypes/

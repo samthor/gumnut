@@ -14,14 +14,11 @@
  * the License.
  */
 
-/**
- * @fileoverview Entrypoint for Node.
- */
-
-import buildHarness from './src/harness/node-harness.js';
-export {buildHarness};
-
-import buildRewriter from './src/harness/node-rewriter.js';
-export {buildRewriter};
-
-export * from './src/harness/common.js';
+export const sameline = 1;
+export const declare = 2;
+export const top = 4;
+export const property = 8;
+export const change = 16;
+export const external = 32;
+export const destructuring = 64;
+export const lit = 1073741824;  // this is (1 << 30) but tsc doesn't like expanding it

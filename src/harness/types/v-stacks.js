@@ -14,14 +14,19 @@
  * the License.
  */
 
-/**
- * @fileoverview Entrypoint for Node.
- */
-
-import buildHarness from './src/harness/node-harness.js';
-export {buildHarness};
-
-import buildRewriter from './src/harness/node-rewriter.js';
-export {buildRewriter};
-
-export * from './src/harness/common.js';
+const _null = 0;
+export {_null as null};
+export const expr = 1;
+export const declare = 2;
+export const control = 3;
+export const block = 4;
+const _function = 5;
+export {_function as function};
+const _class = 6;
+export {_class as class};
+export const misc = 7;
+export const label = 8;
+const _export = 9;
+export {_export as export};
+export const module = 10;
+export const inner = 11;

@@ -39,51 +39,7 @@ errorMap.set(-2, 'stack');
 errorMap.set(-3, 'internal');
 Object.freeze(errorMap);
 
-export const types = Object.freeze({
-  eof: 0,
-  lit: 1,
-  semicolon: 2,
-  op: 3,
-  colon: 4,
-  brace: 5,
-  array: 6,
-  paren: 7,
-  ternary: 8,
-  close: 9,
-  string: 10,
-  regexp: 11,
-  number: 12,
-  symbol: 13,
-  keyword: 14,
-  label: 15,
-  block: 16,
-});
-
-export const specials = Object.freeze({
-  sameline: 1,
-  declare: 2,
-  top: 4,
-  property: 8,
-  change: 16,
-  external: 32,
-  destructuring: 64,
-  lit: (1 << 30),
-});
-
-export const stacks = Object.freeze({
-  null: 0,
-  expr: 1,
-  declare: 2,
-  control: 3,
-  block: 4,
-  function: 5,
-  class: 6,
-  misc: 7,
-  label: 8,
-  export: 9,
-  module: 10,
-  inner: 11,
-});
+import {string as stringType} from './types/v-types.js';
 
 /**
  * @param {Promise<BufferSource>|BufferSource} modulePromise
@@ -209,7 +165,7 @@ export default async function build(modulePromise) {
     },
 
     stringValue() {
-      if (tokenView[4] !== types.string) {
+      if (tokenView[4] !== stringType) {
         throw new TypeError('Can\'t stringValue() on non-string');
       }
       const target = view.subarray(tokenView[1], tokenView[1] + tokenView[2]);

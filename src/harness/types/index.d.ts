@@ -1,6 +1,31 @@
+/*
+ * Copyright 2021 Sam Thorogood.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ */
 
 // TODO(samthor): This is a Node-specific type.
 import * as stream from 'stream';
+
+/**
+ * Enum of valid token types.
+ */
+type TokenValues = typeof import('./v-types.js')[keyof typeof import('./v-types.js')];
+
+/**
+ * Enum of valid stack types.
+ */
+type StackValues = typeof import('./v-stacks.js')[keyof typeof import('./v-stacks.js')];
 
 /**
  * Calls provided by the internal C code.
@@ -18,11 +43,11 @@ export interface InternalCalls {
  */
 export interface InternalImports {
   memset(at: number, byte: number, size: number): void;
-  memchr(at: number, byte: number, siez: number): number;
+  memchr(at: number, byte: number, size: number): number;
 
   blep_parser_callback(): void;
-  blep_parser_open(type: number): 0 | 1;
-  blep_parser_close(type: number): void;
+  blep_parser_open(type: StackValues): 0 | 1;
+  blep_parser_close(type: StackValues): void;
 }
 
 /**
@@ -39,14 +64,15 @@ export interface Handlers {
   /**
    * A stack is being opened. Return false if you'd like to skip it and its close.
    */
-  open: (stack: number) => boolean|void;
+  open: (stack: StackValues) => boolean|void;
 
   /**
    * A previously opened stack is being closed.
    */
-  close: (stack: number) => void;
+  close: (stack: StackValues) => void;
 
 }
+
 
 /**
  * An interface to the current token. This will change what it is pointing to, when the parser
@@ -78,11 +104,12 @@ export interface Token {
   /**
    * The type of this token.
    */
-  type(): number;
+  type(): TokenValues;
 
   /**
    * Special for this token. This changes depending on token type. For ops and keywords, this
-   * returns their hash. For close, it returns the type of its paired open token.
+   * returns their hash. For close, it returns the type of its paired open token. It can return
+   * other values from specials for other token types.
    */
   special(): number;
 
@@ -140,7 +167,7 @@ export interface Harness extends Base {
 
 export interface RewriterArgs {
   callback(): string|void;
-  stack(type: number): boolean|void;
+  stack(type: StackValues): boolean|void;
 }
 
 export interface RewriterReturn {

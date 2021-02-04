@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Sam Thorogood.
+ * Copyright 2020 Sam Thorogood.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -14,14 +14,7 @@
  * the License.
  */
 
-/**
- * @fileoverview Entrypoint for Node.
- */
-
-import buildHarness from './src/harness/node-harness.js';
-export {buildHarness};
-
-import buildRewriter from './src/harness/node-rewriter.js';
-export {buildRewriter};
-
-export * from './src/harness/common.js';
+export * as lit from '../tokens/lit.js';
+export * as types from './types/v-types.js';
+export * as specials from './types/v-specials.js';
+export * as stacks from './types/v-stacks.js';

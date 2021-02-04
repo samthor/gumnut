@@ -22,12 +22,15 @@ import {buildHarness} from 'gumnut';
 
 const harness = await buildHarness();  // WebAssembly instantiation is async
 
-// returns Uint8Array to place code
-const memory = harness.prepare(code.length);
-memory.set(fs.readFileSync('source.js'));
+const buffer = new TextEncoder().encode('console.info("hello");');
+const memory = harness.prepare(buffer.length);
+memory.set(buffer);
 
 harness.handle({
-  callback() { /* check harness.token to see token */ },
+  callback() {
+    const type = harness.token.type();
+    console.info('token', harness.token.type(), harness.token.string());
+  },
   open(stackType) { /* open stack type, return false to skip contents */ },
   close(stackType) { /* close stack type */ },
 });
