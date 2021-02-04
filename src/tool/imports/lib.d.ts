@@ -1,6 +1,5 @@
-#!/usr/bin/env node
 /*
- * Copyright 2020 Sam Thorogood.
+ * Copyright 2021 Sam Thorogood.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -15,16 +14,18 @@
  * the License.
  */
 
+/// <reference types="node" />
+
+import {Readable} from 'stream';
+
 /**
- * @fileoverview Node interface to a JS imports rewriter.
+ * Builds a method which rewrites imports from a passed filename into ESM found inside node_modules.
+ *
+ * This emits relative paths to node_modules, rather than absolute ones.
  */
+export default function buildModuleImportRewriter(resolver?: typeof defaultResolver): Promise<(file: string) => Readable>;
 
-import build from './lib.js';
-
-const run = await build();
-
-const targets = process.argv.slice(2);
-targets.forEach((target) => {
-  const s = run(target);
-  s.pipe(process.stdout);
-});
+/**
+ * The default resolver used to resolve ESM.
+ */
+export const defaultResolver: (importee: string, importer: string) => string|void;

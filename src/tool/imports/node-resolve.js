@@ -47,6 +47,7 @@ export function loadPackage(name, importer) {
     const check = path.join(p, name, 'package.json');
     if (fs.existsSync(check)) {
       packagePath = check;
+      break;
     }
   }
   if (!packagePath) {

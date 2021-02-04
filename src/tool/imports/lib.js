@@ -19,7 +19,7 @@ import * as stream from 'stream';
 import * as common from '../../harness/common.js';
 import buildHarness from '../../harness/node-harness.js';
 import rewriter from '../../harness/node-rewriter.js';
-import {resolver} from './resolver.js';
+import {resolver as defaultResolver} from './resolver.js';
 
 // Set to true to allow all stacks to be parsed (even though we don't need to as modules are
 // top-level). Useful for debugging.
@@ -30,21 +30,10 @@ const allowAllStack = false;
  *
  * This emits relative paths to node_modules, rather than absolute ones.
  *
- * TODO(samthor): Allow callers to intercept node_modules strings before emitting them.
- *
- * @return {Promise<(file: string) => stream.Readable>}
- */
-export async function buildModuleImportRewriter() {
-  return buildCustomModuleImportRewriter(resolver);
-}
-
-/**
- * Builds a method which rewrites imports from a passed filename.
- *
  * @param {(importee: string, importer: string) => string|void} resolver new import or void to retain
  * @return {Promise<(file: string) => stream.Readable>}
  */
-export async function buildCustomModuleImportRewriter(resolver) {
+export default async function buildModuleImportRewriter(resolver = defaultResolver) {
   const harness = await buildHarness();
   const {token, run} = rewriter(harness);
 
@@ -65,3 +54,5 @@ export async function buildCustomModuleImportRewriter(resolver) {
     return run(f, {callback, stack});
   };
 }
+
+export {defaultResolver};

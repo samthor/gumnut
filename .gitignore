@@ -2,4 +2,7 @@ node_modules/
 _*
 .DS_Store
 .vscode
+
+# generated .d.ts files
 generatedTypes/
+imports/

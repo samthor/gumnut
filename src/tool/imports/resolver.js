@@ -14,7 +14,6 @@
  * the License.
  */
 
-import * as blep from '../../harness/types/index.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import {resolve as internalResolver} from './node-resolve.js';
@@ -71,9 +70,10 @@ function confirmPath(pathname) {
 
 
 /**
- * @type {blep.Resolver}
+ * @param {string} importee
+ * @param {string} importer
  */
-export const resolver = (importee, importer) => {
+export function resolver(importee, importer) {
   try {
     new URL(importee);
     return; // ignore, is valid URL
@@ -109,4 +109,4 @@ export const resolver = (importee, importer) => {
     return `./${out}`;  // don't allow naked pathname
   }
   return out;
-};
+}

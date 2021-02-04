@@ -10,6 +10,10 @@
   "exports": {
     ".": {
       "node": "./index.js"
+    },
+    "./imports": {
+      "node": "./src/tool/imports/lib.js",
+      "types": "./src/tool/imports/index.d.ts"
     }
   },
   "author": "Sam Thorogood <sam.thorogood@gmail.com>",
@@ -17,7 +21,7 @@
   "types": "./index.d.ts",
   "type": "module",
   "scripts": {
-    "build:types": "rm -rf generatedTypes; tsc index.js --declaration --allowJs --emitDeclarationOnly --outDir generatedTypes; cp src/harness/types/index.d.ts generatedTypes/src/harness/types/",
+    "build:types": "bash src/build/types.sh",
     "prepublishOnly": "npm run build:types",
     "test": "ava ./src/test/harness.js && ./src/test/parser.sh && ./src/test/test262.sh"
   },

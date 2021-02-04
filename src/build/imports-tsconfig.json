@@ -1,0 +1,4 @@
+{
+  "include": ["../tool/imports/lib.js"],
+  "exlude": ["**/*.js"]
+}

@@ -175,9 +175,4 @@ export interface RewriterReturn {
   token: Token;
 }
 
-/**
- * Resolver helper for module import rewriting.
- *
- * Notably this cannot be async because the Web Assembly runner cannot be. 
- */
-export type Resolver = (importee: string, importer: string) => string|void;
+

@@ -38,8 +38,22 @@ harness.handle({
 harness.run();
 ```
 
-This is fairly low-level.
-Check out a [module rewriting demo](https://github.com/samthor/gumnut/tree/main/src/tool/imports).
+This is fairly low-level and designed to be used by other tools.
+
+### Module Imports Rewriter
+
+This provides a rewriter for imports from `node_modules`, which could be used as part of an ESM development server.
+Usage:
+
+```js
+import build from 'gumnut/imports';
+
+const run = await build();  // WebAssembly instantiation is async
+run('./source.js').pipe(process.stdout);
+```
+
+This implements a basic resolution algorithm that implements [subpath exports](https://nodejs.org/api/packages.html#packages_subpath_exports) and [conditional exports](https://nodejs.org/api/packages.html#packages_conditional_exports) .
+It will rewrite to the "browser", "import" or "default" keys.
 
 ## Coverage
 
