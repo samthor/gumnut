@@ -16,33 +16,47 @@
 
 import * as stream from 'stream';
 
-import * as e from '../../harness/harness.js';
+import * as common from '../../harness/common.js';
 import buildHarness from '../../harness/node-harness.js';
 import rewriter from '../../harness/node-rewriter.js';
+import {resolver} from './resolver.js';
 
 // Set to true to allow all stacks to be parsed (even though we don't need to as modules are
 // top-level). Useful for debugging.
 const allowAllStack = false;
 
 /**
- * Builds a method which rewrites imports from a passed filename.
+ * Builds a method which rewrites imports from a passed filename into ESM found inside node_modules.
  *
- * @param {(importee: string, importer: string) => string|void} resolve new import or void to retain
+ * This emits relative paths to node_modules, rather than absolute ones.
+ *
+ * TODO(samthor): Allow callers to intercept node_modules strings before emitting them.
+ *
  * @return {Promise<(file: string) => stream.Readable>}
  */
-export async function moduleImportRewriter(resolve) {
+export async function buildModuleImportRewriter() {
+  return buildCustomModuleImportRewriter(resolver);
+}
+
+/**
+ * Builds a method which rewrites imports from a passed filename.
+ *
+ * @param {(importee: string, importer: string) => string|void} resolver new import or void to retain
+ * @return {Promise<(file: string) => stream.Readable>}
+ */
+export async function buildCustomModuleImportRewriter(resolver) {
   const harness = await buildHarness();
   const {token, run} = rewriter(harness);
 
   /**
    * @param {number} type
    */
-  const stack = (type) => allowAllStack || type === e.stacks.module;
+  const stack = (type) => allowAllStack || type === common.stacks.module;
 
   return (f) => {
     const callback = () => {
-      if (token.special() === e.specials.external && token.type() === e.types.string) {
-        const out = resolve(token.stringValue(), f);
+      if (token.special() === common.specials.external && token.type() === common.types.string) {
+        const out = resolver(token.stringValue(), f);
         if (out && typeof out === 'string') {
           return JSON.stringify(out);
         }

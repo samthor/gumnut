@@ -103,7 +103,7 @@ function matchExportsNode(exports, rest) {
  * @param {string} importee absolute importer URL, will always start with "file://"
  * @return {string|void}
  */
-export function legacyResolve(importee, importer) {
+export function resolve(importee, importer) {
   const {name, rest} = splitImport(importee);
   if (!name) {
     return;

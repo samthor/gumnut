@@ -19,11 +19,9 @@
  * @fileoverview Node interface to a JS imports rewriter.
  */
 
-import {moduleImportRewriter} from './lib.js';
-import {buildResolver} from './resolve.js';
+import {buildModuleImportRewriter} from './lib.js';
 
-const resolver = buildResolver();
-const run = await moduleImportRewriter(resolver);
+const run = await buildModuleImportRewriter();
 
 const targets = process.argv.slice(2);
 targets.forEach((target) => {
