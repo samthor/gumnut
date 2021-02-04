@@ -16,11 +16,9 @@
 
 import buildHarness from '../harness/node-harness.js';
 import buildRewriter from '../harness/node-rewriter.js';
-import {specials, types} from '../harness/harness.js';
+import {specials, types} from '../harness/common.js';
 import * as lit from '../tokens/lit.js';
 
-import * as path from 'path';
-import * as fs from 'fs';
 import test from 'ava';
 
 const harness = await buildHarness();
