@@ -129,7 +129,7 @@ export default async function build(modulePromise) {
   // resized for a new run.
   let view = new Uint8Array(0);
 
-  /** @type {blep.BlepImports} */
+  /** @type {blep.InternalImports} */
   const imports = {
     memset(s, c, n) {
       // nb. This only happens once per run.

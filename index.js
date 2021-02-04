@@ -23,3 +23,9 @@ export {buildHarness};
 
 import buildRewriter from './src/harness/node-rewriter.js';
 export {buildRewriter};
+
+import * as symbols from './src/tokens/lit.js';
+export {symbols};
+
+import {types, specials, stacks} from './src/harness/harness.js';
+export {types, specials, stacks};

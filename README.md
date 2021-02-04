@@ -1,6 +1,6 @@
 [![Tests](https://github.com/samthor/gumnut/workflows/Tests/badge.svg)](https://github.com/samthor/gumnut/actions)
 
-A fast, permissive JavaScript tokenizer and parser in C.
+A permissive JavaScript tokenizer and parser in C.
 See a [demo syntax highlighter](https://samthor.github.io/gumnut/src/harness/).
 
 Supports ESM code only (i.e., `type="module"`, which is implicitly strict).
@@ -15,7 +15,7 @@ It does not generate an AST (although does emit enough data to do so in JS), doe
 Import and install via your favourite package manager.
 This requires Node [v13.10.0](https://twitter.com/guybedford/status/1235306690901422080?lang=en) or higher.
 
-This works by invoking callbacks on every token as well as open/close announcements for a 'stack', which roughly maps to something you might make an AST node out of.
+The parser works by invoking callbacks on every token as well as open/close announcements for a 'stack', which roughly maps to something you might make an AST node out of.
 
 ```js
 import {buildHarness} from 'gumnut';
@@ -44,7 +44,7 @@ This correctly parses all 'pass-explicit' tests from [test262-parser-tests](http
 
 ## Note
 
-JavaScript has a single open-ended 'after-the-fact' ambiguity, as `async` is not always a keyword—even in strict mode.
+JavaScript has a single open-ended 'after-the-fact' ambiguity for keywords, as `async` is not always a keyword—even in strict mode.
 Here's an example:
 
 ```js
@@ -58,7 +58,7 @@ async(/* anything can go here */) => {}
 foo.async() {}
 ```
 
-This parser has to walk over code like this at most twice to resolve whether `async` is a keyword.
+This parser has to walk over code like this at most twice to resolve whether `async` is a keyword _before_ continuing.
 See [arrow functions break JavaScript parsers](https://dev.to/samthor/arrow-functions-break-javascript-parsers-1ldp) for more details.
 
 It also needs to walk over non-async functions at most twice—like `(a, b) =>`—to correctly label the argument as either _creating_ new variables in scope, or just using them (like a function call or simple parens).
