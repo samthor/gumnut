@@ -1,6 +1,6 @@
 {
   "name": "gumnut",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "repository": "git@github.com:samthor/gumnut.git",
   "description": "Permissive JS parser and tokenizer in Web Assembly / C, for Node or browser",
   "keywords": [
