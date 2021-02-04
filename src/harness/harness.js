@@ -87,11 +87,11 @@ export const stacks = Object.freeze({
 
 /**
  * @param {Promise<BufferSource>|BufferSource} modulePromise
- * @param {blep.BlepImports} imports
+ * @param {blep.InternalImports} imports
  * @return {Promise<{
  *   instance: WebAssembly.Instance,
  *   memory: WebAssembly.Memory,
- *   calls: blep.BlepCalls,
+ *   calls: blep.InternalCalls,
  * }>}
  */
 async function initialize(modulePromise, imports) {
@@ -109,7 +109,8 @@ async function initialize(modulePromise, imports) {
   const {instance} = instantiatedSource;
 
   // In the browser, the exports appear on instantiatedSource; in Node, they're on instance.
-  const calls = /** @type {blep.BlepCalls} */ (/** @type {unknown} */ (instantiatedSource.exports || instance.exports));
+  // @ts-ignore
+  const calls = /** @type {blep.InternalCalls} */ (instantiatedSource.exports || instance.exports);
 
   // emscripten creates __post_instantiate to configure statics
   calls.__post_instantiate();
@@ -131,7 +132,7 @@ export default async function build(modulePromise) {
   /** @type {blep.BlepImports} */
   const imports = {
     memset(s, c, n) {
-      // nb. This only happens once per run in prsr.
+      // nb. This only happens once per run.
       view.fill(c, s, s + n);
       return s;
     },

@@ -1,14 +1,18 @@
 {
-  "name": "~invalid-name-do-not-publish",
+  "name": "gumnut",
   "version": "0.1.0",
   "keywords": [
     "javascript",
     "javascript-parser"
   ],
-  "exports": {},
+  "exports": {
+    ".": {
+      "node": "./index.js"
+    }
+  },
   "author": "Sam Thorogood <sam.thorogood@gmail.com>",
   "license": "Apache-2.0",
-  "types": "./src/harness/types/index.d.ts",
+  "types": "./index.d.ts",
   "type": "module",
   "scripts": {
     "test": "ava ./src/test/harness.js && ./src/test/parser.sh && ./src/test/test262.sh"
