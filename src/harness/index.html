@@ -3,7 +3,8 @@
 <head>
 <script type="module">
 
-import build, * as harness from './harness.js';
+import build from './harness.js';
+import * as common from './common.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -18,8 +19,8 @@ function reverseDict(dict) {
 
 const runnerPromise = build(WebAssembly.compileStreaming(window.fetch('runner.wasm')));
 
-const TOKEN_LOOKUP = reverseDict(harness.types);
-const SPECIAL_LOOKUP = reverseDict(harness.specials);
+const TOKEN_LOOKUP = reverseDict(common.types);
+const SPECIAL_LOOKUP = reverseDict(common.specials);
 
 
 window.addEventListener('load', (ev) => {
@@ -61,7 +62,7 @@ window.addEventListener('load', (ev) => {
       node.tabIndex = 0;
 
       let special = token.special;
-      if (special & harness.specials.lit || token.type === harness.types.close) {
+      if (special & common.specials.lit || token.type === common.types.close) {
         return;  // don't mark this one
       }
 
