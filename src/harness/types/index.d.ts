@@ -171,7 +171,7 @@ export interface RewriterArgs {
 }
 
 export interface RewriterReturn {
-  run(file: string, args?: RewriterArgs): stream.Readable;
+  run(file: string, args?: Partial<RewriterArgs>): stream.Readable;
   token: Token;
 }
 

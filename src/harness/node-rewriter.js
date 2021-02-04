@@ -37,7 +37,7 @@ export default function wrapper(harness) {
 
   /**
    * @param {string} f
-   * @param {blep.RewriterArgs} args
+   * @param {Partial<blep.RewriterArgs>} args
    */
   const run = (f, {callback = noop, stack = noop}) => {
     const fd = fs.openSync(f, 'r');
