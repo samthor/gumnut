@@ -1,4 +1,4 @@
 {
-  "private": "true",
-  "name": "~for-test"
+  "name": "private-for-test-do-not-publish",
+  "exports": {".": "./blah/file.js"}
 }

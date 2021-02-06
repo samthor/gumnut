@@ -15,10 +15,15 @@
  */
  
 import test from 'ava';
+import * as fs from 'fs';
 
 import {defaultBrowserResolver as r, resolver} from '../resolver.js';
 
 const {pathname: importer} = new URL('./testdata/index.js', import.meta.url);
+
+const {pathname: packagePath} = new URL('./testdata/package.json', import.meta.url);
+/** @type {string} */
+const fakePackageName = JSON.parse(fs.readFileSync(packagePath, 'utf-8')).name;
 
 test('resolves legacy import', t => {
   t.is('./node_modules/fake-package/esm.mjs', r('fake-package', importer), 'default import is returned');
@@ -55,3 +60,7 @@ test('hides .d.ts only', t => {
   t.is(out3, './node_modules/fake-package/peer-types.js', 'don\'t hide with peer file');
 });
 
+test('resolves self-package', t => {
+  t.is(r(fakePackageName, importer), './blah/file.js');
+  t.is(r(`${fakePackageName}/package.json`, importer), './package.json');
+});

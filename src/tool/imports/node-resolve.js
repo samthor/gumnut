@@ -55,14 +55,28 @@ export function splitImport(importee) {
 /**
  * @param {string} name
  * @param {string} importer
- * @return {{resolved?: string, info?: any}}
+ * @return {{resolved?: string, info?: any, self?: true}}
  */
 export function loadPackage(name, importer) {
   const require = createRequire(importer);
 
   const candidatePaths = require.resolve.paths(name) ?? [];
-  let packagePath;
+  if (!candidatePaths.length) {
+    return {};
+  }
 
+  // If we literally are the named import, match it first.
+  const selfCheck = path.join(candidatePaths[0], '../package.json');
+  if (fs.existsSync(selfCheck)) {
+    const info = JSON.parse(fs.readFileSync(selfCheck, 'utf-8'));
+    /** @type {{name?: string}} */
+    const {name: nameCheck} = info ?? {};
+    if (nameCheck === name) {
+      return {resolved: path.dirname(selfCheck), info, self: true};
+    }
+  }
+
+  let packagePath;
   for (const p of candidatePaths) {
     const check = path.join(p, name, 'package.json');
     if (fs.existsSync(check)) {
