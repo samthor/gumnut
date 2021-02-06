@@ -110,10 +110,11 @@ function confirmPath(pathname) {
 
 
 /**
+ * @param {string[]} constraints exports constraints choices, used as OR
  * @param {string} importee
  * @param {string} importer
  */
-export function resolver(importee, importer) {
+export function resolver(constraints, importee, importer) {
   try {
     new URL(importee);
     return; // ignore, is valid URL
@@ -122,8 +123,10 @@ export function resolver(importee, importer) {
   /** @type {string=} */
   let pathname;
 
+  let suffix = '';
+
   const absoluteImporter = new URL(path.resolve(importer), import.meta.url);
-  const resolved = internalResolver(importee, absoluteImporter.toString());
+  const resolved = internalResolver(constraints, importee, absoluteImporter.toString());
   if (resolved !== undefined) {
     // We get back file:// URLs, beacause Node doesn't care about our webserver.
     const resolvedUrl = new URL(resolved);
@@ -131,9 +134,11 @@ export function resolver(importee, importer) {
       throw new Error(`expected file:, was: ${resolvedUrl.toString()}`);
     }
     ({pathname} = resolvedUrl);
+    suffix = resolvedUrl.search + resolvedUrl.hash;
   } else {
     const absoluteUrl = new URL(importee, absoluteImporter);
     ({pathname} = absoluteUrl);
+    suffix = absoluteUrl.search + absoluteUrl.hash;
   }
 
   // Confirm the path actually exists (with extra node things).
@@ -142,6 +147,7 @@ export function resolver(importee, importer) {
     return;
   }
   try {
+    // confirmPath might return a data: URL, so check here.
     new URL(pathname);
     return pathname;
   } catch (e) {
@@ -150,9 +156,15 @@ export function resolver(importee, importer) {
 
   // Find the relative path from the request.
   const importerDir = path.dirname(absoluteImporter.pathname)
-  const out = path.relative(importerDir, pathname);
+  let out = path.relative(importerDir, pathname);
   if (!relativeRegexp.test(out)) {
-    return `./${out}`;  // don't allow naked pathname
+    out = `./${out}`;  // don't allow naked pathname
   }
-  return out;
+  return out + suffix;
 }
+
+
+/**
+ * The default resolver which prefers browser constraints.
+ */
+export const defaultBrowserResolver = resolver.bind(null, ['browser']);

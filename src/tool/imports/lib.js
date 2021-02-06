@@ -19,7 +19,7 @@ import * as stream from 'stream';
 import * as common from '../../harness/common.js';
 import buildHarness from '../../harness/node-harness.js';
 import rewriter from '../../harness/node-rewriter.js';
-import {resolver as defaultResolver} from './resolver.js';
+import {defaultBrowserResolver} from './resolver.js';
 
 // Set to true to allow all stacks to be parsed (even though we don't need to as modules are
 // top-level). Useful for debugging.
@@ -33,7 +33,7 @@ const allowAllStack = false;
  * @param {(importee: string, importer: string) => string|void} resolver new import or void to retain
  * @return {Promise<(file: string) => stream.Readable>}
  */
-export default async function buildModuleImportRewriter(resolver = defaultResolver) {
+export default async function buildModuleImportRewriter(resolver = defaultBrowserResolver) {
   const harness = await buildHarness();
   const {token, run} = rewriter(harness);
 
@@ -54,5 +54,3 @@ export default async function buildModuleImportRewriter(resolver = defaultResolv
     return run(f, {callback, stack});
   };
 }
-
-export {defaultResolver};

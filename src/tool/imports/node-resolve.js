@@ -120,11 +120,12 @@ function matchExportsNode(exports, rest) {
 
 
 /**
+ * @param {string[]} constraints exports constraints choices (used as OR)
  * @param {string} importee relative or naked string
  * @param {string} importee absolute importer URL, will always start with "file://"
  * @return {string|void}
  */
-export function resolve(importee, importer) {
+export function resolve(constraints, importee, importer) {
   const {name, rest} = splitImport(importee);
   if (!name) {
     return;
@@ -144,7 +145,7 @@ export function resolve(importee, importer) {
     // Traverse looking for the best conditional export. These can be nested.
     restart: while (node && typeof node !== 'string') {
       for (const key in node) {
-        if (key === 'import' || key === 'browser') {
+        if (key === 'import' || constraints.includes(key)) {
           node = node[key];
           continue restart;
         }
