@@ -52,8 +52,10 @@ const run = await build();  // WebAssembly instantiation is async
 run('./source.js').pipe(process.stdout);
 ```
 
-This implements a basic resolution algorithm that implements [subpath exports](https://nodejs.org/api/packages.html#packages_subpath_exports) and [conditional exports](https://nodejs.org/api/packages.html#packages_conditional_exports) .
-It will rewrite to the "browser", "import" or "default" keys.
+This implements modern Node resolution, i.e., [subpath exports](https://nodejs.org/api/packages.html#packages_subpath_exports) and [conditional exports](https://nodejs.org/api/packages.html#packages_conditional_exports).
+It will rewrite to the "browser", "import" or "default" keys (not "node", as this is for your browser).
+
+It's permissive, falling back to real paths if exports aren't defined, and will remove imports that point purely to ".d.ts" files (you don't need to create [peer JS](https://whistlr.info/2021/check-js-with-ts/#import-your-types)).
 
 ## Coverage
 

@@ -19,12 +19,28 @@ import * as fs from 'fs';
 import {resolve as internalResolver} from './node-resolve.js';
 
 
-// Allow files or "/index." missing these suffixes. Update if you hate mjs.
+/**
+ * Allow files or "/index." missing these suffixes. Update if you hate mjs.
+ */
 const extToCheck = ['js', 'mjs'];
 
 
-// Regexp that matches "../", "./" or "/" as a prefix.
+/**
+ * Regexp that matches "../", "./" or "/" as a prefix.
+ */
 const relativeRegexp = /^\.{0,2}\//;
+
+
+/**
+ * Regexp that matches ".js" as a suffix.
+ */
+const matchJsSuffixRegexp = /\.js$/;
+
+
+/**
+ * Zero JS "file" that evaluates correctly.
+ */
+const zeroJsDefinitionsImport = 'data:text/javascript;charset=utf-8,/* was .d.ts only */';
 
 
 /**
@@ -40,6 +56,13 @@ const statOrNull = (p) => {
 
 
 /**
+ * @param {string} p
+ * @return {boolean}
+ */
+const statIsFile = (p) => statOrNull(p)?.isFile() ?? false;
+
+
+/**
  * @param {string} pathname
  * @return {string=}
  */
@@ -49,23 +72,40 @@ function confirmPath(pathname) {
     // Look for a file with a suffix.
     for (const ext of extToCheck) {
       const check = `${pathname}.${ext}`;
-      const stat = statOrNull(check);
-      if (stat && !stat.isDirectory()) {
+      if (statIsFile(check)) {
         return check;
       }
     }
+
+    // Special-case .d.ts files when there's no better option... because TypeScript.
+    //   - importing a naked or '.js' file allows the adjacent '.d.ts'
+    //   - this file doesn't really exist, so return a zero import
+    const tsCheck = [pathname + '.d.ts', pathname.replace(matchJsSuffixRegexp, '.d.ts')];
+    for (const check of tsCheck) {
+      if (statIsFile(check)) {
+        return zeroJsDefinitionsImport;
+      }
+    }
+
   } else if (stat.isDirectory()) {
     // Look for index.js in the directory.
     for (const ext of extToCheck) {
       const check = path.join(pathname, `index.${ext}`);
-      const stat = statOrNull(check);
-      if (stat && !stat.isDirectory()) {
+      if (statIsFile(check)) {
         return check;
       }
     }
+
+    // Look for a solo index.d.ts in the directory, which TypeScript allows.
+    if (statIsFile(path.join(pathname, 'index.d.ts'))) {
+      return zeroJsDefinitionsImport;
+    }
+
   } else {
     return pathname;
   }
+
+  // In the failure case this returns undefined.
 }
 
 
@@ -100,6 +140,12 @@ export function resolver(importee, importer) {
   pathname = confirmPath(pathname);
   if (pathname === undefined) {
     return;
+  }
+  try {
+    new URL(pathname);
+    return pathname;
+  } catch (e) {
+    // ignore
   }
 
   // Find the relative path from the request.

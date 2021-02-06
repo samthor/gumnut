@@ -20,6 +20,26 @@ import {createRequire} from 'module';
 
 
 /**
+ * If true, allows missing exports in package.json to be returned as their literal pathnames. This
+ * is against Node's resolution rules.
+ */
+const allowExportFallback = true;
+
+
+/**
+ * Search these fields for a potential legacy main module if a top-level package is imported.
+ */
+const defaultPackageMain = [
+  'module',
+  'esnext:main',
+  'esnext',
+  'jsnext:main',
+  'jsnext',
+  'main',
+];
+
+
+/**
  * @param {string} importee
  * @return {{name?: string, rest: string}}
  */
@@ -115,36 +135,45 @@ export function resolve(importee, importer) {
     return;
   }
 
+  // If we find exports, then use a modern resolution mechanism.
   const exports = info['exports'];
+  if (exports) {
+    // Look for "." etc mappings.
+    let {node, subpath} = matchExportsNode(exports, rest);
 
-  // Without an exports field, check a few legacy options.
-  if (!exports) {
-    let simple = rest;
-    if (rest === '.') {
-      simple = info['module'] ?? info['esnext'] ?? info['main'] ?? rest;
+    // Traverse looking for the best conditional export. These can be nested.
+    restart: while (node && typeof node !== 'string') {
+      for (const key in node) {
+        if (key === 'import' || key === 'browser') {
+          node = node[key];
+          continue restart;
+        }
+      }
+      node = node['default'];
     }
-    return `file://${path.join(resolved, simple)}`;
+    if (node) {
+      if (subpath) {
+        node = node.replace(/\*/g, subpath);
+      }
+      return `file://${path.join(resolved, node)}`;
+    }
+
+    if (!allowExportFallback) {
+      return;
+    }
+    // If we couldn't find a node, then fallback to running the legacy resolution algorithm. This
+    // is agaist Node's rules: if an exports field is found, it's all that should be used.
   }
 
-  // Look for "." etc mappings.
-  let {node, subpath} = matchExportsNode(exports, rest);
-
-  // Traverse looking for the best conditional export.
-  restart: while (node && typeof node !== 'string') {
-    for (const key in node) {
-      if (key === 'import' || key === 'browser') {
-        node = node[key];
-        continue restart;
+  // Check a few legacy options and fall back to allowing any path within the package.
+  let simple = rest;
+  if (rest === '.') {
+    for (const key of defaultPackageMain) {
+      if (info[key]) {
+        simple = info[key];
+        break;
       }
     }
-    node = node['default'];
   }
-  if (!node) {
-    return;
-  }
-
-  if (subpath) {
-    node = node.replace(/\*/g, subpath);
-  }
-  return `file://${path.join(resolved, node)}`;
+  return `file://${path.join(resolved, simple)}`;
 }
