@@ -64,3 +64,7 @@ test('resolves self-package', t => {
   t.is(r(fakePackageName, importer), './blah/file.js');
   t.is(r(`${fakePackageName}/package.json`, importer), './package.json');
 });
+
+test('resolves internal exports', t => {
+  t.is(r('#secret', importer), './blah/file.js');
+});

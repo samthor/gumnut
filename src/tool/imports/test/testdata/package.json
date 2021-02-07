@@ -1,4 +1,11 @@
 {
   "name": "private-for-test-do-not-publish",
-  "exports": {".": "./blah/file.js"}
+  "exports": {
+    ".": "./blah/file.js",
+    "./blah-test": "./blah/file.js"
+  },
+  "imports": {
+    "#secret": "./blah/file.js#secret",
+    "#redir": "private-for-test-do-not-publish"
+  }
 }

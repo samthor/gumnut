@@ -17,6 +17,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {createRequire} from 'module';
+import * as libTypes from './lib.js';
 
 
 /**
@@ -52,28 +53,65 @@ export function splitImport(importee) {
 }
 
 
-/**
- * @param {string} name
- * @param {string} importer
- * @return {{resolved?: string, info?: any, self?: true}}
- */
-export function loadPackage(name, importer) {
-  const require = createRequire(importer);
+/** @type {NodeRequire} */
+let cachedRequire;
 
-  const candidatePaths = require.resolve.paths(name) ?? [];
-  if (!candidatePaths.length) {
+/** @type {string=} */
+let cachedRequireFor;
+
+
+/**
+ * @param {string} importer
+ * @return {NodeRequire}
+ */
+function lazyRequireFor(importer) {
+  if (importer === cachedRequireFor) {
+    return cachedRequire;
+  }
+  cachedRequireFor = importer;
+  return cachedRequire = createRequire(importer);
+}
+
+
+/**
+ * @param {string} importer
+ * @return {{resolved?: string, info?: libTypes.InternalPackageJson}
+ */
+function loadSelfPackage(importer) {
+  const require = lazyRequireFor(importer);
+  const candidatePath = require.resolve.paths('.')?.[0];
+  if (candidatePath === undefined) {
+    return {};
+  }
+
+  let info;
+  try {
+    const selfPackagePath = path.join(candidatePath, 'package.json');
+    info = JSON.parse(fs.readFileSync(selfPackagePath, 'utf-8'));
+  } catch (e) {
+    return {};
+  }
+  return {info, resolved: candidatePath};
+}
+
+
+/**
+ * @param {string} importer
+ * @param {string} name
+ * @return {{resolved?: string, info?: libTypes.InternalPackageJson}}
+ */
+function loadPackage(importer, name) {
+  const require = lazyRequireFor(importer);
+
+  const candidatePaths = require.resolve.paths(name);
+  if (!candidatePaths?.length) {
     return {};
   }
 
   // If we literally are the named import, match it first.
-  const selfCheck = path.join(candidatePaths[0], '../package.json');
-  if (fs.existsSync(selfCheck)) {
-    const info = JSON.parse(fs.readFileSync(selfCheck, 'utf-8'));
-    /** @type {{name?: string}} */
-    const {name: nameCheck} = info ?? {};
-    if (nameCheck === name) {
-      return {resolved: path.dirname(selfCheck), info, self: true};
-    }
+  const self = loadSelfPackage(importer);
+  if (self.info?.['name'] === name) {
+    return {resolved: self.resolved, info: self.info};
   }
 
   let packagePath;
@@ -94,9 +132,9 @@ export function loadPackage(name, importer) {
 
 
 /**
- * @param {any} exports
+ * @param {libTypes.InternalPackageModuleNode} exports
  * @param {string} rest
- * @return {{node: any, subpath?: string}}
+ * @return {{node: libTypes.InternalPackageModuleNode|undefined, subpath?: string}}
  */
 function matchExportsNode(exports, rest) {
   if (typeof exports !== 'object') {
@@ -140,18 +178,33 @@ function matchExportsNode(exports, rest) {
  * @return {string|void}
  */
 export function resolve(constraints, importee, importer) {
+  if (importee.startsWith('#')) {
+    const self = loadSelfPackage(importer);
+
+    const imports = self.info?.imports ?? {};
+    const node = imports[importee];
+    if (!node) {
+      return;
+    }
+
+    return;
+    // TODO(samthor)
+    console.info('warn got stuff', importee, 'node', node);
+    throw 1;
+  }
+
   const {name, rest} = splitImport(importee);
   if (!name) {
     return;
   }
 
-  const {resolved, info} = loadPackage(name, importer);
-  if (!resolved) {
+  const {resolved, info} = loadPackage(importer, name);
+  if (!resolved || !info) {
     return;
   }
 
   // If we find exports, then use a modern resolution mechanism.
-  const exports = info['exports'];
+  const exports = info.exports;
   if (exports) {
     // Look for "." etc mappings.
     let {node, subpath} = matchExportsNode(exports, rest);
@@ -184,8 +237,8 @@ export function resolve(constraints, importee, importer) {
   let simple = rest;
   if (rest === '.') {
     for (const key of defaultPackageMain) {
-      if (info[key]) {
-        simple = info[key];
+      if (typeof info[key] === 'string') {
+        simple = /** @type {string} */ (info[key]);
         break;
       }
     }

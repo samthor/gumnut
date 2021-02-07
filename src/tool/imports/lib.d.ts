@@ -29,3 +29,18 @@ export default function buildModuleImportRewriter(resolver?: typeof defaultResol
  * The default resolver used to resolve ESM.
  */
 export const defaultResolver: (importee: string, importer: string) => string|void;
+
+/**
+ * Internal node type for package.json' imports/exports.
+ */
+export type InternalPackageModuleNode = {[name: string]: InternalPackageModuleNode} | string;
+
+export type InternalPackageJson = {
+  [name: string]: number | string | InternalPackageJson,
+  exports?: InternalPackageModuleNode,
+  imports?: InternalPackageModuleNode,
+};
+
+export type InternalPackageJsonNode = {
+  [name: string]: number | string | InternalPackageJsonNode,
+};
