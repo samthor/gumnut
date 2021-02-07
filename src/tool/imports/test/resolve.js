@@ -66,5 +66,9 @@ test('resolves self-package', t => {
 });
 
 test('resolves internal exports', t => {
-  t.is(r('#secret', importer), './blah/file.js');
+  t.is(r('#secret', importer), './blah/file.js#secret');
+  t.is(r('#self', importer), './blah/file.js');
+  t.is(r('#other', importer), './node_modules/exports-package/node.js#browser');
+  t.is(r('#other/package.json', importer), undefined, 'doesn\'t fall through, longer string not in imports');
+  t.is(r('#other-any/package.json', importer), './node_modules/exports-package/package.json', 'falls through due to /*');
 });

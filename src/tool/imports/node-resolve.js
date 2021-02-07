@@ -41,6 +41,15 @@ const defaultPackageMain = [
 
 
 /**
+ * @param {string} p
+ * @return {boolean}
+ */
+export function isLocal(p) {
+  return p === '.' || p.startsWith('./');
+}
+
+
+/**
  * @param {string} importee
  * @return {{name?: string, rest: string}}
  */
@@ -75,7 +84,7 @@ function lazyRequireFor(importer) {
 
 /**
  * @param {string} importer
- * @return {{resolved?: string, info?: libTypes.InternalPackageJson}
+ * @return {{resolved?: string, info?: libTypes.InternalPackageJson}}
  */
 function loadSelfPackage(importer) {
   const require = lazyRequireFor(importer);
@@ -136,14 +145,14 @@ function loadPackage(importer, name) {
  * @param {string} rest
  * @return {{node: libTypes.InternalPackageModuleNode|undefined, subpath?: string}}
  */
-function matchExportsNode(exports, rest) {
+function matchModuleNode(exports, rest) {
   if (typeof exports !== 'object') {
     return {node: exports};
   }
   let fallback;
 
   for (const key in exports) {
-    if (key !== '.' && !key.startsWith('./')) {
+    if (!key.startsWith('#') && !isLocal(key)) {
       fallback = exports;  // it might be "import" and so on
       continue;
     }
@@ -172,25 +181,60 @@ function matchExportsNode(exports, rest) {
 
 
 /**
+ * @param {libTypes.InternalPackageModuleNode} exports
+ * @param {string} rest
+ * @param {string[]} constraints
+ */
+function matchModuleNodeDeep(exports, rest, constraints) {
+  let {node, subpath} = matchModuleNode(exports, rest);
+
+  // Traverse looking for the best conditional. These can be nested.
+  restart: while (node && typeof node !== 'string') {
+    for (const key in node) {
+      if (key === 'import' || constraints.includes(key)) {
+        node = node[key];
+        continue restart;
+      }
+    }
+    node = node['default'];
+  }
+  if (!node) {
+    return;
+  }
+
+  if (subpath) {
+    node = node.replace(/\*/g, subpath);
+  }
+  return node;
+}
+
+
+/**
  * @param {string[]} constraints exports constraints choices (used as OR)
  * @param {string} importee relative or naked string
  * @param {string} importee absolute importer URL, will always start with "file://"
  * @return {string|void}
  */
 export function resolve(constraints, importee, importer) {
+  // Try to match subpath imports first. See Node's documentation:
+  //   https://nodejs.org/api/packages.html#packages_subpath_imports
+  // This allows local file resolution or picking another module, so check it first and fall
+  // through to the external import process if required.
   if (importee.startsWith('#')) {
     const self = loadSelfPackage(importer);
-
-    const imports = self.info?.imports ?? {};
-    const node = imports[importee];
-    if (!node) {
+    if (!self.info || !self.resolved) {
       return;
     }
 
-    return;
-    // TODO(samthor)
-    console.info('warn got stuff', importee, 'node', node);
-    throw 1;
+    const matched = matchModuleNodeDeep(self.info.imports ?? {}, importee, constraints);
+    if (!matched) {
+      return;
+    } else if (isLocal(matched)) {
+      return `file://${path.join(self.resolved, matched)}`;
+    }
+
+    // This #import resolved to another package because it wasn't local. Continue below.
+    importee = matched;
   }
 
   const {name, rest} = splitImport(importee);
@@ -204,26 +248,15 @@ export function resolve(constraints, importee, importer) {
   }
 
   // If we find exports, then use a modern resolution mechanism.
-  const exports = info.exports;
-  if (exports) {
-    // Look for "." etc mappings.
-    let {node, subpath} = matchExportsNode(exports, rest);
-
-    // Traverse looking for the best conditional export. These can be nested.
-    restart: while (node && typeof node !== 'string') {
-      for (const key in node) {
-        if (key === 'import' || constraints.includes(key)) {
-          node = node[key];
-          continue restart;
-        }
+  if (info.exports) {
+    const matched = matchModuleNodeDeep(info.exports, rest, constraints);
+    if (matched) {
+      if (!isLocal(matched)) {
+        // This module is trying to export something that is not part of its own package.
+        // This isn't allowed although perhaps we should let it happen.
+        return;
       }
-      node = node['default'];
-    }
-    if (node) {
-      if (subpath) {
-        node = node.replace(/\*/g, subpath);
-      }
-      return `file://${path.join(resolved, node)}`;
+      return `file://${path.join(resolved, matched)}`;
     }
 
     if (!allowExportFallback) {

@@ -6,6 +6,8 @@
   },
   "imports": {
     "#secret": "./blah/file.js#secret",
-    "#redir": "private-for-test-do-not-publish"
+    "#self": "private-for-test-do-not-publish",
+    "#other": "exports-package",
+    "#other-any/*": "exports-package/*"
   }
 }

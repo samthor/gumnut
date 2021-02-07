@@ -35,12 +35,18 @@ export const defaultResolver: (importee: string, importer: string) => string|voi
  */
 export type InternalPackageModuleNode = {[name: string]: InternalPackageModuleNode} | string;
 
+/**
+ * Internal top-level type approximating a package.json file.
+ */
 export type InternalPackageJson = {
   [name: string]: number | string | InternalPackageJson,
   exports?: InternalPackageModuleNode,
   imports?: InternalPackageModuleNode,
 };
 
+/**
+ * Internal type of a general package.json node.
+ */
 export type InternalPackageJsonNode = {
   [name: string]: number | string | InternalPackageJsonNode,
 };
