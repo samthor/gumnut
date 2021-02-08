@@ -1,6 +1,6 @@
 {
   "name": "gumnut",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "repository": "git@github.com:samthor/gumnut.git",
   "description": "Permissive JS parser and tokenizer in Web Assembly / C, for Node or browser",
   "keywords": [
@@ -23,7 +23,7 @@
   "scripts": {
     "build:types": "bash src/build/types.sh",
     "prepublishOnly": "npm run build:types",
-    "test": "ava ./src/test/*.js ./src/tool/imports/test/*.js && ./src/test/parser.sh && ./src/test/test262.sh"
+    "test": "ava ./src/test/*.js && ./src/test/parser.sh && ./src/test/test262.sh"
   },
   "devDependencies": {
     "@types/node": "^14.14.22",

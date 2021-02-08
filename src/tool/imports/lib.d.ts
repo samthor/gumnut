@@ -20,33 +20,10 @@ import {Readable} from 'stream';
 
 /**
  * Builds a method which rewrites imports from a passed filename into ESM found inside node_modules.
+ * Requires a helper which builds a resolver for files.
  *
  * This emits relative paths to node_modules, rather than absolute ones.
  */
-export default function buildModuleImportRewriter(resolver?: typeof defaultResolver): Promise<(file: string) => Readable>;
-
-/**
- * The default resolver used to resolve ESM.
- */
-export const defaultResolver: (importee: string, importer: string) => string|void;
-
-/**
- * Internal node type for package.json' imports/exports.
- */
-export type InternalPackageModuleNode = {[name: string]: InternalPackageModuleNode} | string;
-
-/**
- * Internal top-level type approximating a package.json file.
- */
-export type InternalPackageJson = {
-  [name: string]: number | string | InternalPackageJson,
-  exports?: InternalPackageModuleNode,
-  imports?: InternalPackageModuleNode,
-};
-
-/**
- * Internal type of a general package.json node.
- */
-export type InternalPackageJsonNode = {
-  [name: string]: number | string | InternalPackageJsonNode,
-};
+export default function buildModuleImportRewriter(
+  buildResolver: (importer: string) => ((importee: string) => string|undefined),
+): Promise<(file: string) => Readable>;

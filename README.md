@@ -42,20 +42,19 @@ This is fairly low-level and designed to be used by other tools.
 
 ### Module Imports Rewriter
 
-This provides a rewriter for imports from `node_modules`, which could be used as part of an ESM development server.
+This provides a rewriter for unresolved ESM imports (i.e., those pointing to "node_modules"), which could be used as part of an [ESM dev server](https://npmjs.com/package/dhost).
 Usage:
 
 ```js
-import build from 'gumnut/imports';
+import buildImportsRewriter from 'gumnut/imports';
+import buildResolver from 'esm-resolve';
 
-const run = await build();  // WebAssembly instantiation is async
+// WebAssembly instantiation is async
+const run = await buildImportsRewriter(buildResolver);
 run('./source.js').pipe(process.stdout);
 ```
 
-This implements modern Node resolution, i.e., [subpath exports](https://nodejs.org/api/packages.html#packages_subpath_exports) and [conditional exports](https://nodejs.org/api/packages.html#packages_conditional_exports).
-It will rewrite to the "browser", "import" or "default" keys (not "node", as this is for your browser).
-
-It's permissive, falling back to real paths if exports aren't defined, and will remove imports that point purely to ".d.ts" files (you don't need to create [peer JS](https://whistlr.info/2021/check-js-with-ts/#import-your-types)).
+This example uses [esm-resolve](https://npmjs.com/package/esm-resolve), which implements an ESM resolver in pure JS.
 
 ## Coverage
 

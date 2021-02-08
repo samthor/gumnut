@@ -19,36 +19,37 @@ import * as stream from 'stream';
 import * as common from '../../harness/common.js';
 import buildHarness from '../../harness/node-harness.js';
 import rewriter from '../../harness/node-rewriter.js';
-import {defaultBrowserResolver} from './resolver.js';
 
 // Set to true to allow all stacks to be parsed (even though we don't need to as modules are
 // top-level). Useful for debugging.
 const allowAllStack = false;
 
 /**
+ * @type {(stack: number) => boolean}
+ */
+const stack = allowAllStack ? () => true : (type) => type === common.stacks.module;
+
+/**
  * Builds a method which rewrites imports from a passed filename into ESM found inside node_modules.
  *
  * This emits relative paths to node_modules, rather than absolute ones.
  *
- * @param {(importee: string, importer: string) => string|void} resolver new import or void to retain
+ * @param {(importer: string) => (importee: string) => string|undefined} buildResolver
  * @return {Promise<(file: string) => stream.Readable>}
  */
-export default async function buildModuleImportRewriter(resolver = defaultBrowserResolver) {
+export default async function buildModuleImportRewriter(buildResolver) {
   const harness = await buildHarness();
   const {token, run} = rewriter(harness);
 
-  /**
-   * @param {number} type
-   */
-  const stack = (type) => allowAllStack || type === common.stacks.module;
-
   return (f) => {
+    const resolver = buildResolver(f);
     const callback = () => {
-      if (token.special() === common.specials.external && token.type() === common.types.string) {
-        const out = resolver(token.stringValue(), f);
-        if (out && typeof out === 'string') {
-          return JSON.stringify(out);
-        }
+      if (!(token.special() === common.specials.external && token.type() === common.types.string)) {
+        return;
+      }
+      const out = resolver(token.stringValue());
+      if (out && typeof out === 'string') {
+        return JSON.stringify(out);
       }
     };
     return run(f, {callback, stack});
