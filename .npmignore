@@ -6,3 +6,4 @@ src/**/*.sh
 src/tokens/build.js
 .github
 tsconfig.json
+_*
