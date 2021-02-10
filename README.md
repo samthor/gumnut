@@ -51,7 +51,7 @@ import buildResolver from 'esm-resolve';
 
 // WebAssembly instantiation is async
 const run = await buildImportsRewriter(buildResolver);
-run('./source.js').pipe(process.stdout);
+run('./source.js', (part) => process.stdout.write(part));
 ```
 
 This example uses [esm-resolve](https://npmjs.com/package/esm-resolve), which implements an ESM resolver in pure JS.

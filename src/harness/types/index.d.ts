@@ -14,8 +14,6 @@
  * the License.
  */
 
-// TODO(samthor): This is a Node-specific type.
-import * as stream from 'stream';
 
 /**
  * Enum of valid token types.
@@ -166,12 +164,13 @@ export interface Harness extends Base {
 }
 
 export interface RewriterArgs {
-  callback(): string|void;
+  callback(): Uint8Array|string|void;
   stack(type: StackValues): boolean|void;
+  write(part: Uint8Array): void;
 }
 
 export interface RewriterReturn {
-  run(file: string, args?: Partial<RewriterArgs>): stream.Readable;
+  run(file: string, args?: Partial<RewriterArgs>): void;
   token: Token;
 }
 

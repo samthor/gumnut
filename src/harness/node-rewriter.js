@@ -23,10 +23,12 @@
 
 import * as blep from './types/index.js';
 import * as fs from 'fs';
-import * as stream from 'stream';
 import {noop} from './harness.js';
 
+
 const PENDING_BUFFER_MAX = 1024 * 16;
+const encoder = new TextEncoder();
+
 
 /**
  * @param {blep.Harness} harness
@@ -39,10 +41,9 @@ export default function wrapper(harness) {
    * @param {string} f
    * @param {Partial<blep.RewriterArgs>} args
    */
-  const run = (f, {callback = noop, stack = noop}) => {
+  const run = (f, {callback = noop, stack = noop, write = noop}) => {
     const fd = fs.openSync(f, 'r');
     const stat = fs.fstatSync(fd);
-    const readable = new stream.Readable();
 
     const buffer = prepare(stat.size);
     const read = fs.readSync(fd, buffer, 0, stat.size, 0);
@@ -60,17 +61,25 @@ export default function wrapper(harness) {
         if (update === undefined) {
           if (p - sent > PENDING_BUFFER_MAX) {
             // send some data, we've gone through a lot
-            readable.push(buffer.subarray(sent, p));
+            write(buffer.subarray(sent, p));
             sent = p;
           }
           return;
         }
 
         // bump to high water mark
-        readable.push(buffer.subarray(sent, p));
+        if (sent !== p) {
+          write(buffer.subarray(sent, p));
+        }
 
         // write update
-        readable.push(update, 'utf-8');
+        if (update.length) {
+          if (typeof update === 'string') {
+            write(encoder.encode(update));
+          } else {
+            write(update);
+          }
+        }
 
         // move past the "original" string
         sent = p + token.length();
@@ -85,11 +94,9 @@ export default function wrapper(harness) {
     });
 
     internalRun();
-
-    // send rest
-    readable.push(buffer.subarray(sent, buffer.length));
-    readable.push(null);
-    return readable;
+    if (sent !== buffer.length) {
+      write(buffer.subarray(sent, buffer.length));
+    }
   };
 
   return {

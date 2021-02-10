@@ -137,7 +137,7 @@ inline static int consume_defn_name(int special) {
 static inline int consume_dict() {
 #ifdef DEBUG
   if (cursor->type != TOKEN_BRACE) {
-    debugf("missing open brace for dict\n");
+    debugf("missing open brace for dict");
     return ERROR__UNEXPECTED;
   }
 #endif
@@ -265,7 +265,7 @@ static inline int consume_dict() {
 
       case TOKEN_EOF:
         // don't stay here forever
-        debugf("got EOF inside dict\n");
+        debugf("got EOF inside dict");
         return ERROR__UNEXPECTED;
 
       case TOKEN_OP:
@@ -287,7 +287,7 @@ static inline int consume_dict() {
         continue;
     }
 
-    debugf("unknown left-side dict part: %d\n", cursor->type);
+    debugf("unknown left-side dict part: %d", cursor->type);
     return ERROR__UNEXPECTED;
   }
 }
@@ -335,7 +335,7 @@ static int consume_expr_group() {
 // consume arrowfunc from and including "=>"
 static int consume_arrowfunc_from_arrow(int is_statement) {
   if (cursor->special != MISC_ARROW) {
-    debugf("arrowfunc missing =>\n");
+    debugf("arrowfunc missing =>");
     return ERROR__UNEXPECTED;
   }
   cursor_next();  // consume =>
@@ -375,7 +375,7 @@ static int consume_arrowfunc(int is_statement) {
       break;
 
     default:
-      debugf("got unknown part of arrowfunc: %d\n", cursor->type);
+      debugf("got unknown part of arrowfunc: %d", cursor->type);
       return ERROR__UNEXPECTED;
   }
 
@@ -449,7 +449,7 @@ static int lookahead_is_paren_arrowfunc() {
 
 #ifdef DEBUG
   if (cursor->type != TOKEN_PAREN) {
-    debugf("internal error, lookahead_is_arrowfunc_paren was not paren: %d\n", cursor->type);
+    debugf("internal error, lookahead_is_arrowfunc_paren was not paren: %d", cursor->type);
     return ERROR__UNEXPECTED;
   }
 #endif
@@ -789,7 +789,6 @@ restart_expr:
         // technically chain only allows e.g, ?.foo, ?.['foo'], or ?.(arg)
         // but broadly means "value but only continue if non-null"
         if (cursor->type == TOKEN_PAREN || cursor->type == TOKEN_ARRAY) {
-          cursor_next();
           value_line = cursor->line_no;
           continue;
         } else if (cursor->type != TOKEN_LIT) {
@@ -1099,7 +1098,7 @@ static int consume_function(int special) {
 static int consume_class(int special) {
 #ifdef DEBUG
   if (cursor->special != LIT_CLASS) {
-    debugf("expected class keyword\n");
+    debugf("expected class keyword");
     return ERROR__UNEXPECTED;
   }
 #endif
@@ -1131,7 +1130,7 @@ static int consume_class(int special) {
 static int consume_decl_stack(int special) {
 #ifdef DEBUG
   if (!(cursor->special & _MASK_DECL)) {
-    debugf("expected decl start\n");
+    debugf("expected decl start");
     return ERROR__UNEXPECTED;
   }
 #endif
@@ -1197,7 +1196,7 @@ static int consume_module_list_deep(int mode) {
       cursor_next();
 
       if (cursor->type != TOKEN_LIT && cursor->type != TOKEN_SYMBOL) {
-        debugf("missing literal after 'as'\n");
+        debugf("missing literal after 'as'");
         return ERROR__UNEXPECTED;
       }
 
@@ -1308,7 +1307,7 @@ static int consume_import_module_list() {
 static int consume_import() {
 #ifdef DEBUG
   if (cursor->special != LIT_IMPORT) {
-    debugf("missing import keyword\n");
+    debugf("missing import keyword");
     return ERROR__UNEXPECTED;
   }
 #endif
@@ -1320,7 +1319,7 @@ static int consume_import() {
 
     // consume "from"
     if (cursor->special != LIT_FROM) {
-      debugf("missing from keyword\n");
+      debugf("missing from keyword");
       return ERROR__UNEXPECTED;
     }
     cursor->type = TOKEN_KEYWORD;
@@ -1335,7 +1334,7 @@ static int consume_import() {
 static int consume_export_reexport() {
 #ifdef DEBUG
   if (cursor->special != LIT_EXPORT) {
-    debugf("missing export keyword\n");
+    debugf("missing export keyword");
     return ERROR__UNEXPECTED;
   }
 #endif
@@ -1386,7 +1385,7 @@ static int consume_export_reexport() {
 static int consume_export_declare() {
 #ifdef DEBUG
   if (cursor->special != LIT_EXPORT) {
-    debugf("missing export keyword\n");
+    debugf("missing export keyword");
     return ERROR__UNEXPECTED;
   }
 #endif
@@ -1433,7 +1432,7 @@ static int consume_export_declare() {
 static int consume_export_wrap() {
 #ifdef DEBUG
   if (cursor->special != LIT_EXPORT) {
-    debugf("missing export keyword\n");
+    debugf("missing export keyword");
     return ERROR__UNEXPECTED;
   }
 #endif

@@ -14,12 +14,23 @@
  * the License.
  */
 
-/**
- * Builds a method which rewrites imports from a passed filename into ESM found inside node_modules.
- * Requires a helper which builds a resolver for files.
- *
- * This emits relative paths to node_modules, rather than absolute ones.
- */
-export default function buildModuleImportRewriter(
-  buildResolver: (importer: string) => ((importee: string) => string|undefined),
-): Promise<(file: string, write: (part: Uint8Array) => void) => void>;
+import buildImportsRewriter from '../../src/tool/imports/lib.js';
+
+import test from 'ava';
+
+test.serial('imports rewriter', async (t) => {
+  const run = await buildImportsRewriter((f) => {
+    return () => 'lol';
+  });
+
+  const {pathname} = new URL('data/imports.js', import.meta.url);
+
+  const decoder = new TextDecoder();
+  let out = '';
+  run(pathname, (part) => {
+    out += decoder.decode(part);
+  });
+
+  t.is(out, 'import "lol";');
+});
+

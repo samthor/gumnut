@@ -14,8 +14,6 @@
  * the License.
  */
 
-import * as stream from 'stream';
-
 import * as common from '../../harness/common.js';
 import buildHarness from '../../harness/node-harness.js';
 import rewriter from '../../harness/node-rewriter.js';
@@ -35,13 +33,13 @@ const stack = allowAllStack ? () => true : (type) => type === common.stacks.modu
  * This emits relative paths to node_modules, rather than absolute ones.
  *
  * @param {(importer: string) => (importee: string) => string|undefined} buildResolver
- * @return {Promise<(file: string) => stream.Readable>}
+ * @return {Promise<(file: string, write: (part: Uint8Array) => void) => void>}
  */
 export default async function buildModuleImportRewriter(buildResolver) {
   const harness = await buildHarness();
   const {token, run} = rewriter(harness);
 
-  return (f) => {
+  return (f, write) => {
     const resolver = buildResolver(f);
     const callback = () => {
       if (!(token.special() === common.specials.external && token.type() === common.types.string)) {
@@ -52,6 +50,6 @@ export default async function buildModuleImportRewriter(buildResolver) {
         return JSON.stringify(out);
       }
     };
-    return run(f, {callback, stack});
+    return run(f, {callback, stack, write});
   };
 }

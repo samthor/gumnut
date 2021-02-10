@@ -705,6 +705,13 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("optional func", "func?.()",
+    TOKEN_SYMBOL,    // func
+    TOKEN_OP,        // ?.
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+  );
+
   // restate all errors
   render_output = 1;
   testdef *p = &fail;

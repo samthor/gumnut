@@ -88,6 +88,13 @@ test.serial('simple', (t) => {
   t.is(index, expected.length, `invalid token count`);
 });
 
+test.serial('bad syntax rewriter', (t) => {
+  const {pathname} = new URL('data/invalid.js', import.meta.url);
+  t.throws(() => {
+    run(pathname, {});
+  });
+});
+
 test.serial('rewriter', (t) => {
   const callback = () => {
     if (token.special() === specials.external && token.type() === types.string) {
@@ -96,15 +103,13 @@ test.serial('rewriter', (t) => {
   };
 
   const {pathname} = new URL('data/simple.js', import.meta.url);
-  const s = run(pathname, {callback});
+  const parts = [];
+  run(pathname, {callback, write: parts.push.bind(parts)});
 
+  const decoder = new TextDecoder();
   let out = '';
-  for (;;) {
-    const next = s.read();
-    if (next === null) {
-      break;
-    }
-    out += next.toString('utf-8');
+  for (const part of parts) {
+    out += decoder.decode(part);
   }
 
   t.is(out, `/*
