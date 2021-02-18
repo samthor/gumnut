@@ -15,3 +15,4 @@
  */
 
 export * from './generatedTypes/index.js';
+export * from './generatedTypes/src/harness/types/index.d.ts';
