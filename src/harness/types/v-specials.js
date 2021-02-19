@@ -21,4 +21,6 @@ export const property = 8;
 export const change = 16;
 export const external = 32;
 export const destructuring = 64;
+const _default = 128;
+export {_default as default};
 export const lit = 1073741824;  // this is (1 << 30) but tsc doesn't like expanding it

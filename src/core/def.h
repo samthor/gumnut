@@ -36,6 +36,7 @@
 #define SPECIAL__CHANGE          16   // underlying symbol is being changed
 #define SPECIAL__EXTERNAL        32   // is an external reference (import/export)
 #define SPECIAL__DESTRUCTURING   64   // on { or [
+#define SPECIAL__DEFAULT         128  // this is also the default export (on class/func)
 #define SPECIAL__LIT             (1 << 30)
 
 

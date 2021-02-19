@@ -1396,7 +1396,7 @@ static int consume_export_declare() {
   if (is_default) {
     cursor->type = TOKEN_KEYWORD;
     cursor_next();  // move over "default"
-    special_hoist = SPECIAL__DECLARE | SPECIAL__CHANGE;
+    special_hoist = SPECIAL__DECLARE | SPECIAL__CHANGE | SPECIAL__DEFAULT;
   } else {
     special_hoist = SPECIAL__DECLARE | SPECIAL__CHANGE | SPECIAL__EXTERNAL;
   }
