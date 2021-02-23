@@ -525,6 +525,14 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("class prop is not symbol", "void class { x }",
+    TOKEN_OP,        // void
+    TOKEN_KEYWORD,   // class
+    TOKEN_BRACE,     // {
+    TOKEN_LIT,       // x
+    TOKEN_CLOSE,     // }
+  );
+
   _test("async assumed with dot", "x.async()",
     TOKEN_SYMBOL,    // x
     TOKEN_OP,        // .
@@ -656,6 +664,13 @@ int main() {
     TOKEN_BRACE,     // {
     TOKEN_LIT,       // foo
     TOKEN_COLON,     // :
+    TOKEN_SYMBOL,    // foo
+    TOKEN_CLOSE,     // }
+  );
+
+  _test("return dict", "return {foo}",
+    TOKEN_KEYWORD,   // return
+    TOKEN_BRACE,     // {
     TOKEN_SYMBOL,    // foo
     TOKEN_CLOSE,     // }
   );

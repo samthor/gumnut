@@ -196,29 +196,29 @@ static inline int consume_dict(int is_class) {
     switch (cursor->type) {
       case TOKEN_SYMBOL:  // reentry
       case TOKEN_LIT: {
-        // look for cases like `{foo}`, where foo is both a property and symbol
-        int is_symbol = 1;
-
-        // if followed by : = or (, then this is a property
-        switch (blep_token_peek()) {
-          case TOKEN_COLON:
-          case TOKEN_PAREN:
-            is_symbol = 0;
-            break;
-
-          case TOKEN_OP:
-            if (peek->special == MISC_EQUALS) {
-              is_symbol = 0;
-            }
-            break;
-        }
-
-        if (is_symbol) {
-          cursor->type = TOKEN_SYMBOL;
-        } else {
-          cursor->type = TOKEN_LIT;
-        }
+        cursor->type = TOKEN_LIT;
         cursor->special = SPECIAL__PROPERTY;
+
+        // look for dict cases like `{foo}`, where foo is both a property and symbol
+        if (!is_class) {
+
+          // if followed by : = or (, then this is a property
+          switch (blep_token_peek()) {
+            case TOKEN_COLON:
+            case TOKEN_PAREN:
+              break;
+
+            case TOKEN_OP:
+              if (peek->special == MISC_EQUALS) {
+                break;
+              }
+              // fall-through
+
+            default:
+              cursor->type = TOKEN_SYMBOL;
+          }
+        }
+
         cursor_next();
         break;
       }
