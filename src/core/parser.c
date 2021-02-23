@@ -134,7 +134,7 @@ inline static int consume_defn_name(int special) {
   return 0;
 }
 
-static inline int consume_dict() {
+static inline int consume_dict(int is_class) {
 #ifdef DEBUG
   if (cursor->type != TOKEN_BRACE) {
     debugf("missing open brace for dict");
@@ -151,7 +151,14 @@ static inline int consume_dict() {
     }
 
     // static prefix
-    if (cursor->special == LIT_STATIC && blep_token_peek() != TOKEN_PAREN) {
+    int is_static = (cursor->special == LIT_STATIC && blep_token_peek() != TOKEN_PAREN);
+    if (is_static) {
+#if DEBUG
+      if (!is_class) {
+        debugf("got static inside non-class");
+        return ERROR__UNEXPECTED;
+      }
+#endif
       cursor->type = TOKEN_KEYWORD;
       cursor_next();
     }
@@ -238,8 +245,10 @@ static inline int consume_dict() {
       case TOKEN_PAREN:
         // method
         _STACK_BEGIN(STACK__FUNCTION);
+        _STACK_BEGIN(STACK__INNER);
         _check(consume_definition_group());
         _check(consume_statement(0));
+        _STACK_END();
         _STACK_END();
         break;
 
@@ -252,8 +261,18 @@ static inline int consume_dict() {
       case TOKEN_COLON:
         // nb. this allows "async * foo:" or "async foo =" which is nonsensical
         cursor_next();
-        // this isn't really a statement, but we want to _abandon_ like it is
-        _check(consume_expr(1));
+        // this isn't really a statement, but we want to _abandon_ like it is (we pass 1 to consume_expr)
+
+        if (is_class && !is_static) {
+          // this expression is only run when the outer class is instantiated
+          // this isn't on statics, because they're run immediately
+          _STACK_BEGIN(STACK__INNER);
+          _check(consume_expr(1));
+          _STACK_END();
+        } else {
+          _check(consume_expr(1));
+        }
+
         break;
     }
 
@@ -631,7 +650,7 @@ restart_expr:
 
       case TOKEN_BRACE:
         _transition_to_value();
-        _check(consume_dict());
+        _check(consume_dict(0));
         continue;
 
       case TOKEN_TERNARY:
@@ -1119,10 +1138,7 @@ static int consume_class(int special) {
     _STACK_END();
   }
 
-  _STACK_BEGIN(STACK__INNER);
-  _check(consume_dict());
-  _STACK_END();
-
+  _check(consume_dict(1));
   _STACK_END();
   return 0;
 }
