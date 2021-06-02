@@ -288,11 +288,14 @@ static inline int consume_dict(int is_class) {
         return ERROR__UNEXPECTED;
 
       case TOKEN_OP:
-        if (cursor->special != MISC_COMMA) {
-          break;
+        if (cursor->special == MISC_COMMA) {
+          cursor_next();
+          continue;
         }
-        cursor_next();
-        continue;
+        if (cursor->special == MISC_STAR) {
+          continue;  // this is a generator next
+        }
+        break;
 
       case TOKEN_SEMICOLON:
         cursor_next();

@@ -727,10 +727,17 @@ int main() {
     TOKEN_CLOSE,     // )
   );
 
-  _test("class with *", "class Foo { *bar() {} }",
+  _test("class with *", "class Foo { x=()=>{}\n*bar() {} }",
     TOKEN_KEYWORD,   // class
     TOKEN_SYMBOL,    // Foo
     TOKEN_BRACE,     // {
+    TOKEN_LIT,       // x
+    TOKEN_OP,        // =
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_OP,        // =>
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
     TOKEN_OP,        // *
     TOKEN_LIT,       // bar
     TOKEN_PAREN,     // (
