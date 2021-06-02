@@ -727,6 +727,19 @@ int main() {
     TOKEN_CLOSE,     // )
   );
 
+  _test("class with *", "class Foo { *bar() {} }",
+    TOKEN_KEYWORD,   // class
+    TOKEN_SYMBOL,    // Foo
+    TOKEN_BRACE,     // {
+    TOKEN_OP,        // *
+    TOKEN_LIT,       // bar
+    TOKEN_PAREN,     // (
+    TOKEN_CLOSE,     // )
+    TOKEN_BLOCK,     // {
+    TOKEN_CLOSE,     // }
+    TOKEN_CLOSE,     // }
+  );
+
   // restate all errors
   render_output = 1;
   testdef *p = &fail;
