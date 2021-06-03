@@ -68,8 +68,8 @@ async function initialize(modulePromise, imports) {
   // @ts-ignore
   const calls = /** @type {blep.InternalCalls} */ (instantiatedSource.exports || instance.exports);
 
-  // emscripten creates __post_instantiate to configure statics
-  calls.__post_instantiate();
+  // emscripten creates __wasm_call_ctors to configure statics
+  calls.__wasm_call_ctors();
 
   return {instance, memory, calls};
 }

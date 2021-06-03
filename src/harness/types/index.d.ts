@@ -29,7 +29,7 @@ type StackValues = typeof import('./v-stacks.js')[keyof typeof import('./v-stack
  * Calls provided by the internal C code.
  */
 export interface InternalCalls {
-  __post_instantiate(): void;
+  __wasm_call_ctors(): void;
 
   blep_parser_init(at: number, len: number): number;
   blep_parser_run(): number;

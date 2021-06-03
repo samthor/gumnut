@@ -736,7 +736,7 @@ int main() {
     TOKEN_PAREN,     // (
     TOKEN_CLOSE,     // )
     TOKEN_OP,        // =>
-    TOKEN_BRACE,     // {
+    TOKEN_BLOCK,     // {
     TOKEN_CLOSE,     // }
     TOKEN_OP,        // *
     TOKEN_LIT,       // bar
