@@ -43,12 +43,16 @@ export default function wrapper(harness) {
    */
   const run = (f, {callback = noop, stack = noop, write = noop}) => {
     const fd = fs.openSync(f, 'r');
-    const stat = fs.fstatSync(fd);
+    try {
+      const stat = fs.fstatSync(fd);
 
-    const buffer = prepare(stat.size);
-    const read = fs.readSync(fd, buffer, 0, stat.size, 0);
-    if (read !== stat.size) {
-      throw new Error(`did not read all bytes at once: ${read}/${stat.size}`);
+      const buffer = prepare(stat.size);
+      const read = fs.readSync(fd, buffer, 0, stat.size, 0);
+      if (read !== stat.size) {
+        throw new Error(`did not read all bytes at once: ${read}/${stat.size}`);
+      }
+    } finally {
+      fs.closeSync(fd);
     }
 
     let sent = 0;
