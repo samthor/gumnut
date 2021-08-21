@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import fs from 'fs';
+import * as fs from 'fs';
+
 const now = new Date;
 const litMaxBits = 10;
 const lengthBits = 4;
@@ -232,7 +233,7 @@ function uniquePrefix(list) {
   list.sort();
   const out = new Map();
   let prev = -1;
-  let options = null;
+  let options = [];
 
   for (const opt of list) {
     const cand = opt.charCodeAt(0) || '';
@@ -282,7 +283,7 @@ function renderChoice(all, space='', prefix='') {
     const check = String.fromCharCode(...chars);
     prefix += check;
     if (chars.length === 1) {
-      len = prefix.length - 1;  // we safely consumed this many chars (one cond, so no sub)
+      len = (prefix.length - 1).toString();  // we safely consumed this many chars (one cond, so no sub)
     }
 
     out += `${space}if (${conditional.join(' || ')}) {
