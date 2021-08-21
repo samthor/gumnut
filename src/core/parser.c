@@ -439,6 +439,7 @@ static int consume_template_string() {
 }
 
 static int maybe_consume_destructuring() {
+  // look for e.g. `[a] = ..` or `{} = ...`; array or brace with equals following
   switch (cursor->type) {
     case TOKEN_ARRAY:
     case TOKEN_BRACE:

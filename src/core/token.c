@@ -382,12 +382,14 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
             break;  // inner of template string starts expr
             // TODO: could check stack too
           }
+          // ambig case: `import x from "foo" /foo/` is regexp
           _ret(1, TOKEN_OP);  // strings coeerce to numbers if divided (except import targets)
 
         case TOKEN_CLOSE:
           if (prev->p[0] == ':') {
             break;  // must always be regexp
           }
+          // ambig case: `if (1) /foo/` is regexp
           _ret(1, TOKEN_OP);
 
         case TOKEN_SYMBOL:  // reentry
