@@ -32,7 +32,7 @@ const variableLike =
 
 // these act like symbols in most cases, but hash so we can find them
 const optionalKeyword =
-    " as async from get of set ";
+    " as assert async from get of set ";
 
 // keywords that start a decl
 const declKeyword =

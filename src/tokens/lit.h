@@ -1,4 +1,4 @@
-// Generated on Sat Jan 30 2021 16:04:39 GMT+1100 (Australian Eastern Daylight Time)
+// Generated on Wed Nov 24 2021 07:57:48 GMT+1100 (Australian Eastern Daylight Time)
 
 #ifndef _LIT_H
 #define _LIT_H
@@ -13,6 +13,7 @@
 #define _MASK_CONTROL_PAREN    128
 
 #define LIT_AS           1085506560
+#define LIT_ASSERT       1102283776
 #define LIT_ASYNC        1098089472
 #define LIT_AWAIT        1098351621
 #define LIT_BREAK        1098024961

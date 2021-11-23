@@ -1,4 +1,4 @@
-// Generated on Sat Jan 30 2021 16:04:39 GMT+1100 (Australian Eastern Daylight Time)
+// Generated on Wed Nov 24 2021 07:57:48 GMT+1100 (Australian Eastern Daylight Time)
 
 export const _KEYWORD = 1;
 export const _REL_OP = 2;
@@ -10,6 +10,7 @@ export const _CONTROL = 64;
 export const _CONTROL_PAREN = 128;
 
 export const AS = 1085506560;
+export const ASSERT = 1102283776;
 export const ASYNC = 1098089472;
 export const AWAIT = 1098351621;
 export const BREAK = 1098024961;
