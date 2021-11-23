@@ -1347,7 +1347,21 @@ static int consume_import() {
   }
 
   // match string (but not if `${}`).
-  return consume_basic_key_string_special(SPECIAL__EXTERNAL);
+  _check(consume_basic_key_string_special(SPECIAL__EXTERNAL));
+
+  // maybe consume assert and dict
+  if (cursor->special == LIT_ASSERT) {
+    cursor->type = TOKEN_KEYWORD;
+    cursor_next();
+
+    if (cursor->type != TOKEN_BRACE) {
+      debugf("assert missing dict");
+      return ERROR__UNEXPECTED;
+    }
+    _check(consume_dict(0));
+  }
+
+  return 0;
 }
 
 // consumes only a reexport (must be on `export` keyword)

@@ -747,6 +747,16 @@ int main() {
     TOKEN_CLOSE,     // }
   );
 
+  _test("assert", "import x from 'foo' assert {}",
+    TOKEN_KEYWORD,   // import
+    TOKEN_SYMBOL,    // x
+    TOKEN_KEYWORD,   // from
+    TOKEN_STRING,    // 'foo'
+    TOKEN_KEYWORD,   // assert
+    TOKEN_BRACE,     // {
+    TOKEN_CLOSE,     // }
+  );
+
   // restate all errors
   render_output = 1;
   testdef *p = &fail;
