@@ -1,4 +1,3 @@
-#include "token.h"
 
 #define _LOOKUP__OP_1      33  // 32 + 1
 #define _LOOKUP__OP_2      34  // 32 + 2

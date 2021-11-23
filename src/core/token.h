@@ -16,21 +16,30 @@ struct token {
 
 
 int blep_token_init(char *, int);
-int blep_token_update(int);
 int blep_token_next();
-int blep_token_peek();
-
-int blep_token_set_restore();
-int blep_token_restore();
 
 
 #define STACK_SIZE    256
+#define RING_SIZE     8
+
+// TODO: need to keep two tokens (peek), or one longer "run" of tokens
+
+// RING_SIZE must fit "export default async function * foo (" (longest single part, 7)
+
+
+typedef struct {
+  int open;
+  int block_has_value;
+} tokendef_stack;
 
 
 
 typedef struct {
-  struct token curr;  // cursor before head
-  struct token peek;  // also before head if p is !NULL
+  struct token curr;
+
+  struct token buf[RING_SIZE];
+  int buf_use;
+  int buf_at;
 
   int line_no;  // line_no at head
   char *at;     // head pointer
@@ -38,12 +47,7 @@ typedef struct {
 
   // depth/stack at head (just used for balancing)
   int depth;
-  int stack[STACK_SIZE];
-
-  struct token restore__curr;
-  int restore__line_no;
-  char *restore__at;
-  int restore__depth;
+  tokendef_stack stack[STACK_SIZE];
 } tokendef;
 
 // global

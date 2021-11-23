@@ -3,7 +3,9 @@
 #include <strings.h>
 #include <ctype.h>
 #include "token.h"
+#include "debug.h"
 
+#include "consume.c"
 #include "../tokens/helper.c"
 
 #include "token-tables.h"
@@ -12,16 +14,12 @@
 tokendef _td;
 #endif
 
-#ifndef NULL
-#define NULL ((char*)0)
-#endif
 
-#ifdef DEBUG
-#include <stdio.h>
-#define debugf(...) fprintf(stderr, "!!! " __VA_ARGS__); fprintf(stderr, "\n")
-#else
-#define debugf (void)sizeof
-#endif
+
+#define __CONSUME_CONTROL      1
+#define __CONSUME_MAYBE_LABEL  2
+#define __CONSUME_ARROW_BODY   3
+#define __CONSUME_DOT_PROPERTY 4
 
 
 int blep_token_init(char *p, int len) {
@@ -30,6 +28,9 @@ int blep_token_init(char *p, int len) {
   td->at = p;
   td->end = p + len;
   td->line_no = 1;
+
+  // depth is length of stack, check (td->depth - 1)
+  td->stack[0].open = TOKEN_BLOCK;
   td->depth = 1;
 
   // sanity-check td->end is NULL
@@ -37,247 +38,25 @@ int blep_token_init(char *p, int len) {
     debugf("got bad td->end");
     return ERROR__UNEXPECTED;
   }
-
   return 0;
 }
 
-// consume regexp "/foobar/"
-static inline int blepi_consume_slash_regexp(char *p) {
-#ifdef DEBUG
-  if (p[0] != '/') {
-    debugf("failed to consume slash_regexp, no slash");
-    return 0;
-  }
-#endif
-  char *start = p;
-  int is_charexpr = 0;
-
-  while (++p < td->end) {
-    switch (*p) {
-      case '/':
-        // nb. already known not to be a comment `//`
-        if (is_charexpr) {
-          continue;
-        }
-
-        // eat trailing flags
-        do {
-          ++p;
-        } while (isalnum(*p));
-        return p - start;
-
-      case '\n':
-        return p - start;
-
-      case '[':
-        is_charexpr = 1;
-        continue;
-
-      case ']':
-        is_charexpr = 0;
-        continue;
-
-      case '\\':
-        if (p[1] == '/' || p[1] == '[' || p[1] == '\\') {
-          ++p;  // we can only escape these
-        }
-        continue;
-    }
-  }
-
-  return p - start;
-}
-
-static inline int blepi_maybe_consume_alnum_group(char *p) {
-  if (p[0] != '{') {
-    return 0;
-  }
-
-  int len = 1;
-  for (;;) {
-    char c = p[len];
-    ++len;
-
-    if (c == '}') {
-      return len;
-    } else if (!isalnum(c)) {
-      return ERROR__UNEXPECTED;
-    }
-  }
-}
-
-static inline int blepi_consume_basic_string(char *p, int *line_no) {
-#ifdef DEBUG
-  if (p[0] != '\'' && p[0] != '"') {
-    debugf("got bad string starter");
-    return 0;
-  }
-#endif
-  char *start = p;
-
-  for (;;) {
-    ++p;
-    switch (*p) {
-      case '\0':
-        if (td->end == p) {
-          return p - start;
-        }
-        continue;
-
-      case '\n':
-        // nb. not valid here
-        ++(*line_no);
-        continue;
-
-      case '\\':
-        if (p[1] == *start || p[1] == '\\') {
-          ++p;  // the only things we care about escaping
-        }
-        continue;
-
-      case '"':
-      case '\'':
-        if (*p == *start) {
-          ++p;
-          return p - start;
-        }
-        // do nothing, we found the other one
-    }
-  }
-}
-
-static inline int blepi_consume_template(char *p, int *line_no) {
-  // p[0] will be ` or }
-#ifdef DEBUG
-  if (p[0] != '`' && p[0] != '}') {
-    debugf("consume_template got bad starter");
-    return 0;
-  }
-#endif
-  char *start = p;
-
-  for (;;) {
-    ++p;
-    switch (*p) {
-      case '\0':
-        if (td->end == p) {
-          return p - start;
-        }
-        continue;
-
-      case '\n':
-        ++(*line_no);
-        continue;
-
-      case '\\':
-        if (p[1] == '$' || p[1] == '`' || p[1] == '\\') {
-          ++p;  // we can only escape these
-        }
-        continue;
-
-      case '$':
-        if (p[1] == '{') {
-          return 2 + p - start;
-        }
-        continue;
-
-      case '`':
-        return 1 + p - start;
-    }
-  }
-}
-
-// consumes spaces/comments between tokens
-static inline int blepi_consume_void(char *p, int *line_no) {
-  int line_no_delta = 0;
-  char *start = p;
-
-  for (;;) {
-    switch (*p) {
-      case ' ':    // 32
-      case '\t':   //  9
-      case '\v':   // 11
-      case '\f':   // 12
-      case '\r':   // 13
-        ++p;
-        continue;
-
-      case '\n':   // 10
-        ++p;
-        ++line_no_delta;
-        continue;
-
-      case '/': {  // 47
-        char next = p[1];
-        if (next == '/') {
-          p = memchr(p, '\n', td->end - p);
-          if (p == 0) {
-            p = td->end;
-          }
-          continue;
-        } else if (next != '*') {
-          break;
-        }
-
-        // consuming multiline
-        // nb. this can't use memchr because it's looking for both * and \n
-        p += 2;
-        do {
-          char c = *p;
-          if (c == '*') {
-            if (p[1] == '/') {
-              p += 2;
-              break;
-            }
-          } else if (c == '\n') {
-            ++line_no_delta;
-          }
-        } while (++p < td->end);
-        continue;
-      }
-    }
-
-    break;  // unhandled, break below
-  }
-
-  (*line_no) += line_no_delta;
-  return p - start;
-}
-
-// consumes number, assumes first char is valid (dot or digit)
-static inline int blepi_consume_number(char *p) {
-#ifdef DEBUG
-  if (!(isdigit(p[0]) || (p[0] == '.' && isdigit(p[1])))) {
-    debugf("consume_number got bad digit");
-    return 0;
-  }
-#endif
-  int len = 1;
-  char c = p[1];
-  for (;;) {
-    if (!(isalnum(c) || c == '.' || c == '_')) {  // letters, dots, etc- misuse is invalid, so eat anyway
-      break;
-    }
-    c = p[++len];
-  }
-  return len;
-}
 
 static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
-#define _ret(_len, _type) {t->special = 0; t->type = _type; t->len = _len; return;};
+#define _ret(_len, _type) {t->type = _type; t->len = _len; return;};
 #define _reth(_len, _type, _hash) {t->special = _hash; t->type = _type; t->len = _len; return;};
 #define _inc_stack(_type) { \
-      td->stack[td->depth] = _type; \
-      if (td->depth < td->restore__depth) { \
-        debugf("got stack increment below restore depth: was=%d, depth=%d", td->depth, td->restore__depth); \
-        _ret(0, TOKEN_EOF); \
-      } else if (++td->depth == STACK_SIZE) { \
+      td->stack[td->depth].open = _type; \
+      td->stack[td->depth].block_has_value = 0; \
+      if (++td->depth == STACK_SIZE) { \
         debugf("hit stack upper limit"); \
         _ret(0, TOKEN_EOF); \
       } \
     }
 
-  struct token *prev = &(td->curr);
+  // always clear
+  t->special = 0;
+
   const unsigned char initial = p[0];
   int op = lookup_op[initial];
   int len = 0;
@@ -301,11 +80,14 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
               break;
             }
             _reth(1, TOKEN_OP, MISC_STAR);
+            return 0;
           case '~':
             _reth(1, TOKEN_OP, MISC_BITNOT);
+            return 0;
           case '!':
             if (c != '=') {
               _reth(1, TOKEN_OP, MISC_NOT);
+              return 0;
             }
             break;
         }
@@ -313,9 +95,16 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
         // nb. these are all allowed=1, so len=1 even though we're consuming more
         if (initial == '=' && c == '>') {
           _reth(2, TOKEN_OP, MISC_ARROW);  // arrow for arrow function
+          return __CONSUME_ARROW_BODY;
+
         } else if (c == initial && (c == '+' || c == '-')) {
           // nb. we don't actually care which one this is
+
+          // FIXME unrelated: can {} be determined as block - always follows { or right keyword?
+          // TODO: determine pre or postfix here?
+
           _reth(2, TOKEN_OP, MISC_INCDEC);
+          return 0;
         } else if (c == initial && (c == '|' || c == '&')) {
           ++len;  // eat || or &&: but no more
         } else if (c == '=') {
@@ -327,6 +116,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
         } else if (initial == '=') {
           // match equals specially
           _reth(1, TOKEN_OP, MISC_EQUALS);
+          return 0;
         }
       } else if (c == '=') {
         // for 2 and 3-cases, allow = as suffix
@@ -334,37 +124,48 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
       }
 
       _ret(len, TOKEN_OP);
+      return 0;
     }
 
     case _LOOKUP__DOT:
       if (isdigit(p[1])) {
         _ret(blepi_consume_number(p), TOKEN_NUMBER);
+        return 0;
       } else if (p[1] == '.' && p[2] == '.') {
         _reth(3, TOKEN_OP, MISC_SPREAD);
+        return 0;
       }
       _reth(1, TOKEN_OP, MISC_DOT);
+      return __CONSUME_DOT_PROPERTY;
 
     case _LOOKUP__Q:
       switch (p[1]) {
         case '.':
           _reth(2, TOKEN_OP, MISC_CHAIN);  // "?." operator
+          return __CONSUME_DOT_PROPERTY;
         case '?':
           if (p[2] == '=') {
-            _ret(3, TOKEN_OP);
+            _ret(3, TOKEN_OP);  // "??="
+          } else {
+            _ret(2, TOKEN_OP);  // "??"
           }
-          _ret(2, TOKEN_OP);
+          return 0;
       }
       _inc_stack(TOKEN_TERNARY);
       _ret(1, TOKEN_TERNARY);
+      return 0;
 
     case _LOOKUP__COMMA:
       _reth(1, TOKEN_OP, MISC_COMMA);
+      return 0;
 
     case _LOOKUP__NUMBER:
       _ret(blepi_consume_number(p), TOKEN_NUMBER);
+      return 0;
 
     case _LOOKUP__STRING:
       _ret(blepi_consume_basic_string(p, line_no), TOKEN_STRING);
+      return 0;
 
     case _LOOKUP__SLASH:
       // js is dumb: slashes are ambiguous, so guess here. we're almost always right, but callers
@@ -387,9 +188,11 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
 
         case TOKEN_CLOSE:
           if (prev->p[0] == ':') {
-            break;  // must always be regexp
+            break;  // ternary is always regexp
+          } else if (prev->p[0] == ']') {
+            _ret(1, TOKEN_OP);  // always op
           }
-          // ambig case: `if (1) /foo/` is regexp
+          // ambig case: `if (1) /foo/` is regexp, `function foo() {} /foo/` is regexp
           _ret(1, TOKEN_OP);
 
         case TOKEN_SYMBOL:  // reentry
@@ -400,21 +203,28 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
 
       _ret(blepi_consume_slash_regexp(p), TOKEN_REGEXP);
 
-    case _LOOKUP__LIT: {
+    case _LOOKUP__LIT:
+      t->type = TOKEN_LIT;
+
       // don't hash if this is a property
       if (prev->special != MISC_DOT && prev->special != MISC_CHAIN) {
-        t->special = 0;
         len = consume_known_lit(p, &(t->special));
 
         char c = p[len];
         if (!lookup_symbol[c]) {
-          t->type = TOKEN_LIT;
           t->len = len;
+
+          // TODO: we have a keyword that we might care about
+          //   * "class [sym] <extends {}> {}"
+          //   * "for await ("
+          //   * any other control start (consume to "(", mark as non-value)
+
           return;
         }
       }
+
+      t->special = SPECIAL__PROPERTY;
       // fall-through
-    }
 
     case _LOOKUP__SYMBOL: {
       char c = p[len];  // don't need to check this one, we know it's valid
@@ -438,17 +248,67 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
         c = p[len];
       } while (lookup_symbol[c]);
 
-      _ret(len, TOKEN_LIT);
+      t->len = len;
+
+      if (td->stack[td->depth - 1].open == TOKEN_BLOCK) {
+        // TODO: look for upcoming ":"
+
+        // saved
+        int buffer_line_no = td->line_no;
+
+        char *after_p = p + len;
+        int after_len = blepi_consume_void(after_p, &(td->line_no));
+        after_p += after_len;
+
+        if (after_p[0] != ':') {
+          // TODO: don't throw away comment traversal (?)
+          td->line_no = buffer_line_no;
+          return;
+        }
+
+        // hooray!
+        t->type = TOKEN_LABEL;
+
+        td->buf_at = 0;
+        td->buf_use = 1;
+
+        struct token *next = td->buf + 0;
+        next->len = 1;
+        next->line_no = td->line_no;
+        next->p = after_p;
+        next->type = TOKEN_COLON;
+        next->special = 0;
+        next->vp = p + len;
+
+        td->at = after_p + 1;
+      }
+
+      return;
     }
 
     case TOKEN_BRACE:
+      if (prev->special == MISC_ARROW) {
+        // `=> {}` is always a block
+      } else if (prev->type == TOKEN_COLON && td->stack[td->depth - 1].open == TOKEN_BLOCK) {
+        // `foo: {}` inside block is a label starting a block
+      } else if (prev->type == TOKEN_CLOSE && prev->p[0] == ')' && prev->line_no == td->line_no) {
+        // `() {}` on same line is always a block
+        // TODO: this is just optimization over if/while/for opening ()'s
+        // TODO: it can also be on multiple lines if precided by if/while/for/...
+      } else {
+        _inc_stack(TOKEN_BRACE);
+        _ret(1, TOKEN_BRACE);
+      }
+      _inc_stack(TOKEN_BLOCK);
+      _ret(1, TOKEN_BLOCK);
+
     case TOKEN_ARRAY:
     case TOKEN_PAREN:
       _inc_stack(op);
       _ret(1, op);
 
     case TOKEN_COLON:
-      if (td->stack[td->depth - 1] != TOKEN_TERNARY) {
+      if (td->stack[td->depth - 1].open != TOKEN_TERNARY) {
         _ret(1, TOKEN_COLON);
       }
       // inside ternary stack, close it
@@ -463,7 +323,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
       }
 
       // normal non-string, close and record
-      int prev = td->stack[update];
+      int prev = td->stack[update].open;
       if (prev != TOKEN_STRING) {
         td->depth = update;
         _reth(1, TOKEN_CLOSE, prev);
@@ -491,10 +351,7 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
     }
 
     case _LOOKUP__SEMICOLON:
-      if (prev->line_no == *line_no || td->depth[td->stack] == LIT_DO) {
-        _ret(1, TOKEN_SEMICOLON);
-      }
-      _reth(1, TOKEN_SEMICOLON, SPECIAL__NEWLINE);
+      _ret(1, TOKEN_SEMICOLON);
 
     case TOKEN_EOF:
     case _LOOKUP__SPACE:
@@ -516,79 +373,56 @@ static inline void blepi_consume_token(struct token *t, char *p, int *line_no) {
 #undef _inc_stack
 }
 
-int blep_token_update(int type) {
-#ifdef DEBUG
-  if (td->peek.p) {
-    debugf("can't update once already peeked, request: %d", type);
-    return ERROR__INTERNAL;
-  }
-#endif
-
-  if (type == td->curr.type) {
-    return 0;
-  }
-
-  switch (type) {
-    case TOKEN_REGEXP: {
-#ifdef DEBUG
-      if (!(td->curr.type == TOKEN_OP && td->curr.p[0] == '/')) {
-        debugf("can't update non-slash to regexp: %d", td->curr.type);
-        return ERROR__INTERNAL;
-      }
-#endif
-      int len = blepi_consume_slash_regexp(td->curr.p);
-      td->at += (len - 1);
-      td->curr.len = len;
-      td->curr.type = TOKEN_REGEXP;
-      return 0;
-    }
-
-    case TOKEN_OP: {
-#ifdef DEBUG
-      if (td->curr.type != TOKEN_REGEXP) {
-        debugf("can't update non-regexp to slash");
-        return ERROR__INTERNAL;
-      }
-#endif
-      // slash is always length=1, don't remove it
-      td->at -= (td->curr.len - 1);
-      td->curr.len = 1;
-      td->curr.type = TOKEN_OP;
-      return 0;
-    }
-  }
-
-  debugf("got bad blep_token_update");
-  return ERROR__INTERNAL;
-}
-
 int blep_token_next() {
-  if (td->peek.p) {
-    memcpy(&td->curr, &td->peek, sizeof(struct token));
-    td->peek.p = 0;
-  } else {
-    int void_len = blepi_consume_void(td->at, &(td->line_no));
-    td->curr.vp = td->at;
-    td->at += void_len;
+  if (td->buf_use) {
+    // we have stuff to send
+    memcpy(&(td->curr), td->buf + td->buf_at, sizeof(struct token));
 
-    // save as we can't yet write p/line_no to `td->curr`
-    char *p = td->at;
-    int line_no = td->line_no;
+    td->buf_at++;
+    if (td->buf_at == td->buf_use) {
+      td->buf_at = 0;
+      td->buf_use = 0;
+    }
 
-    blepi_consume_token(&(td->curr), td->at, &(td->line_no));
-    td->at += td->curr.len;
+    return td->curr.type;
+  }
 
+  int void_len = blepi_consume_void(td->at, &(td->line_no));
+  td->curr.vp = td->at;
+  td->at += void_len;
+
+  // save as we can't yet write p/line_no to `td->curr`
+  char *p = td->at;
+  int line_no = td->line_no;
+
+  blepi_consume_token(&(td->curr), td->at, &(td->line_no));
+
+  if (td->stack[td->depth - 1].open == TOKEN_BLOCK && td->curr.type == TOKEN_LIT && !(td->curr.special & SPECIAL__PROPERTY)) {
+//    blepi_internal_check();
+    debugf("got lit in block");
+  }
+
+  if (td->buf_use) {
+    // TODO: gross, the consume fn sets this up so we can skip td->at
     td->curr.p = p;
     td->curr.line_no = line_no;
+    return td->curr.type;
   }
 
+  td->at += td->curr.len;
+
+  td->curr.p = p;
+  td->curr.line_no = line_no;
+
+
+  // nb. this is all "can we consume successfully" stuff
   if (!td->curr.len) {
     if (td->at >= td->end) {
-      return 0;
+      return 0;  // got EOF for some reason
     }
     if (!td->depth || td->depth == STACK_SIZE) {
       debugf("stack err: %c (depth=%d)\n", td->at[0], td->depth);
-      return ERROR__STACK;
+      return ERROR__STACK;  // stack got too big/small
     }
     debugf("could not consume: %c (void=%ld)\n", td->at[0], td->curr.vp - td->curr.p);
     return ERROR__UNEXPECTED;
@@ -597,74 +431,3 @@ int blep_token_next() {
   return td->curr.type;
 }
 
-int blep_token_peek() {
-  if (td->peek.p) {
-    // we need to allow duplicate peeks for a few cases
-    return td->peek.type;
-  }
-
-  int void_len = blepi_consume_void(td->at, &(td->line_no));
-  td->peek.vp = td->at;
-  td->at += void_len;
-
-  td->peek.p = td->at;
-  td->peek.line_no = td->line_no;
-  blepi_consume_token(&(td->peek), td->at, &(td->line_no));
-  td->at += td->peek.len;
-
-  return td->peek.type;
-}
-
-int blep_token_set_restore() {
-  if (td->restore__at) {
-    return 0;
-  }
-
-  // clear peek and reset its contribution
-  if (td->peek.p) {
-    switch (td->peek.type) {
-      case TOKEN_CLOSE:
-        ++td->depth;
-        break;
-
-      case TOKEN_BRACE:
-      case TOKEN_ARRAY:
-      case TOKEN_PAREN:
-      case TOKEN_TERNARY:
-        --td->depth;
-        break;
-    }
-
-    td->at = td->peek.vp;  // the cursor has been moved forward
-    td->peek.p = 0;
-  }
-
-  memcpy(&(td->restore__curr), &(td->curr), sizeof(struct token));
-
-  td->restore__line_no = td->line_no;
-  td->restore__at = td->at;
-  td->restore__depth = td->depth;
-  return td->depth;
-}
-
-int blep_token_restore() {
-  if (!td->restore__at) {
-    return 0;
-  }
-
-  // TODO: set_restore and restore currently just move the top token back
-  // but we could/should store a ring buffer of ~256 tokens for re-parsing
-  // challenges are with looping again/overflows: we enact tokens in consume 
-
-  memcpy(&(td->curr), &(td->restore__curr), sizeof(struct token));
-
-  td->line_no = td->restore__line_no;
-  td->at = td->restore__at;
-  td->depth = td->restore__depth;
-
-  td->restore__depth = 0;
-  td->restore__at = NULL;
-  td->peek.p = NULL;
-
-  return td->depth;
-}

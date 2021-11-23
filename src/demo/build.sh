@@ -1,5 +1,5 @@
 #!/bin/bash
 
 set -eu
-clang demo.c ../core/*.c $@ -o _runner
+clang demo2.c ../core/token.c $@ -o _runner
 
